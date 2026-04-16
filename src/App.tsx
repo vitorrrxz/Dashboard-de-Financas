@@ -42,6 +42,7 @@ export default function App() {
   const [activeTab, setActiveTab]     = useState<Tab>('dashboard');
   const [showImport, setShowImport]   = useState(false);
   const [search, setSearch]           = useState('');
+  const [txFilter, setTxFilter]       = useState<'all' | 'income' | 'expense'>('all');
   const [transactions, setTxs]        = useState<Transaction[]>(() => load(TXS_KEY, []));
   const [accounts, setAccounts]       = useState<Account[]>(() => load(ACCOUNTS_KEY, []));
   const [debts, setDebts]             = useState<Debt[]>(() => load(DEBTS_KEY, []));
@@ -104,8 +105,14 @@ export default function App() {
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return transactions.filter(t => t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q));
-  }, [transactions, search]);
+    return transactions
+      .filter(t => {
+        if (txFilter === 'income')  return t.amount > 0;
+        if (txFilter === 'expense') return t.amount < 0;
+        return true;
+      })
+      .filter(t => t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q));
+  }, [transactions, search, txFilter]);
 
   const hasAccounts = accounts.length > 0;
   const isEmpty     = transactions.length === 0;
@@ -220,9 +227,11 @@ export default function App() {
               {!isEmpty && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
                   <SummaryCard title="Total de Receitas" amount={fmt(stats.income)} isPositive={true}
-                    icon={<ArrowUpRight size={22} style={{ color:'var(--color-accent)' }}/>} badge={`${transactions.filter(t=>t.amount>0).length} entradas`} />
+                    icon={<ArrowUpRight size={22} style={{ color:'var(--color-accent)' }}/>} badge={`${transactions.filter(t=>t.amount>0).length} entradas`}
+                    onClick={() => { setTxFilter('income'); setActiveTab('transactions'); }} />
                   <SummaryCard title="Total de Despesas" amount={fmt(stats.expense)} isPositive={false}
-                    icon={<ArrowDownRight size={22} className="text-red-400"/>} badge={`${transactions.filter(t=>t.amount<0).length} saídas`} />
+                    icon={<ArrowDownRight size={22} className="text-red-400"/>} badge={`${transactions.filter(t=>t.amount<0).length} saídas`}
+                    onClick={() => { setTxFilter('expense'); setActiveTab('transactions'); }} />
                   <SummaryCard title="Este Mês (Gastos)" amount={fmt(stats.monthExpense)} isPositive={false}
                     icon={<ArrowDownRight size={22} className="text-orange-400"/>} badge="Mês corrente" />
                 </div>
@@ -316,7 +325,6 @@ export default function App() {
             </>
           )}
 
-          {/* ══════════ TRANSACTIONS TAB ══════════ */}
           {activeTab === 'transactions' && (
             <>
               <div className="flex justify-between items-end mb-6">
@@ -330,6 +338,34 @@ export default function App() {
                   <Upload size={15}/> Importar
                 </button>
               </div>
+
+              {/* Filter buttons */}
+              <div className="flex gap-2 mb-5">
+                {([
+                  { key: 'all',     label: 'Todas',     color: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)',  text: '#a5b4fc' },
+                  { key: 'income',  label: '↑ Receitas', color: 'rgba(20,184,166,0.12)', border: 'rgba(20,184,166,0.4)', text: '#5eead4' },
+                  { key: 'expense', label: '↓ Despesas', color: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.4)',  text: '#fca5a5' },
+                ] as const).map(f => (
+                  <button key={f.key} onClick={() => setTxFilter(f.key)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200"
+                    style={{
+                      backgroundColor: txFilter === f.key ? f.color : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${txFilter === f.key ? f.border : 'rgba(255,255,255,0.08)'}`,
+                      color: txFilter === f.key ? f.text : 'var(--color-textMuted)',
+                      transform: txFilter === f.key ? 'scale(1.02)' : 'scale(1)',
+                    }}>
+                    {f.label}
+                    {f.key !== 'all' && (
+                      <span className="ml-2 text-xs opacity-70">
+                        {f.key === 'income'
+                          ? transactions.filter(t=>t.amount>0).length
+                          : transactions.filter(t=>t.amount<0).length}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
               <div className="glass-card rounded-2xl p-6">
                 {filtered.length === 0 ? (
                   <p className="text-center text-textMuted py-12 text-sm">Nenhuma transação encontrada.</p>
@@ -394,10 +430,22 @@ function NavItem({ icon, label, active=false, onClick=()=>{}, badge, badgeColor 
   );
 }
 
-function SummaryCard({ title, amount, isPositive, icon, badge }:
-  { title:string; amount:string; isPositive:boolean; icon:React.ReactNode; badge:string }) {
+function SummaryCard({ title, amount, isPositive, icon, badge, onClick }:
+  { title:string; amount:string; isPositive:boolean; icon:React.ReactNode; badge:string; onClick?: ()=>void }) {
+  const isClickable = !!onClick;
   return (
-    <div className="glass-card rounded-2xl p-5 relative overflow-hidden group hover:-translate-y-0.5 transition-transform duration-300">
+    <div
+      onClick={onClick}
+      className={`glass-card rounded-2xl p-5 relative overflow-hidden group transition-all duration-300 ${
+        isClickable ? 'cursor-pointer hover:-translate-y-1 hover:shadow-lg' : 'hover:-translate-y-0.5'
+      }`}
+      style={isClickable ? { border:'1px solid rgba(255,255,255,0.12)' } : undefined}
+    >
+      {isClickable && (
+        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+          <ArrowUpRight size={14} className="text-textMuted rotate-45"/>
+        </div>
+      )}
       <div className="flex justify-between items-start mb-3 relative z-10">
         <p className="text-xs font-medium text-textMuted uppercase tracking-wide">{title}</p>
         <div className="p-2.5 rounded-xl" style={{ backgroundColor:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.07)' }}>
@@ -410,7 +458,7 @@ function SummaryCard({ title, amount, isPositive, icon, badge }:
           backgroundColor: isPositive ? 'rgba(20,184,166,0.12)' : 'rgba(239,68,68,0.10)',
           color: isPositive ? 'var(--color-accent)' : '#f87171',
         }}>
-        {badge}
+        {badge}{isClickable && ' →'}
       </span>
       <div className="absolute -bottom-8 -right-8 w-28 h-28 rounded-full blur-2xl opacity-50"
         style={{ backgroundColor:'rgba(255,255,255,0.03)' }}/>
