@@ -25,6 +25,13 @@ export interface Account {
 
 export type DebtCategory = 'Empréstimo' | 'Financiamento' | 'Cartão de Crédito' | 'Pessoal' | 'Outros';
 
+export interface DebtItem {
+  id: string;
+  name: string;
+  amount: number;
+  date: string;
+}
+
 export interface Debt {
   id: string;
   name: string;
@@ -38,4 +45,5 @@ export interface Debt {
   nextDueDate: string;   // ISO date
   interestRate?: number; // % per month
   createdAt: string;
+  subItems?: DebtItem[]; // Items from CSV import
 }

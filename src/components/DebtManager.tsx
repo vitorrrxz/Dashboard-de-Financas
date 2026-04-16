@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Debt, DebtCategory } from '../types';
+import { parseDebtsAsGroup } from '../utils/parsers';
 
 const CATEGORY_COLORS: Record<DebtCategory, string> = {
   'Empréstimo':        '#f59e0b',
@@ -32,6 +33,11 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Debt | null>(null);
   const [form, setForm] = useState<Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallments'>>(EMPTY_DEBT);
+  const [pendingGroup, setPendingGroup] = useState<{ items: any[], total: number } | null>(null);
+  const [groupName, setGroupName] = useState('');
+  const [groupCategory, setGroupCategory] = useState<DebtCategory>('Cartão de Crédito');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const totalDebt = debts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
   const totalMonthly = debts.reduce((s, d) => s + d.monthlyPayment, 0);
@@ -99,9 +105,147 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
   const isPaid = (d: Debt) => d.paidInstallments >= d.totalInstallments;
   const isOverdue = (d: Debt) => !isPaid(d) && new Date(d.nextDueDate) < new Date();
 
+  const exportCSV = () => {
+    if (debts.length === 0) return;
+    const headers = [
+      'Nome', 'Descrição', 'Categoria', 'Valor Total (R$)', 'Valor Pago (R$)',
+      'Restante (R$)', 'Parcela Mensal (R$)', 'Parcelas Pagas', 'Total de Parcelas',
+      'Progresso (%)', 'Juros (% a.m.)', 'Próximo Vencimento', 'Status',
+    ];
+    const rows = debts.map(d => [
+      d.name,
+      d.description ?? '',
+      d.category,
+      d.totalAmount.toFixed(2).replace('.', ','),
+      d.paidAmount.toFixed(2).replace('.', ','),
+      remaining(d).toFixed(2).replace('.', ','),
+      d.monthlyPayment.toFixed(2).replace('.', ','),
+      d.paidInstallments,
+      d.totalInstallments,
+      progress(d).toFixed(1).replace('.', ','),
+      (d.interestRate ?? 0).toFixed(2).replace('.', ','),
+      new Date(d.nextDueDate + 'T12:00:00').toLocaleDateString('pt-BR'),
+      isPaid(d) ? 'Quitada' : isOverdue(d) ? 'Vencida' : 'Em dia',
+    ]);
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
+      .join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dividas_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      // In consolidated mode, we use parseDebtsAsGroup
+      const result = await parseDebtsAsGroup(file);
+      if (result.items.length > 0) {
+        setPendingGroup(result);
+        setGroupName(file.name.replace('.csv', ''));
+      } else {
+        alert('Nenhuma transação encontrada no arquivo.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao processar o arquivo CSV.');
+    }
+    e.target.value = '';
+  };
+
+  const finalizeGroupImport = () => {
+    if (!pendingGroup || !groupName.trim()) return;
+
+    const newDebt: Debt = {
+      id: `debt-group-${Date.now()}`,
+      name: groupName,
+      category: groupCategory,
+      totalAmount: pendingGroup.total,
+      paidAmount: 0,
+      monthlyPayment: pendingGroup.total,
+      totalInstallments: 1,
+      paidInstallments: 0,
+      nextDueDate: new Date().toISOString().slice(0, 10),
+      createdAt: new Date().toISOString(),
+      subItems: pendingGroup.items.map(it => ({
+        id: it.id,
+        name: it.name,
+        amount: it.totalAmount,
+        date: it.nextDueDate
+      }))
+    };
+
+    onChange([...debts, newDebt]);
+    setPendingGroup(null);
+    setGroupName('');
+  };
+
+  const handlePayAll = () => {
+    const active = debts.filter(d => d.paidInstallments < d.totalInstallments);
+    if (active.length === 0) return;
+    if (confirm(`Pagar uma parcela de todas as ${active.length} dívidas ativas?`)) {
+      onChange(debts.map(d => (d.paidInstallments < d.totalInstallments) ? {
+        ...d,
+        paidInstallments: d.paidInstallments + 1,
+        paidAmount: d.paidAmount + d.monthlyPayment,
+      } : d));
+    }
+  };
+
+  const handleDeleteAll = () => {
+    if (debts.length === 0) return;
+    if (confirm('TEM CERTEZA? Isso excluirá todas as dívidas permanentemente.')) {
+      onChange([]);
+    }
+  };
+
   return (
     <div>
-      {/* Summary */}
+      {/* Summary + Actions button */}
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-textMuted uppercase tracking-wide font-medium">Resumo</p>
+        <div className="flex gap-2">
+          <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
+          <button
+            onClick={handleImportClick}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:bg-white/10 border border-white/10 text-white"
+          >
+            <Upload size={14} />
+            Importar CSV
+          </button>
+          <button
+            onClick={exportCSV}
+            disabled={debts.length === 0}
+            title={debts.length === 0 ? 'Adicione dívidas para exportar' : 'Exportar dívidas como CSV'}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+            style={{
+              background: debts.length === 0
+                ? 'rgba(255,255,255,0.04)'
+                : 'linear-gradient(135deg, #f59e0b22, #ec489922)',
+              backgroundColor: debts.length === 0 ? undefined : 'rgba(245,158,11,0.1)',
+              border: `1px solid ${debts.length === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(245,158,11,0.3)'}`,
+              color: debts.length === 0 ? 'var(--color-textMuted)' : '#fbbf24',
+              cursor: debts.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: debts.length === 0 ? 0.5 : 1,
+            }}
+          >
+            <Download size={14} />
+            Exportar CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <div className="glass-card rounded-2xl p-5">
           <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Total em Dívidas</p>
@@ -134,68 +278,113 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
           const paid = isPaid(debt);
           const overdue = isOverdue(debt);
           const color = CATEGORY_COLORS[debt.category];
+          const isExpanded = expandedId === debt.id;
+          const isGroup = !!(debt.subItems && debt.subItems.length > 0);
 
           return (
-            <div key={debt.id} className="glass-card rounded-xl p-5" style={{ borderLeft: `3px solid ${color}` }}>
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="text-sm font-semibold text-white">{debt.name}</h4>
-                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${color}20`, color }}>
-                      {debt.category}
-                    </span>
-                    {paid && <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent flex items-center gap-1"><CheckCircle size={10} /> Quitada</span>}
-                    {overdue && <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 flex items-center gap-1"><AlertCircle size={10} /> Vencida</span>}
+            <div key={debt.id} className="glass-card rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${color}` }}>
+              <div className="p-5">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-semibold text-white">{debt.name}</h4>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${color}20`, color }}>
+                        {debt.category}
+                      </span>
+                      {isGroup && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400">Fatura Grupal</span>}
+                      {paid && <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent flex items-center gap-1"><CheckCircle size={10} /> Quitada</span>}
+                      {overdue && <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 flex items-center gap-1"><AlertCircle size={10} /> Vencida</span>}
+                    </div>
+                    {debt.description && <p className="text-xs text-textMuted mt-0.5">{debt.description}</p>}
                   </div>
-                  {debt.description && <p className="text-xs text-textMuted mt-0.5">{debt.description}</p>}
-                </div>
-                <div className="flex gap-1 shrink-0">
-                  {!paid && (
-                    <button onClick={() => handlePayInstallment(debt)}
-                      title="Marcar parcela como paga"
-                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                      style={{ backgroundColor: 'rgba(20,184,166,0.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.2)' }}>
-                      + Pagar parcela
+                  <div className="flex gap-1 shrink-0">
+                    {!paid && (
+                      <button onClick={() => handlePayInstallment(debt)}
+                        title={isGroup ? 'Registrar pagamento da fatura' : 'Marcar parcela como paga'}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                        style={{ backgroundColor: 'rgba(20,184,166,0.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.2)' }}>
+                        {isGroup ? '✓ Pagar Fatura' : '+ Pagar parcela'}
+                      </button>
+                    )}
+                    <button onClick={() => openEdit(debt)} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                      <Edit2 size={13} />
                     </button>
-                  )}
-                  <button onClick={() => openEdit(debt)} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
-                    <Edit2 size={13} />
-                  </button>
-                  <button onClick={() => handleDelete(debt.id)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
-                    <Trash2 size={13} />
-                  </button>
+                    <button onClick={() => handleDelete(debt.id)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
+
+                {/* Progress Bar */}
+                <div className="mb-3">
+                  <div className="flex justify-between text-xs text-textMuted mb-1.5">
+                    <span>{debt.paidInstallments}/{debt.totalInstallments} {isGroup ? 'fatura paga' : 'parcelas pagas'}</span>
+                    <span>{pct.toFixed(0)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.07)' }}>
+                    <div className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${pct}%`, backgroundColor: paid ? '#14b8a6' : color }} />
+                  </div>
+                </div>
+
+                {/* Financial Info */}
+                <div className="grid grid-cols-3 gap-3 text-center mb-1">
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                    <p className="text-xs text-textMuted mb-0.5">Total</p>
+                    <p className="text-sm font-bold text-white">R$ {remaining(debt).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                  </div>
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                    <p className="text-xs text-textMuted mb-0.5">{isGroup ? 'Subtotal' : 'Parcela'}</p>
+                    <p className="text-sm font-bold" style={{ color }}>R$ {debt.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                  </div>
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                    <p className="text-xs text-textMuted mb-0.5">Vencimento</p>
+                    <p className={`text-sm font-bold ${overdue ? 'text-red-400' : 'text-white'}`}>
+                      {paid ? '—' : new Date(debt.nextDueDate + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                    </p>
+                  </div>
+                </div>
+
+                {isGroup && (
+                  <button
+                    onClick={() => setExpandedId(isExpanded ? null : debt.id)}
+                    className="w-full mt-3 py-1.5 text-xs text-textMuted hover:text-white border-t border-white/5 font-medium transition-colors"
+                  >
+                    {isExpanded ? 'Ocultar Detalhes' : `Ver Detalhes (${debt.subItems?.length} itens)`}
+                  </button>
+                )}
               </div>
 
-              {/* Progress Bar */}
-              <div className="mb-3">
-                <div className="flex justify-between text-xs text-textMuted mb-1.5">
-                  <span>{debt.paidInstallments}/{debt.totalInstallments} parcelas pagas</span>
-                  <span>{pct.toFixed(0)}%</span>
+              {/* Expansion Table */}
+              {isGroup && isExpanded && (
+                <div className="border-t border-white/5 bg-black/20 p-4 animate-in slide-in-from-top-2 duration-300">
+                  <div className="max-h-60 overflow-y-auto pr-2">
+                    <table className="w-full text-left text-[11px]">
+                      <thead className="text-textMuted uppercase tracking-wider">
+                        <tr>
+                          <th className="pb-2">Local/Descrição</th>
+                          <th className="pb-2 text-right">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {debt.subItems?.map((item, idx) => (
+                          <tr key={idx} className="border-t border-white/5">
+                            <td className="py-2 text-white font-medium max-w-[150px] truncate">{item.name}</td>
+                            <td className={`py-2 text-right font-bold ${item.amount < 0 ? 'text-accent' : 'text-white'}`}>
+                              R$ {Math.abs(item.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              {item.amount < 0 && <span className="ml-1 text-[10px] opacity-70">(Estorno)</span>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-white/10 flex justify-between items-center">
+                    <span className="text-[10px] text-textMuted">Total da fatura importada</span>
+                    <span className="text-sm font-bold text-white">R$ {debt.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                  </div>
                 </div>
-                <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.07)' }}>
-                  <div className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${pct}%`, backgroundColor: paid ? '#14b8a6' : color }} />
-                </div>
-              </div>
-
-              {/* Financial Info */}
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
-                  <p className="text-xs text-textMuted mb-0.5">Restante</p>
-                  <p className="text-sm font-bold text-white">R$ {remaining(debt).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                </div>
-                <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
-                  <p className="text-xs text-textMuted mb-0.5">Parcela</p>
-                  <p className="text-sm font-bold" style={{ color }}>R$ {debt.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                </div>
-                <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
-                  <p className="text-xs text-textMuted mb-0.5">Próx. Venc.</p>
-                  <p className={`text-sm font-bold ${overdue ? 'text-red-400' : 'text-white'}`}>
-                    {paid ? '—' : new Date(debt.nextDueDate + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                  </p>
-                </div>
-              </div>
+              )}
             </div>
           );
         })}
@@ -205,6 +394,19 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
         className="w-full py-3 rounded-xl border border-dashed border-white/10 hover:border-red-400/40 text-textMuted hover:text-white text-sm flex items-center justify-center gap-2 transition-all">
         <Plus size={16} /> Adicionar Dívida
       </button>
+
+      {debts.length > 0 && (
+        <div className="flex gap-4 mt-4 px-2">
+          <button onClick={handlePayAll}
+            className="text-xs font-semibold text-accent hover:underline flex items-center gap-1.5 transition-all">
+            <CheckCircle size={14} /> Pagar todas as parcelas do mês
+          </button>
+          <button onClick={handleDeleteAll}
+            className="text-xs font-semibold text-textMuted hover:text-red-400 flex items-center gap-1.5 transition-all ml-auto">
+            <Trash2 size={14} /> Excluir todas as dívidas
+          </button>
+        </div>
+      )}
 
       {/* Form Modal */}
       {showForm && (
@@ -260,6 +462,54 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
               <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors"
                 style={{ background: 'linear-gradient(135deg, #f59e0b, #ec4899)' }}>
                 {editing ? 'Salvar' : 'Adicionar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Group Naming Modal */}
+      {pendingGroup && (
+        <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4" onClick={() => setPendingGroup(null)}>
+          <div className="w-full max-w-sm glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-white">Importar Fatura</h3>
+              <button onClick={() => setPendingGroup(null)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted">
+                <X size={18} />
+              </button>
+            </div>
+            
+            <p className="text-xs text-textMuted mb-5 leading-relaxed">
+              Consolidando <span className="text-white font-bold">{pendingGroup.items.length} itens</span> do arquivo.<br/>
+              Total líquido: <span className="text-accent font-bold">R$ {pendingGroup.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+            </p>
+
+            <div className="space-y-4">
+              <FormField label="Nome do Grupo/Fatura">
+                <input
+                  autoFocus
+                  value={groupName}
+                  onChange={e => setGroupName(e.target.value)}
+                  placeholder="Ex: Fatura Nubank Outubro"
+                  className="input-field"
+                  onKeyDown={e => e.key === 'Enter' && finalizeGroupImport()}
+                />
+              </FormField>
+
+              <FormField label="Categoria">
+                <select 
+                  value={groupCategory} 
+                  onChange={e => setGroupCategory(e.target.value as DebtCategory)} 
+                  className="input-field"
+                >
+                  {DEBT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </FormField>
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button onClick={() => setPendingGroup(null)} className="flex-1 py-2.5 text-sm text-textMuted hover:bg-white/5 rounded-xl border border-white/10 transition-colors">Cancelar</button>
+              <button onClick={finalizeGroupImport} className="flex-1 py-2.5 text-sm text-white font-bold rounded-xl shadow-lg transition-all hover:brightness-110 active:scale-95" style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}>
+                Salvar Fatura
               </button>
             </div>
           </div>

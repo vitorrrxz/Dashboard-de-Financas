@@ -129,24 +129,24 @@ export function parseOFX(content: string): Transaction[] {
   return transactions.filter(t => !isNaN(t.amount) && t.date);
 }
 
+// Split CSV line respecting quoted fields
+function splitLine(line: string, sep: string): string[] {
+  const result: string[] = [];
+  let field = '';
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQuote = !inQuote; continue; }
+    if (!inQuote && ch === sep) { result.push(field.trim()); field = ''; continue; }
+    field += ch;
+  }
+  result.push(field.trim());
+  return result;
+}
+
 export function parseCSV(content: string): Transaction[] {
   const lines = content.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return [];
-
-  // Split CSV line respecting quoted fields
-  const splitLine = (line: string, sep: string): string[] => {
-    const result: string[] = [];
-    let field = '';
-    let inQuote = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQuote = !inQuote; continue; }
-      if (!inQuote && ch === sep) { result.push(field.trim()); field = ''; continue; }
-      field += ch;
-    }
-    result.push(field.trim());
-    return result;
-  };
 
   // Detect separator: semicolon or comma
   const sep = lines[0].includes(';') ? ';' : ',';
@@ -196,6 +196,79 @@ export function parseCSV(content: string): Transaction[] {
   return transactions;
 }
 
+export function parseDebtsCSV(content: string): any[] {
+  // Remove BOM if present
+  const cleanContent = content.replace(/^\uFEFF/, '');
+  const lines = cleanContent.split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const sep = lines[0].includes(';') ? ';' : ',';
+  const header = splitLine(lines[0], sep).map(h => h.toLowerCase().trim());
+  const debts: any[] = [];
+
+  const findCol = (...keys: string[]) =>
+    keys.reduce((found, k) => found !== -1 ? found : header.findIndex(h => h.includes(k)), -1);
+
+  let nameCol           = findCol('nome', 'name', 'title', 'descrição', 'descricao', 'título', 'titulo', 'divida', 'dívida');
+  const catCol          = findCol('categoria', 'category', 'tipo');
+  let totalAmountCol    = findCol('valor total', 'total amount', 'amount', 'montante', 'valor', 'total');
+  const paidAmountCol   = findCol('valor pago', 'paid amount', 'pago');
+  const monthlyCol      = findCol('parcela mensal', 'monthly payment', 'valor da parcela', 'mensalidade', 'parcela');
+  const totalInstCol    = findCol('total de parcelas', 'total installments', 'parcelas totais', 'nº parcelas');
+  const paidInstCol     = findCol('parcelas pagas', 'paid installments', 'parcelas quitadas');
+  const dueDateCol      = findCol('vencimento', 'due date', 'date', 'próximo vencimento', 'data');
+  const interestCol     = findCol('juros', 'interest', 'taxa');
+
+  // Fallback: if name not found, take first column
+  if (nameCol === -1 && header.length > 0) nameCol = 0;
+  // Fallback: if total amount not found, try common patterns or default to 2nd column
+  if (totalAmountCol === -1) {
+    totalAmountCol = header.findIndex((h, idx) => idx !== nameCol && (h.includes('valor') || h.includes('total') || h.includes('montante') || h.includes('$')));
+    if (totalAmountCol === -1 && header.length > 1) totalAmountCol = 1; 
+  }
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitLine(lines[i], sep);
+    if (cols.length < 2) continue;
+
+    const name           = cols[nameCol] || 'Dívida Importada';
+    const rawTotalAmount = cols[totalAmountCol] || '0';
+    const rawPaidAmount  = paidAmountCol !== -1 ? cols[paidAmountCol] : '0';
+    const rawMonthly     = monthlyCol !== -1 ? cols[monthlyCol] : '0';
+    const totalInst      = totalInstCol !== -1 ? parseInt(cols[totalInstCol]) : 1;
+    const paidInst       = paidInstCol !== -1 ? parseInt(cols[paidInstCol]) : 0;
+    const rawDate        = dueDateCol !== -1 ? cols[dueDateCol] : new Date().toISOString().slice(0, 10);
+    const interest       = interestCol !== -1 ? parseAmount(cols[interestCol]) : 0;
+
+    const totalAmount = parseAmount(rawTotalAmount);
+    if (isNaN(totalAmount) || totalAmount === 0) continue;
+
+    const paidAmount  = parseAmount(rawPaidAmount);
+    const monthly     = parseAmount(rawMonthly);
+
+    // Normalize date: DD/MM/YYYY → YYYY-MM-DD
+    let date = rawDate;
+    const brDate = rawDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (brDate) date = `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+
+    debts.push({
+      id: `debt-csv-${i}-${Date.now()}`,
+      name: name.trim() || `Dívida ${i}`,
+      category: (cols[catCol] || 'Outros') as any,
+      totalAmount,
+      paidAmount: !isNaN(paidAmount) ? paidAmount : (paidInst * monthly),
+      monthlyPayment: !isNaN(monthly) ? monthly : (totalAmount / totalInst),
+      totalInstallments: totalInst || 1,
+      paidInstallments: paidInst || 0,
+      nextDueDate: date,
+      interestRate: interest,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  return debts;
+}
+
 export function parseFile(file: File): Promise<Transaction[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -207,7 +280,6 @@ export function parseFile(file: File): Promise<Transaction[]> {
         } else if (file.name.toLowerCase().endsWith('.csv')) {
           resolve(parseCSV(content));
         } else {
-          // Try both
           const parsed = parseOFX(content);
           resolve(parsed.length > 0 ? parsed : parseCSV(content));
         }
@@ -216,6 +288,24 @@ export function parseFile(file: File): Promise<Transaction[]> {
       }
     };
     reader.onerror = reject;
-    reader.readAsText(file, 'latin1');
+    reader.readAsText(file, 'utf-8');
+  });
+}
+
+export function parseDebtsAsGroup(file: File): Promise<{ items: any[], total: number }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      try {
+        const items = parseDebtsCSV(content);
+        const total = items.reduce((s, item) => s + item.totalAmount, 0);
+        resolve({ items, total });
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsText(file, 'utf-8');
   });
 }
