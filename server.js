@@ -28,5 +28,5 @@ app.post('/api/pluggy/token', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(\`Pluggy Backend Server running on http://localhost:\${PORT}\`);
+  console.log(`Pluggy Backend Server running on http://localhost:${PORT}`);
 });
