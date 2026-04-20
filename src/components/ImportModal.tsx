@@ -6,15 +6,17 @@ import type { Transaction } from '../utils/parsers';
 interface ImportModalProps {
   onClose: () => void;
   onImport: (transactions: Transaction[]) => void;
+  accounts: any[];
 }
 
 type UploadState = 'idle' | 'dragging' | 'loading' | 'success' | 'error';
 
-export function ImportModal({ onClose, onImport }: ImportModalProps) {
+export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
   const [state, setState] = useState<UploadState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [preview, setPreview] = useState<Transaction[]>([]);
   const [fileName, setFileName] = useState('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
 
   const processFile = async (file: File) => {
     setState('loading');
@@ -47,7 +49,8 @@ export function ImportModal({ onClose, onImport }: ImportModalProps) {
   };
 
   const handleConfirm = () => {
-    onImport(preview);
+    const txsWithAccount = preview.map(tx => ({ ...tx, accountId: selectedAccountId }));
+    onImport(txsWithAccount);
     onClose();
   };
 
@@ -126,15 +129,30 @@ export function ImportModal({ onClose, onImport }: ImportModalProps) {
         {state === 'success' && (
           <div>
             {/* Success summary */}
-            <div className="flex items-center gap-3 mb-5 p-4 bg-accent/10 border border-accent/20 rounded-xl">
-              <CheckCircle size={20} className="text-accent shrink-0" />
-              <div>
-                <p className="text-white text-sm font-semibold">{preview.length} transações encontradas em <span className="text-accent">{fileName}</span></p>
-                <p className="text-textMuted text-xs mt-0.5">
-                  Receitas: <span className="text-accent">+R$ {income.toFixed(2).replace('.', ',')}</span>
-                  {' · '}
-                  Despesas: <span className="text-red-400">-R$ {expense.toFixed(2).replace('.', ',')}</span>
-                </p>
+            <div className="flex items-center justify-between mb-5 p-4 bg-accent/10 border border-accent/20 rounded-xl">
+              <div className="flex items-center gap-3">
+                <CheckCircle size={20} className="text-accent shrink-0" />
+                <div>
+                  <p className="text-white text-sm font-semibold">{preview.length} transações encontradas</p>
+                  <p className="text-textMuted text-xs mt-0.5">
+                    Receitas: <span className="text-accent">+R$ {income.toFixed(2).replace('.', ',')}</span>
+                    {' · '}
+                    Despesas: <span className="text-red-400">-R$ {expense.toFixed(2).replace('.', ',')}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1 items-end">
+                <label className="text-[10px] text-textMuted uppercase font-bold pr-2">Importar para:</label>
+                <select 
+                  value={selectedAccountId}
+                  onChange={e => setSelectedAccountId(e.target.value)}
+                  className="bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-accent transition-colors cursor-pointer"
+                >
+                  {accounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
+                  ))}
+                </select>
               </div>
             </div>
 

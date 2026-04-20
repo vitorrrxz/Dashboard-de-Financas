@@ -6,6 +6,7 @@ export interface Transaction {
   category: string;
   date: string;
   amount: number;
+  accountId?: string; // Link to an Account
 }
 
 export type AccountType = 'checking' | 'savings' | 'credit' | 'investment' | 'cash';
@@ -46,4 +47,5 @@ export interface Debt {
   interestRate?: number; // % per month
   createdAt: string;
   subItems?: DebtItem[]; // Items from CSV import
+  accountId?: string;    // Link to an Account
 }

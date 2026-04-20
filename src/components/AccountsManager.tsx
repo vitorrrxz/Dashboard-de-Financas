@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { X, Plus, Trash2, Edit2, CreditCard, Landmark, PiggyBank, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, CreditCard, Landmark, PiggyBank, TrendingUp, Wallet } from 'lucide-react';
 import type { Account, AccountType } from '../types';
+import { PluggyConnect } from 'react-pluggy-connect';
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   checking:   'Conta Corrente',
@@ -28,13 +29,31 @@ const EMPTY_ACCOUNT: Omit<Account, 'id' | 'createdAt'> = {
 
 interface AccountsManagerProps {
   accounts: Account[];
-  onChange: (accounts: Account[]) => void;
+  onAdd: (acc: Omit<Account, 'id' | 'createdAt'>) => Promise<void>;
+  onUpdate: (id: string, acc: Omit<Account, 'id' | 'createdAt'>) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onPluggySync: (itemId: string) => Promise<boolean>;
 }
 
-export function AccountsManager({ accounts, onChange }: AccountsManagerProps) {
+export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, onPluggySync }: AccountsManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [form, setForm] = useState<Omit<Account, 'id'>>(EMPTY_ACCOUNT as Omit<Account, 'id'>);
+  const [pluggyToken, setPluggyToken] = useState<string | null>(null);
+
+  const handleOpenPluggy = async () => {
+    try {
+      const res = await fetch('http://localhost:3001/api/pluggy/token', { method: 'POST' });
+      const data = await res.json();
+      if (data.accessToken) {
+        setPluggyToken(data.accessToken);
+      } else {
+        throw new Error(data.error || 'Failed to get token');
+      }
+    } catch(e: any) {
+      alert("Erro ao preparar conexão rápida via Open Finance: " + e.message);
+    }
+  };
 
   const totalBalance = accounts
     .filter(a => a.type !== 'credit')
@@ -56,18 +75,22 @@ export function AccountsManager({ accounts, onChange }: AccountsManagerProps) {
     setShowForm(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim()) return;
-    if (editing) {
-      onChange(accounts.map(a => a.id === editing.id ? { ...form, id: editing.id } : a));
-    } else {
-      onChange([...accounts, { ...form, id: `acc-${Date.now()}` }]);
+    try {
+      if (editing) {
+        await onUpdate(editing.id, form);
+      } else {
+        await onAdd(form);
+      }
+      setShowForm(false);
+    } catch (error) {
+       // handled by parent alert
     }
-    setShowForm(false);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Remover esta conta?')) onChange(accounts.filter(a => a.id !== id));
+  const handleDelete = async (id: string) => {
+    if (confirm('Remover esta conta?')) await onDelete(id);
   };
 
   const set = (k: keyof Omit<Account, 'id'>, v: unknown) => setForm(f => ({ ...f, [k]: v }));
@@ -148,10 +171,17 @@ export function AccountsManager({ accounts, onChange }: AccountsManagerProps) {
         ))}
       </div>
 
-      <button onClick={openAdd}
-        className="w-full py-3 rounded-xl border border-dashed border-white/10 hover:border-primary/40 text-textMuted hover:text-white text-sm flex items-center justify-center gap-2 transition-all">
-        <Plus size={16} /> Adicionar Conta ou Cartão
-      </button>
+      <div className="flex flex-col md:flex-row gap-3">
+        <button onClick={handleOpenPluggy}
+          className="flex-1 py-3.5 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
+          style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
+          <Wallet size={16} /> Conectar Banco (Open Finance)
+        </button>
+        <button onClick={openAdd}
+          className="md:w-64 py-3.5 rounded-xl border border-dashed border-white/20 text-textMuted hover:border-primary/40 hover:text-white text-sm flex items-center justify-center gap-2 transition-all">
+          <Plus size={16} /> Adicionar Manualmente
+        </button>
+      </div>
 
       {/* Form Modal */}
       {showForm && (
@@ -227,6 +257,21 @@ export function AccountsManager({ accounts, onChange }: AccountsManagerProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {pluggyToken && (
+        <PluggyConnect
+          connectToken={pluggyToken}
+          includeSandbox={true}
+          onSuccess={(itemData) => {
+            onPluggySync(itemData.item.id).then(() => setPluggyToken(null));
+          }}
+          onError={(error: any) => {
+            console.error('PluggyConnect error', error);
+            setPluggyToken(null);
+          }}
+          onClose={() => setPluggyToken(null)}
+        />
       )}
     </div>
   );

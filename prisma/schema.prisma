@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+
+  accounts     Account[]
+  transactions Transaction[]
+  debts        Debt[]
+}
+
+model Account {
+  id          String   @id @default(uuid())
+  userId      String
+  pluggyId    String?  
+  name        String
+  bank        String
+  type        String   
+  balance     Float
+  limit       Float?
+  dueDay      Int?
+  closingDay  Int?
+  pendingBill Float?
+  color       String
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+  debts       Debt[]   
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  userId      String
+  accountId   String?
+  pluggyId    String?  
+  name        String
+  category    String
+  date        String
+  amount      Float
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+  account     Account? @relation(fields: [accountId], references: [id])
+}
+
+model Debt {
+  id                String     @id @default(uuid())
+  userId            String
+  accountId         String?
+  name              String
+  description       String?
+  category          String
+  totalAmount       Float
+  paidAmount        Float
+  monthlyPayment    Float
+  totalInstallments Int
+  paidInstallments  Int
+  nextDueDate       String
+  interestRate      Float?
+  createdAt         DateTime   @default(now())
+
+  user              User       @relation(fields: [userId], references: [id])
+  account           Account?   @relation(fields: [accountId], references: [id])
+  subItems          DebtItem[]
+}
+
+model DebtItem {
+  id          String   @id @default(uuid())
+  debtId      String
+  name        String
+  amount      Float
+  date        String
+
+  debt        Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+}

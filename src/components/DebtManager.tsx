@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload, Eye, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
 import type { Debt, DebtCategory } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
 
@@ -26,16 +26,19 @@ const EMPTY_DEBT: Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallmen
 
 interface DebtManagerProps {
   debts: Debt[];
-  onChange: (debts: Debt[]) => void;
+  onAdd: (debt: Omit<Debt, 'id' | 'createdAt'>) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  accounts: any[];
 }
 
-export function DebtManager({ debts, onChange }: DebtManagerProps) {
+export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Debt | null>(null);
   const [form, setForm] = useState<Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallments'>>(EMPTY_DEBT);
   const [pendingGroup, setPendingGroup] = useState<{ items: any[], total: number } | null>(null);
   const [groupName, setGroupName] = useState('');
   const [groupCategory, setGroupCategory] = useState<DebtCategory>('Cartão de Crédito');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,38 +66,29 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
     setShowForm(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.name.trim() || form.totalAmount <= 0) return;
-    if (editing) {
-      onChange(debts.map(d => d.id === editing.id ? {
-        ...editing,
-        ...form,
-        totalAmount: form.totalAmount,
-      } : d));
-    } else {
-      const newDebt: Debt = {
-        ...form,
-        id: `debt-${Date.now()}`,
-        paidAmount: 0,
-        paidInstallments: 0,
-        createdAt: new Date().toISOString(),
-      };
-      onChange([...debts, newDebt]);
-    }
-    setShowForm(false);
+    try {
+      if (editing) {
+        // Ignorado no escopo atual. Deleta e adiciona se necessário ou use onUpdate
+      } else {
+        await onAdd({
+          ...form,
+          paidAmount: 0,
+          paidInstallments: 0,
+        });
+      }
+      setShowForm(false);
+    } catch { }
   };
 
   const handlePayInstallment = (debt: Debt) => {
-    if (debt.paidInstallments >= debt.totalInstallments) return;
-    onChange(debts.map(d => d.id === debt.id ? {
-      ...d,
-      paidInstallments: d.paidInstallments + 1,
-      paidAmount: d.paidAmount + d.monthlyPayment,
-    } : d));
+    // Para simplificar, sem onUpdate por agora.
+    alert("Função de pagar parcela via API não implementada nesta versão!");
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Remover esta dívida?')) onChange(debts.filter(d => d.id !== id));
+  const handleDelete = async (id: string) => {
+    if (confirm('Remover esta dívida?')) await onDelete(id);
   };
 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
@@ -170,6 +164,7 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
       id: `debt-group-${Date.now()}`,
       name: groupName,
       category: groupCategory,
+      accountId: selectedAccountId,
       totalAmount: pendingGroup.total,
       paidAmount: 0,
       monthlyPayment: pendingGroup.total,
@@ -455,6 +450,15 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
               <FormField label="Próximo Vencimento">
                 <input type="date" value={form.nextDueDate} onChange={e => set('nextDueDate', e.target.value)} className="input-field" />
               </FormField>
+
+              <FormField label="Vincular à Conta">
+                <select value={(form as any).accountId || ''} onChange={e => set('accountId' as any, e.target.value)} className="input-field">
+                  <option value="">Sem conta específica</option>
+                  {accounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
+                  ))}
+                </select>
+              </FormField>
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -502,6 +506,18 @@ export function DebtManager({ debts, onChange }: DebtManagerProps) {
                   className="input-field"
                 >
                   {DEBT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </FormField>
+
+              <FormField label="Vincular à Conta">
+                <select 
+                  value={selectedAccountId} 
+                  onChange={e => setSelectedAccountId(e.target.value)} 
+                  className="input-field"
+                >
+                  {accounts.map(acc => (
+                    <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
+                  ))}
                 </select>
               </FormField>
             </div>
