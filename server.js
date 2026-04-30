@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { PluggyClient } from 'pluggy-sdk';
 import { PrismaClient } from '@prisma/client';
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
@@ -13,13 +13,11 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = 3001;
-const prisma = new PrismaClient();
-const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_finance_app';
-
-const pluggyClient = new PluggyClient({
-  clientId: process.env.PLUGGY_CLIENT_ID || '',
-  clientSecret: process.env.PLUGGY_CLIENT_SECRET || '',
+const adapter = new PrismaBetterSqlite3({
+  url: process.env.DATABASE_URL || 'file:./dev.db',
 });
+const prisma = new PrismaClient({ adapter });
+const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_finance_app';
 
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
@@ -214,87 +212,6 @@ app.delete('/api/debts/:id', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-/* -------------------------------------------------------------------------- */
-/*                               PLUGGY OPEN FINANCE                          */
-/* -------------------------------------------------------------------------- */
-
-app.post('/api/pluggy/token', authenticateToken, async (req, res) => {
-  try {
-    const data = await pluggyClient.createConnectToken();
-    res.json({ accessToken: data.accessToken });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to generate token', details: error.message });
-  }
-});
-
-app.get('/api/pluggy/sync', authenticateToken, async (req, res) => {
-  try {
-    const { itemId } = req.query;
-    if (!itemId) return res.status(400).json({ error: 'Missing itemId parameter' });
-
-    const accountsResponse = await pluggyClient.fetchAccounts(itemId);
-    const pluggyAccounts = accountsResponse.results || [];
-
-    let transactions = [];
-    for (const acc of pluggyAccounts) {
-      try {
-        const txs = await pluggyClient.fetchAllTransactions(acc.id);
-        transactions = transactions.concat(txs);
-      } catch(e) { }
-    }
-
-    const { userId } = req.user;
-
-    // 1. Save mapped Accounts to Database
-    const savedAccounts = [];
-    for (const pa of pluggyAccounts) {
-      const typeStr = pa.type === 'CREDIT' ? 'credit' : 'checking';
-      
-      const acc = await prisma.account.create({
-        data: {
-          userId,
-          pluggyId: pa.id,
-          name: pa.name,
-          bank: pa.bankData?.name || 'Open Finance',
-          type: typeStr,
-          balance: pa.balance,
-          limit: pa.creditData?.creditLimit || null,
-          color: '#14b8a6', 
-        }
-      });
-      savedAccounts.push(acc);
-    }
-    
-    // Create a map to attach accountId locally
-    const pluggyToLocalAccMap = {};
-    savedAccounts.forEach(sa => { pluggyToLocalAccMap[sa.pluggyId] = sa.id; });
-
-    // 2. Save Transactions to Database
-    const savedTransactions = [];
-    if (transactions.length > 0) {
-      const txsData = transactions.map(pt => ({
-        userId,
-        pluggyId: pt.id,
-        accountId: pluggyToLocalAccMap[pt.accountId] || null,
-        name: pt.description,
-        category: pt.categoryId || 'Outros',
-        date: pt.date?.substring(0, 10) || new Date().toISOString().substring(0,10),
-        amount: pt.amount,
-      }));
-      await prisma.transaction.createMany({ data: txsData });
-      
-      // Just returning what was created directly 
-      // though typically we'd fetch them back but mapped is fine
-      savedTransactions.push(...txsData);
-    }
-
-    res.json({ accounts: savedAccounts, transactions: savedTransactions });
-  } catch (error) {
-    console.error('Error syncing pluggy', error);
-    res.status(500).json({ error: 'Failed to sync data', details: error.message });
   }
 });
 

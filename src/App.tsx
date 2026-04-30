@@ -106,20 +106,7 @@ export default function App() {
     } catch (e: any) { alert("Erro ao importar: " + e.message); }
   };
 
-  const handlePluggySync = async (itemId: string) => {
-    try {
-      await fetchAPI(`/api/pluggy/sync?itemId=${itemId}`); // Backend auto-saves
-      // Re-fetch state
-      const [accsData, txsData] = await Promise.all([ fetchAPI('/api/accounts'), fetchAPI('/api/transactions') ]);
-      setAccounts(accsData);
-      setTxs(txsData);
-      return true;
-    } catch (e: any) {
-      console.error(e);
-      alert('Erro ao sincronizar dados do Pluggy: ' + e.message);
-      return false;
-    }
-  };
+
 
   // CRUD ACCOUNTS
   const addAccount = async (acc: Omit<Account, 'id' | 'createdAt'>) => {
@@ -294,7 +281,7 @@ export default function App() {
           <button onClick={() => setActiveTab('accounts')}
             className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all shadow-lg"
             style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.25)' }}>
-            <Wallet size={15}/> Conectar Banco
+            <Wallet size={15}/> Gerenciar Contas
           </button>
           <button onClick={() => setShowImport(true)}
             className="w-full py-3 rounded-xl border border-white/10 text-xs font-medium text-textMuted hover:text-white flex items-center justify-center gap-2 transition-all hover:bg-white/5">
@@ -396,18 +383,18 @@ export default function App() {
                   </div>
                   <h2 className="text-2xl font-bold text-white mb-3">Bem-vindo ao FinFlow!</h2>
                   <p className="text-textMuted max-w-md mb-8">
-                    Seu painel financeiro agora tem <strong className="text-white">Open Finance</strong>! 
-                    Conecte sua conta bancária na aba <strong>Contas</strong> para que suas faturas e transações sejam importadas e agrupadas automaticamente.
+                    Seu painel financeiro pessoal! 
+                    Adicione suas contas na aba <strong>Contas</strong> e importe seus extratos bancários (CSV/OFX) para acompanhar suas finanças.
                   </p>
                   <div className="flex gap-3">
                     <button onClick={() => setActiveTab('accounts')}
                       className="px-6 py-3 rounded-xl text-white font-semibold text-sm shadow-md"
                       style={{ background:'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow:'0 4px 24px rgba(99,102,241,0.35)' }}>
-                      <span className="flex items-center gap-2"><Wallet size={16}/> Sincronizar Banco Clicando Aqui</span>
+                      <span className="flex items-center gap-2"><Wallet size={16}/> Adicionar Conta</span>
                     </button>
                     <button onClick={() => setShowImport(true)}
                       className="px-6 py-3 rounded-xl text-textMuted text-sm font-medium border border-white/10 hover:bg-white/5 hover:text-white transition-colors">
-                      <span className="flex items-center gap-2"><Upload size={16}/> Antigo Extrato Manual</span>
+                      <span className="flex items-center gap-2"><Upload size={16}/> Importar Extrato</span>
                     </button>
                   </div>
                 </div>
@@ -546,7 +533,6 @@ export default function App() {
                 onAdd={addAccount}
                 onUpdate={updateAccount}
                 onDelete={deleteAccount}
-                onPluggySync={handlePluggySync} 
               />
             </>
           )}
