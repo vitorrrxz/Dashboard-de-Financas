@@ -135,11 +135,6 @@ export default function App() {
       setDebts(prev => [...prev, newDebt]);
     } catch (e: any) { alert(e.message); throw e; }
   };
-  const updateDebt = async (id: string, debt: Omit<Debt, 'id' | 'createdAt'>) => {
-    // For simplicity, debts only need local mutate if we aren't supporting full update yet,
-    // wait, DebtManager deletes and adds if we don't have put. Let's provide an empty update function 
-    // or just implement delete and insert instead inside DebtManager.
-  };
   const deleteDebt = async (id: string) => {
     try {
       await fetchAPI(`/api/debts/${id}`, 'DELETE');
@@ -201,7 +196,6 @@ export default function App() {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const startStr = thirtyDaysAgo.toISOString().substring(0, 10);
     
-    let runningBalance = realBalance; // Approximation
     activeTxs.filter(t => t.date >= startStr).forEach(t => {
        dailyMap[t.date] = (dailyMap[t.date] ?? 0) + t.amount;
     });

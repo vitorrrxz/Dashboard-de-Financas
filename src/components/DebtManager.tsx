@@ -82,7 +82,7 @@ export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerPro
     } catch { }
   };
 
-  const handlePayInstallment = (debt: Debt) => {
+  const handlePayInstallment = (_debt: Debt) => {
     // Para simplificar, sem onUpdate por agora.
     alert("Função de pagar parcela via API não implementada nesta versão!");
   };
@@ -157,50 +157,50 @@ export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerPro
     e.target.value = '';
   };
 
-  const finalizeGroupImport = () => {
+  const finalizeGroupImport = async () => {
     if (!pendingGroup || !groupName.trim()) return;
 
-    const newDebt: Debt = {
-      id: `debt-group-${Date.now()}`,
+    const newDebtData: Omit<Debt, 'id' | 'createdAt'> = {
       name: groupName,
       category: groupCategory,
-      accountId: selectedAccountId,
+      accountId: selectedAccountId || undefined,
       totalAmount: pendingGroup.total,
       paidAmount: 0,
       monthlyPayment: pendingGroup.total,
       totalInstallments: 1,
       paidInstallments: 0,
       nextDueDate: new Date().toISOString().slice(0, 10),
-      createdAt: new Date().toISOString(),
       subItems: pendingGroup.items.map(it => ({
-        id: it.id,
+        id: String(Math.random()),
         name: it.name,
         amount: it.totalAmount,
         date: it.nextDueDate
       }))
     };
 
-    onChange([...debts, newDebt]);
-    setPendingGroup(null);
-    setGroupName('');
-  };
-
-  const handlePayAll = () => {
-    const active = debts.filter(d => d.paidInstallments < d.totalInstallments);
-    if (active.length === 0) return;
-    if (confirm(`Pagar uma parcela de todas as ${active.length} dívidas ativas?`)) {
-      onChange(debts.map(d => (d.paidInstallments < d.totalInstallments) ? {
-        ...d,
-        paidInstallments: d.paidInstallments + 1,
-        paidAmount: d.paidAmount + d.monthlyPayment,
-      } : d));
+    try {
+      await onAdd(newDebtData);
+      setPendingGroup(null);
+      setGroupName('');
+    } catch (err: any) {
+      alert("Erro ao salvar fatura consolidada: " + err.message);
     }
   };
 
-  const handleDeleteAll = () => {
+  const handlePayAll = () => {
+    alert("Função de pagar parcelas via API não implementada nesta versão!");
+  };
+
+  const handleDeleteAll = async () => {
     if (debts.length === 0) return;
     if (confirm('TEM CERTEZA? Isso excluirá todas as dívidas permanentemente.')) {
-      onChange([]);
+      try {
+        for (const d of debts) {
+          await onDelete(d.id);
+        }
+      } catch (err: any) {
+        alert("Erro ao excluir dívidas: " + err.message);
+      }
     }
   };
 

@@ -24,3 +24,11 @@ dist-ssr
 *.sw?
 
 /src/generated/prisma
+
+# Local environment and database files
+.env
+*.db
+*.db-journal
+dev.db
+dev.db-journal
+
