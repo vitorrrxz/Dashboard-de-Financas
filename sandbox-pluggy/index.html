@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pluggy Connect - Sandbox Test</title>
+    <!-- Importação de fonte moderna e Tailwind CSS para interface premium rápida -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SCRIPT DO WIDGET PLUGGY CONNECT -->
+    <script src="https://cdn.pluggy.ai/pluggy-connect/v2.8.2/pluggy-connect.js"></script>
+</head>
+<body class="bg-slate-950 text-white min-h-screen flex items-center justify-center">
+
+    <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center">
+        <div class="w-16 h-16 bg-indigo-600/20 border border-indigo-500/30 rounded-2xl flex items-center justify-center mx-auto mb-6 text-3xl font-black text-indigo-400">
+            P
+        </div>
+        <h1 class="text-2xl font-bold mb-2">Conexão Open Finance</h1>
+        <p class="text-slate-400 text-sm mb-8">Conecte sua conta do banco no ambiente de Sandbox de forma segura.</p>
+
+        <div id="statusContainer" class="hidden mb-6 p-4 rounded-xl bg-slate-800/50 border border-slate-700 text-sm">
+            <p id="statusText" class="text-indigo-400 font-semibold"></p>
+            <p id="subStatusText" class="text-xs text-slate-400 mt-1"></p>
+        </div>
+
+        <button 
+            id="connectBtn" 
+            onclick="initPluggyConnection()"
+            class="w-full py-4 bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition-all text-white font-bold rounded-2xl shadow-lg shadow-indigo-600/20"
+        >
+            Conectar Conta Bancária
+        </button>
+
+        <button 
+            id="syncBtn" 
+            onclick="syncTransactions()"
+            class="hidden w-full py-4 mt-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 transition-all text-white font-bold rounded-2xl shadow-lg shadow-emerald-600/20"
+        >
+            Sincronizar Transações
+        </button>
+    </div>
+
+    <script>
+        const BACKEND_URL = 'http://localhost:3002';
+        let connectedItemId = null;
+
+        async function initPluggyConnection() {
+            const connectBtn = document.getElementById('connectBtn');
+            const statusContainer = document.getElementById('statusContainer');
+            const statusText = document.getElementById('statusText');
+            
+            connectBtn.disabled = true;
+            connectBtn.innerText = 'Buscando token...';
+
+            try {
+                // 1. Solicita o Token de Conexão temporário ao Back-end
+                const response = await fetch(`${BACKEND_URL}/api/pluggy/connect-token`, { method: 'POST' });
+                const { accessToken } = await response.json();
+
+                if (!accessToken) throw new Error("Token não gerado.");
+
+                // 2. Configura e abre o Widget da Pluggy
+                const pluggyConnect = new PluggyConnect({
+                    connectToken: accessToken,
+                    // Garante a abertura no ambiente correto de Teste
+                    includeSandbox: true, 
+                    onSuccess: async (data) => {
+                        console.log('Sucesso!', data);
+                        connectedItemId = data.item.id;
+                        
+                        statusContainer.classList.remove('hidden');
+                        statusText.innerText = 'Conectado com sucesso!';
+                        document.getElementById('subStatusText').innerText = `Item ID: ${connectedItemId}`;
+
+                        // Envia o itemId para salvar no banco de dados local
+                        await registerConnectedItem(connectedItemId);
+                    },
+                    onError: (error) => {
+                        console.error('Erro no widget:', error);
+                        alert('Falha ao conectar com o banco de dados da Pluggy.');
+                    },
+                    onClose: () => {
+                        connectBtn.disabled = false;
+                        connectBtn.innerText = 'Conectar Conta Bancária';
+                    }
+                });
+
+                pluggyConnect.init();
+
+            } catch (error) {
+                console.error(error);
+                alert('Erro ao iniciar fluxo de conexão.');
+                connectBtn.disabled = false;
+                connectBtn.innerText = 'Conectar Conta Bancária';
+            }
+        }
+
+        // Envia o Item ID gerado para registro no banco de dados do back-end
+        async function registerConnectedItem(itemId) {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/pluggy/connect-item`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ itemId })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('connectBtn').classList.add('hidden');
+                    document.getElementById('syncBtn').classList.remove('hidden');
+                } else {
+                    alert('Falha ao salvar a conexão no banco.');
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // Sincroniza as transações do Item conectado
+        async function syncTransactions() {
+            const syncBtn = document.getElementById('syncBtn');
+            syncBtn.disabled = true;
+            syncBtn.innerText = 'Sincronizando dados...';
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/pluggy/sync/${connectedItemId}`, { method: 'POST' });
+                const data = await response.json();
+                
+                alert(data.message || 'Sincronizado!');
+            } catch (err) {
+                console.error(err);
+                alert('Erro na sincronização.');
+            } finally {
+                syncBtn.disabled = false;
+                syncBtn.innerText = 'Sincronizar Transações';
+            }
+        }
+    </script>
+</body>
+</html>

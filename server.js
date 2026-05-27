@@ -5,6 +5,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { PluggyClient } from 'pluggy-sdk';
 
 dotenv.config();
 
@@ -18,6 +19,12 @@ const adapter = new PrismaBetterSqlite3({
 });
 const prisma = new PrismaClient({ adapter });
 const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_finance_app';
+
+// Pluggy Client — inicializado com as credenciais do .env
+const pluggyClient = new PluggyClient({
+  clientId: process.env.PLUGGY_CLIENT_ID || '',
+  clientSecret: process.env.PLUGGY_CLIENT_SECRET || '',
+});
 
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
@@ -212,6 +219,146 @@ app.delete('/api/debts/:id', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* -------------------------------------------------------------------------- */
+/*                           PLUGGY OPEN FINANCE                               */
+/* -------------------------------------------------------------------------- */
+
+// POST /api/pluggy/connect-token — Gera o token temporário para o widget
+app.post('/api/pluggy/connect-token', authenticateToken, async (req, res) => {
+  try {
+    const response = await pluggyClient.createConnectToken(undefined, {
+      clientUserId: req.user.userId,
+    });
+    res.json({ accessToken: response.accessToken });
+  } catch (error) {
+    console.error('Erro ao gerar Connect Token:', error);
+    res.status(500).json({ error: 'Erro ao conectar à API da Pluggy', details: error.message });
+  }
+});
+
+// POST /api/pluggy/connect-item — Recebe itemId do widget e registra no banco
+app.post('/api/pluggy/connect-item', authenticateToken, async (req, res) => {
+  const { itemId } = req.body;
+  if (!itemId) return res.status(400).json({ error: 'itemId é obrigatório.' });
+
+  try {
+    const pluggyItem = await pluggyClient.fetchItem(itemId);
+    const userId = req.user.userId;
+
+    // Cria ou atualiza a conta representando o banco conectado
+    const existing = await prisma.account.findFirst({
+      where: { userId, pluggyId: itemId }
+    });
+
+    if (!existing) {
+      await prisma.account.create({
+        data: {
+          userId,
+          pluggyId: itemId,
+          name: pluggyItem.connector.name,
+          bank: pluggyItem.connector.name,
+          type: 'checking',
+          balance: 0,
+          color: '#6366f1',
+        }
+      });
+    }
+
+    res.json({ success: true, providerName: pluggyItem.connector.name });
+  } catch (error) {
+    console.error('Erro ao registrar item Pluggy:', error);
+    res.status(500).json({ error: 'Erro ao registrar conexão bancária', details: error.message });
+  }
+});
+
+// POST /api/pluggy/sync/:itemId — Sincroniza contas e transações do banco conectado
+app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
+  const { itemId } = req.params;
+  const userId = req.user.userId;
+
+  try {
+    const accountsRes = await pluggyClient.fetchAccounts(itemId);
+    if (!accountsRes.results || accountsRes.results.length === 0) {
+      return res.status(404).json({ error: 'Nenhuma conta encontrada para este item.' });
+    }
+
+    let totalTxs = 0;
+
+    for (const pluggyAcc of accountsRes.results) {
+      // Upsert da conta usando pluggyId
+      let localAccount = await prisma.account.findFirst({
+        where: { userId, pluggyId: pluggyAcc.id }
+      });
+
+      if (!localAccount) {
+        localAccount = await prisma.account.create({
+          data: {
+            userId,
+            pluggyId: pluggyAcc.id,
+            name: pluggyAcc.name,
+            bank: pluggyAcc.marketingName || 'Banco Conectado',
+            type: pluggyAcc.type.toLowerCase(),
+            balance: pluggyAcc.balance,
+            color: '#6366f1',
+          }
+        });
+      } else {
+        await prisma.account.updateMany({
+          where: { id: localAccount.id, userId },
+          data: { balance: pluggyAcc.balance, name: pluggyAcc.name }
+        });
+      }
+
+      // Busca transações do último mês
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      const fromDate = oneMonthAgo.toISOString().split('T')[0];
+
+      const txsRes = await pluggyClient.fetchTransactions(pluggyAcc.id, { from: fromDate });
+
+      for (const tx of txsRes.results) {
+        const txDate = tx.date.toISOString().split('T')[0];
+        const pluggyTxId = tx.id;
+
+        // Upsert usando pluggyId como chave de idempotência
+        const existingTx = await prisma.transaction.findFirst({
+          where: { userId, pluggyId: pluggyTxId }
+        });
+
+        if (!existingTx) {
+          await prisma.transaction.create({
+            data: {
+              userId,
+              accountId: localAccount.id,
+              pluggyId: pluggyTxId,
+              name: tx.description,
+              category: tx.category || 'Outros',
+              date: txDate,
+              amount: tx.amount,
+            }
+          });
+          totalTxs++;
+        } else {
+          await prisma.transaction.updateMany({
+            where: { id: existingTx.id, userId },
+            data: {
+              name: tx.description,
+              category: tx.category || 'Outros',
+              date: txDate,
+              amount: tx.amount,
+            }
+          });
+        }
+      }
+    }
+
+    res.json({ success: true, message: `Sincronizacao concluida! ${totalTxs} novas transacoes importadas.` });
+  } catch (error) {
+    console.error('Erro na sincronizacao Pluggy:', error);
+    res.status(500).json({ error: 'Erro na sincronizacao de dados', details: error.message });
   }
 });
 

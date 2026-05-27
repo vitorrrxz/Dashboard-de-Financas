@@ -12,6 +12,7 @@ import { ImportModal } from './components/ImportModal';
 import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
 import { AuthForm } from './components/AuthForm';
+import { PluggyConnectButton } from './components/PluggyConnectButton';
 import type { Account, Debt, Transaction } from './types';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -281,6 +282,19 @@ export default function App() {
             className="w-full py-3 rounded-xl border border-white/10 text-xs font-medium text-textMuted hover:text-white flex items-center justify-center gap-2 transition-all hover:bg-white/5">
             <Upload size={14}/> Importação Manual
           </button>
+          {token && (
+            <PluggyConnectButton
+              token={token}
+              onSyncComplete={async () => {
+                const [accsData, txsData] = await Promise.all([
+                  fetchAPI('/api/accounts'),
+                  fetchAPI('/api/transactions'),
+                ]);
+                setAccounts(accsData);
+                setTxs(txsData);
+              }}
+            />
+          )}
           {transactions.length > 0 && (
             <button onClick={async () => {
                 if (confirm('Remover todas as transações?')) {

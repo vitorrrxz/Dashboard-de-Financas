@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"nodemon server.js\" \"vite\"",
+    "sandbox": "node sandbox-pluggy/server.js",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -20,7 +21,8 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.8.0",
-    "pluggy-sdk": "^0.85.2",
+    "pg": "^8.21.0",
+    "pluggy-sdk": "^0.85.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-pluggy-connect": "^2.12.0",
