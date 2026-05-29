@@ -1,3 +1,5 @@
+import type { Debt, DebtCategory } from '../types';
+
 export interface Transaction {
   id: string;
   name: string;
@@ -59,12 +61,58 @@ function parseAmount(raw: string): number {
   return parseFloat(s);
 }
 
+function normalizeDate(rawDate: string): string {
+  const clean = rawDate.trim().split(' ')[0]; // ignore time part if present
+
+  // DD/MM/YYYY
+  const brMatch = clean.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (brMatch) {
+    const day = brMatch[1].padStart(2, '0');
+    const month = brMatch[2].padStart(2, '0');
+    const year = brMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // YYYY-MM-DD
+  const isoMatch = clean.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const year = isoMatch[1];
+    const month = isoMatch[2].padStart(2, '0');
+    const day = isoMatch[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  // DD-MM-YYYY
+  const dashMatch = clean.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dashMatch) {
+    const day = dashMatch[1].padStart(2, '0');
+    const month = dashMatch[2].padStart(2, '0');
+    const year = dashMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // YYYY/MM/DD
+  const slashMatch = clean.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if (slashMatch) {
+    const year = slashMatch[1];
+    const month = slashMatch[2].padStart(2, '0');
+    const day = slashMatch[3].padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  return '';
+}
+
 function parseOFXDate(raw: string): string {
+  if (!raw || raw.length < 8) return '';
   // OFX dates: 20231015120000[-3:BRT] or 20231015
   const clean = raw.replace(/\[.*\]/, '').trim();
   const year = clean.substring(0, 4);
   const month = clean.substring(4, 6);
   const day = clean.substring(6, 8);
+  if (!/^\d{4}$/.test(year) || !/^\d{2}$/.test(month) || !/^\d{2}$/.test(day)) {
+    return '';
+  }
   return `${year}-${month}-${day}`;
 }
 
@@ -80,10 +128,10 @@ export function parseOFX(content: string): Transaction[] {
     // XML-style OFX
     blocks.forEach((block, i) => {
       const get = (tag: string) => {
-        const m = block.match(new RegExp(`<${tag}>([^<]*)<\/${tag}>`, 'i'));
+        const m = block.match(new RegExp(`<${tag}>([^<]*)</${tag}>`, 'i'));
         return m ? m[1].trim() : '';
       };
-      const amount = parseFloat(get('TRNAMT').replace(',', '.'));
+      const amount = parseAmount(get('TRNAMT'));
       const memo = get('MEMO') || get('NAME') || 'Transação';
       const dateRaw = get('DTPOSTED');
       transactions.push({
@@ -116,7 +164,7 @@ export function parseOFX(content: string): Transaction[] {
       const tag = line.substring(1, colonIdx).toUpperCase();
       const val = line.substring(colonIdx + 1).trim();
 
-      if (tag === 'TRNAMT') current.amount = parseFloat(val.replace(',', '.'));
+      if (tag === 'TRNAMT') current.amount = parseAmount(val);
       if (tag === 'DTPOSTED') current.date = parseOFXDate(val);
       if (tag === 'MEMO' || tag === 'NAME') {
         current.name = val;
@@ -154,8 +202,19 @@ export function parseCSV(content: string): Transaction[] {
   const header = splitLine(lines[0], sep).map(h => h.toLowerCase().trim());
   const transactions: Transaction[] = [];
 
-  const findCol = (...keys: string[]) =>
-    keys.reduce((found, k) => found !== -1 ? found : header.findIndex(h => h.includes(k)), -1);
+  const findCol = (...keys: string[]) => {
+    // 1. Try exact matches first
+    for (const k of keys) {
+      const idx = header.findIndex(h => h === k);
+      if (idx !== -1) return idx;
+    }
+    // 2. Try substring match
+    for (const k of keys) {
+      const idx = header.findIndex(h => h.includes(k));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
 
   const dateCol   = findCol('data', 'date', 'dt');
   const descCol   = findCol('descrição', 'descricao', 'description', 'lançamento', 'lancamento', 'memo', 'estabelecimento', 'título', 'titulo');
@@ -174,15 +233,8 @@ export function parseCSV(content: string): Transaction[] {
     const amount = parseAmount(rawAmount);
     if (isNaN(amount)) continue;
 
-    // Normalize date: DD/MM/YYYY → YYYY-MM-DD
-    let date = rawDate;
-    const brDate = rawDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (brDate) date = `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
-    // Also handle YYYY-MM-DD already
-    const isoDate = rawDate.match(/^\d{4}-\d{2}-\d{2}$/);
-    if (isoDate) date = rawDate;
-
-    if (!date || date.length < 8) continue;
+    const date = normalizeDate(rawDate);
+    if (!date) continue;
 
     transactions.push({
       id: `csv-${i}-${Date.now()}`,
@@ -196,7 +248,7 @@ export function parseCSV(content: string): Transaction[] {
   return transactions;
 }
 
-export function parseDebtsCSV(content: string): any[] {
+export function parseDebtsCSV(content: string): Debt[] {
   // Remove BOM if present
   const cleanContent = content.replace(/^\uFEFF/, '');
   const lines = cleanContent.split(/\r?\n/).filter(Boolean);
@@ -204,10 +256,21 @@ export function parseDebtsCSV(content: string): any[] {
 
   const sep = lines[0].includes(';') ? ';' : ',';
   const header = splitLine(lines[0], sep).map(h => h.toLowerCase().trim());
-  const debts: any[] = [];
+  const debts: Debt[] = [];
 
-  const findCol = (...keys: string[]) =>
-    keys.reduce((found, k) => found !== -1 ? found : header.findIndex(h => h.includes(k)), -1);
+  const findCol = (...keys: string[]) => {
+    // 1. Try exact matches first
+    for (const k of keys) {
+      const idx = header.findIndex(h => h === k);
+      if (idx !== -1) return idx;
+    }
+    // 2. Try substring match
+    for (const k of keys) {
+      const idx = header.findIndex(h => h.includes(k));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
 
   let nameCol           = findCol('nome', 'name', 'title', 'descrição', 'descricao', 'título', 'titulo', 'divida', 'dívida');
   const catCol          = findCol('categoria', 'category', 'tipo');
@@ -246,15 +309,13 @@ export function parseDebtsCSV(content: string): any[] {
     const paidAmount  = parseAmount(rawPaidAmount);
     const monthly     = parseAmount(rawMonthly);
 
-    // Normalize date: DD/MM/YYYY → YYYY-MM-DD
-    let date = rawDate;
-    const brDate = rawDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (brDate) date = `${brDate[3]}-${brDate[2]}-${brDate[1]}`;
+    const date = normalizeDate(rawDate);
+    if (!date) continue;
 
     debts.push({
       id: `debt-csv-${i}-${Date.now()}`,
       name: name.trim() || `Dívida ${i}`,
-      category: (cols[catCol] || 'Outros') as any,
+      category: (cols[catCol] || 'Outros') as DebtCategory,
       totalAmount,
       paidAmount: !isNaN(paidAmount) ? paidAmount : (paidInst * monthly),
       monthlyPayment: !isNaN(monthly) ? monthly : (totalAmount / totalInst),
@@ -292,7 +353,7 @@ export function parseFile(file: File): Promise<Transaction[]> {
   });
 }
 
-export function parseDebtsAsGroup(file: File): Promise<{ items: any[], total: number }> {
+export function parseDebtsAsGroup(file: File): Promise<{ items: Debt[], total: number }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {

@@ -1,6 +1,30 @@
 import { useState, useCallback } from 'react';
 import { Link2, RefreshCw, CheckCircle2, Loader2, Building2 } from 'lucide-react';
 
+interface PluggyConnectData {
+  item: {
+    id: string;
+  };
+}
+
+interface PluggyConnectConfig {
+  connectToken: string;
+  includeSandbox?: boolean;
+  onSuccess: (data: PluggyConnectData) => void | Promise<void>;
+  onError: (err: Error | Record<string, unknown>) => void;
+  onClose: () => void;
+}
+
+interface PluggyConnectInstance {
+  init: () => void;
+}
+
+declare global {
+  interface Window {
+    PluggyConnect?: new (config: PluggyConnectConfig) => PluggyConnectInstance;
+  }
+}
+
 interface PluggyConnectButtonProps {
   token: string;
   onSyncComplete: () => void;
@@ -16,7 +40,7 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
   const [connectedItem, setConnectedItem] = useState<ConnectedItem | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAPI = useCallback(async (endpoint: string, method = 'POST', body?: any) => {
+  const fetchAPI = useCallback(async (endpoint: string, method = 'POST', body?: unknown) => {
     const res = await fetch(`http://localhost:3001${endpoint}`, {
       method,
       headers: {
@@ -40,26 +64,26 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
       const { accessToken } = await fetchAPI('/api/pluggy/connect-token');
       if (!accessToken) throw new Error('Token de conexão não gerado.');
 
-      if (typeof (window as any).PluggyConnect === 'undefined') {
+      if (typeof window.PluggyConnect === 'undefined') {
         throw new Error('Widget da Pluggy não carregado. Verifique sua conexão com a internet.');
       }
 
-      const pluggyConnect = new (window as any).PluggyConnect({
+      const pluggyConnect = new window.PluggyConnect({
         connectToken: accessToken,
         includeSandbox: true,
-        onSuccess: async (data: any) => {
+        onSuccess: async (data) => {
           const itemId = data.item.id;
           setStatus('loading');
           try {
             const result = await fetchAPI('/api/pluggy/connect-item', 'POST', { itemId });
             setConnectedItem({ itemId, providerName: result.providerName });
             setStatus('connected');
-          } catch (err: any) {
-            setError('Banco conectado, mas falha ao registrar: ' + err.message);
+          } catch (err) {
+            setError('Banco conectado, mas falha ao registrar: ' + (err instanceof Error ? err.message : String(err)));
             setStatus('idle');
           }
         },
-        onError: (err: any) => {
+        onError: (err) => {
           console.error('Erro no widget Pluggy:', err);
           setError('Falha ao conectar com o banco.');
           setStatus('idle');
@@ -70,8 +94,8 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
       });
 
       pluggyConnect.init();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
       setStatus('idle');
     }
   };
@@ -85,8 +109,8 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
       await fetchAPI(`/api/pluggy/sync/${connectedItem.itemId}`, 'POST');
       setStatus('done');
       onSyncComplete();
-    } catch (err: any) {
-      setError('Falha na sincronização: ' + err.message);
+    } catch (err) {
+      setError('Falha na sincronização: ' + (err instanceof Error ? err.message : String(err)));
       setStatus('connected');
     }
   };

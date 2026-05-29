@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Mail, Lock, User, ArrowRight } from 'lucide-react';
 
 interface AuthFormProps {
-  onLogin: (token: string, user: any) => void;
+  onLogin: (token: string, user: { id: string; name: string; email: string }) => void;
 }
 
 export function AuthForm({ onLogin }: AuthFormProps) {
@@ -32,8 +32,8 @@ export function AuthForm({ onLogin }: AuthFormProps) {
       if (!res.ok) throw new Error(data.error || 'Erro na autenticação');
 
       onLogin(data.token, data.user);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

@@ -29,7 +29,7 @@ function fmt(v: number) {
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
-  const [user, setUser]   = useState<any>(null);
+  const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
   const [loading, setLoading] = useState(!!token);
 
   const [activeTab, setActiveTab]     = useState<Tab>('dashboard');
@@ -43,7 +43,7 @@ export default function App() {
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
 
-  const fetchAPI = async (endpoint: string, method = 'GET', body?: any) => {
+  const fetchAPI = async (endpoint: string, method = 'GET', body?: unknown) => {
     const res = await fetch(`http://localhost:3001${endpoint}`, {
       method,
       headers: {
@@ -57,6 +57,15 @@ export default function App() {
       throw new Error(err.error || 'Erro na API');
     }
     return res.json();
+  };
+
+  const handleLogout = () => {
+    setToken(null);
+    setUser(null);
+    setAccounts([]);
+    setTxs([]);
+    setDebts([]);
+    localStorage.removeItem('finflow_token');
   };
 
   useEffect(() => {
@@ -79,18 +88,10 @@ export default function App() {
         setLoading(false);
       });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const handleLogout = () => {
-    setToken(null);
-    setUser(null);
-    setAccounts([]);
-    setTxs([]);
-    setDebts([]);
-    localStorage.removeItem('finflow_token');
-  };
-
-  const handleLogin = (newToken: string, newUser: any) => {
+  const handleLogin = (newToken: string, newUser: { id: string; name: string; email: string }) => {
     localStorage.setItem('finflow_token', newToken);
     setToken(newToken);
     setUser(newUser);
@@ -150,7 +151,7 @@ export default function App() {
           }
         }
       }
-    } catch (e: any) { alert("Erro ao importar: " + e.message); }
+    } catch (e: unknown) { alert("Erro ao importar: " + (e instanceof Error ? e.message : String(e))); }
   };
 
 
@@ -160,19 +161,19 @@ export default function App() {
     try {
       const newAcc = await fetchAPI('/api/accounts', 'POST', acc);
       setAccounts(prev => [...prev, newAcc]);
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const updateAccount = async (id: string, acc: Omit<Account, 'id' | 'createdAt'>) => {
     try {
       await fetchAPI(`/api/accounts/${id}`, 'PUT', acc);
       setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...acc } : a));
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const deleteAccount = async (id: string) => {
     try {
       await fetchAPI(`/api/accounts/${id}`, 'DELETE');
       setAccounts(prev => prev.filter(a => a.id !== id));
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
   // CRUD DEBTS
@@ -180,13 +181,20 @@ export default function App() {
     try {
       const newDebt = await fetchAPI('/api/debts', 'POST', debt);
       setDebts(prev => [...prev, newDebt]);
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const deleteDebt = async (id: string) => {
     try {
       await fetchAPI(`/api/debts/${id}`, 'DELETE');
       setDebts(prev => prev.filter(d => d.id !== id));
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
+  };
+
+  const updateDebt = async (id: string, debtData: Partial<Debt>) => {
+    try {
+      const updated = await fetchAPI(`/api/debts/${id}`, 'PUT', debtData);
+      setDebts(prev => prev.map(d => d.id === id ? updated : d));
+    } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
   };
 
 
@@ -495,7 +503,7 @@ export default function App() {
                           <YAxis stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
                           <RechartsTooltip 
                             contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
-                            formatter={(v: any) => [fmt(v), chartPeriod === '30d' ? 'Evolução' : 'Saldo']} 
+                            formatter={(v: number) => [fmt(v), chartPeriod === '30d' ? 'Evolução' : 'Saldo']} 
                             labelStyle={{ color:'#9ca3af' }}
                           />
                           <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2.5} fill="url(#cg)" animationDuration={1000}/>
@@ -515,7 +523,7 @@ export default function App() {
                             <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} stroke="#6b7280" tick={{ fontSize:11 }} width={80}/>
                             <RechartsTooltip cursor={{ fill:'rgba(255,255,255,0.03)' }}
                               contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
-                              formatter={(v: any) => [fmt(v),'Gasto']}/>
+                              formatter={(v: number) => [fmt(v),'Gasto']}/>
                             <Bar dataKey="amount" radius={[0,4,4,0]} barSize={14}>
                               {stats.expenseByCategory.map(e => (
                                 <Cell key={e.name} fill={CATEGORY_COLORS[e.name] || '#6366f1'}/>
@@ -601,6 +609,7 @@ export default function App() {
               <DebtManager 
                 debts={debts} 
                 onAdd={addDebt}
+                onUpdate={updateDebt}
                 onDelete={deleteDebt}
                 accounts={accounts} 
               />
@@ -616,7 +625,7 @@ export default function App() {
 
 /* --- UI Helpers --- */
 
-function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: any) {
+function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { title: string; amount: string; icon: React.ReactNode; badge?: string; isPositive: boolean; onClick?: () => void }) {
   return (
     <div onClick={onClick} className={`glass-card rounded-2xl p-6 transition-all ${onClick ? 'cursor-pointer hover:bg-white/5 hover:-translate-y-1' : ''}`}>
       <div className="flex justify-between items-start mb-4">
@@ -694,7 +703,7 @@ function TxTable({ rows }: { rows: Transaction[] }) {
   );
 }
 
-function NavItem({ icon, label, active, badge, badgeColor, onClick, isSubItem }: any) {
+function NavItem({ icon, label, active, badge, badgeColor, onClick, isSubItem }: { icon: React.ReactNode; label: string; active: boolean; badge?: number; badgeColor?: string; onClick: () => void; isSubItem?: boolean }) {
   return (
     <button onClick={onClick}
       className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${

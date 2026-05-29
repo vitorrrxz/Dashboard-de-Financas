@@ -45,6 +45,17 @@ const authenticateToken = (req, res, next) => {
 
 app.post('/api/auth/register', async (req, res) => {
   const { name, email, password } = req.body;
+  
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Nome completo é obrigatório.' });
+  }
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ error: 'E-mail inválido.' });
+  }
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    return res.status(400).json({ error: 'A senha deve conter no mínimo 6 caracteres.' });
+  }
+
   try {
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) return res.status(400).json({ error: 'Email já cadastrado.' });
@@ -63,6 +74,14 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
+
+  if (!email || typeof email !== 'string' || !email.trim()) {
+    return res.status(400).json({ error: 'E-mail é obrigatório.' });
+  }
+  if (!password || typeof password !== 'string' || !password.trim()) {
+    return res.status(400).json({ error: 'Senha é obrigatória.' });
+  }
+
   try {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return res.status(400).json({ error: 'Credenciais inválidas' });
@@ -203,6 +222,35 @@ app.post('/api/debts', authenticateToken, async (req, res) => {
         ...data,
         subItems: subItems ? { create: subItems.map(s => ({ name: s.name, amount: s.amount, date: s.date })) } : undefined
       },
+      include: { subItems: true }
+    });
+    res.json(debt);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/debts/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = { ...req.body };
+    delete data.id;
+    delete data.userId;
+    delete data.createdAt;
+    delete data.subItems;
+
+    // Converte tipos se forem passados como strings
+    if (data.totalAmount !== undefined) data.totalAmount = parseFloat(data.totalAmount) || 0;
+    if (data.paidAmount !== undefined) data.paidAmount = parseFloat(data.paidAmount) || 0;
+    if (data.monthlyPayment !== undefined) data.monthlyPayment = parseFloat(data.monthlyPayment) || 0;
+    if (data.totalInstallments !== undefined) data.totalInstallments = parseInt(data.totalInstallments) || 1;
+    if (data.paidInstallments !== undefined) data.paidInstallments = parseInt(data.paidInstallments) || 0;
+    if (data.interestRate !== undefined) data.interestRate = parseFloat(data.interestRate) || 0;
+    if (data.accountId === '') data.accountId = null;
+
+    const debt = await prisma.debt.update({
+      where: { id, userId: req.user.userId },
+      data,
       include: { subItems: true }
     });
     res.json(debt);

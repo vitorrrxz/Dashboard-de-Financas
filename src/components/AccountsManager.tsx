@@ -67,8 +67,8 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete }: Account
         await onAdd(form);
       }
       setShowForm(false);
-    } catch (error) {
-       // handled by parent alert
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -182,7 +182,21 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete }: Account
               </div>
 
               <FormField label="Tipo">
-                <select value={form.type} onChange={e => set('type', e.target.value as AccountType)} className="input-field">
+                <select value={form.type} onChange={e => {
+                  const newType = e.target.value as AccountType;
+                  setForm(f => {
+                    const next = { ...f, type: newType };
+                    if (newType !== 'credit') {
+                      delete next.limit;
+                      delete next.pendingBill;
+                      delete next.closingDay;
+                      delete next.dueDay;
+                    } else {
+                      next.balance = 0;
+                    }
+                    return next;
+                  });
+                }} className="input-field">
                   {(Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][]).map(([v, l]) => (
                     <option key={v} value={v}>{l}</option>
                   ))}

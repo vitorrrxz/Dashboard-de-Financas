@@ -2,12 +2,12 @@ import { useCallback, useState } from 'react';
 import { Upload, X, FileText, CheckCircle, AlertCircle, Loader, CreditCard, Banknote, Smartphone, LayoutList } from 'lucide-react';
 import { parseFile } from '../utils/parsers';
 import type { Transaction } from '../utils/parsers';
-import type { PaymentType } from '../types';
+import type { PaymentType, Account } from '../types';
 
 interface ImportModalProps {
   onClose: () => void;
   onImport: (transactions: Transaction[], paymentType: PaymentType) => void;
-  accounts: any[];
+  accounts: Account[];
 }
 
 type UploadState = 'idle' | 'dragging' | 'loading' | 'success' | 'error';
