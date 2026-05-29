@@ -1,15 +1,47 @@
 import { useCallback, useState } from 'react';
-import { Upload, X, FileText, CheckCircle, AlertCircle, Loader } from 'lucide-react';
+import { Upload, X, FileText, CheckCircle, AlertCircle, Loader, CreditCard, Banknote, Smartphone, LayoutList } from 'lucide-react';
 import { parseFile } from '../utils/parsers';
 import type { Transaction } from '../utils/parsers';
+import type { PaymentType } from '../types';
 
 interface ImportModalProps {
   onClose: () => void;
-  onImport: (transactions: Transaction[]) => void;
+  onImport: (transactions: Transaction[], paymentType: PaymentType) => void;
   accounts: any[];
 }
 
 type UploadState = 'idle' | 'dragging' | 'loading' | 'success' | 'error';
+
+const PAYMENT_TYPES: { value: PaymentType; label: string; description: string; color: string; icon: React.ReactNode }[] = [
+  {
+    value: 'debit',
+    label: 'Débito',
+    description: 'Extrato de conta corrente/poupança',
+    color: '#3b82f6',
+    icon: <Banknote size={16} />,
+  },
+  {
+    value: 'credit',
+    label: 'Crédito',
+    description: 'Fatura de cartão de crédito',
+    color: '#ec4899',
+    icon: <CreditCard size={16} />,
+  },
+  {
+    value: 'pix',
+    label: 'PIX',
+    description: 'Transferências e cobranças via PIX',
+    color: '#10b981',
+    icon: <Smartphone size={16} />,
+  },
+  {
+    value: 'pix_installment',
+    label: 'PIX Parcelado',
+    description: 'PIX parcelado — entra nas dívidas automaticamente',
+    color: '#f59e0b',
+    icon: <LayoutList size={16} />,
+  },
+];
 
 export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
   const [state, setState] = useState<UploadState>('idle');
@@ -17,6 +49,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
   const [preview, setPreview] = useState<Transaction[]>([]);
   const [fileName, setFileName] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
+  const [paymentType, setPaymentType] = useState<PaymentType>('debit');
 
   const processFile = async (file: File) => {
     setState('loading');
@@ -50,12 +83,15 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
 
   const handleConfirm = () => {
     const txsWithAccount = preview.map(tx => ({ ...tx, accountId: selectedAccountId }));
-    onImport(txsWithAccount);
+    onImport(txsWithAccount, paymentType);
     onClose();
   };
 
-  const income = preview.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const income  = preview.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const expense = preview.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  const selectedPayment = PAYMENT_TYPES.find(p => p.value === paymentType)!;
+  const willCreateDebt  = paymentType === 'credit' || paymentType === 'pix_installment';
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -75,12 +111,43 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
           </button>
         </div>
 
+        {/* Payment Type Selector — always visible */}
+        <div className="mb-5">
+          <p className="text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">Tipo de Pagamento</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {PAYMENT_TYPES.map(p => (
+              <button
+                key={p.value}
+                onClick={() => setPaymentType(p.value)}
+                className="flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all duration-200"
+                style={{
+                  backgroundColor: paymentType === p.value ? `${p.color}18` : 'rgba(255,255,255,0.03)',
+                  borderColor: paymentType === p.value ? `${p.color}60` : 'rgba(255,255,255,0.08)',
+                  color: paymentType === p.value ? p.color : '#6b7280',
+                  boxShadow: paymentType === p.value ? `0 0 14px ${p.color}18` : 'none',
+                }}
+              >
+                <span style={{ color: paymentType === p.value ? p.color : '#6b7280' }}>{p.icon}</span>
+                <span className="text-xs font-bold">{p.label}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-textMuted mt-2 text-center">
+            {selectedPayment.description}
+            {willCreateDebt && (
+              <span className="ml-1.5 font-semibold" style={{ color: selectedPayment.color }}>
+                · Gera dívida automática ✦
+              </span>
+            )}
+          </p>
+        </div>
+
         {(state === 'idle' || state === 'dragging') && (
           <div
             onDragOver={e => { e.preventDefault(); setState('dragging'); }}
             onDragLeave={() => setState('idle')}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-xl p-12 flex flex-col items-center justify-center cursor-pointer transition-all duration-200 ${
+            className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center cursor-pointer transition-all duration-200 ${
               state === 'dragging'
                 ? 'border-primary bg-primary/10'
                 : 'border-white/10 hover:border-white/30 hover:bg-white/[0.02]'
@@ -88,17 +155,16 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             onClick={() => document.getElementById('file-input')?.click()}
           >
             <input id="file-input" type="file" accept=".ofx,.qfx,.csv" className="hidden" onChange={handleFileInput} />
-            <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 transition-colors ${
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-3 transition-colors ${
               state === 'dragging' ? 'bg-primary/20' : 'bg-white/5'
             }`}>
-              <Upload size={28} className={state === 'dragging' ? 'text-primary' : 'text-textMuted'} />
+              <Upload size={26} className={state === 'dragging' ? 'text-primary' : 'text-textMuted'} />
             </div>
             <p className="text-white font-semibold text-center mb-1">
               {state === 'dragging' ? 'Solte o arquivo aqui!' : 'Arraste seu extrato ou clique para buscar'}
             </p>
             <p className="text-textMuted text-sm text-center">Formatos aceitos: .OFX, .QFX, .CSV</p>
-
-            <div className="flex gap-3 mt-6">
+            <div className="flex gap-2 mt-4 flex-wrap justify-center">
               {['Nubank (.csv)', 'Itaú (.ofx)', 'Bradesco (.ofx)', 'BB (.ofx)', 'Inter (.csv)'].map(b => (
                 <span key={b} className="text-xs px-3 py-1 bg-white/5 border border-white/10 rounded-full text-textMuted">{b}</span>
               ))}
@@ -107,16 +173,16 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
         )}
 
         {state === 'loading' && (
-          <div className="flex flex-col items-center justify-center py-16">
+          <div className="flex flex-col items-center justify-center py-14">
             <Loader size={40} className="text-primary animate-spin mb-4" />
             <p className="text-white font-medium">Processando <span className="text-primary">{fileName}</span>...</p>
           </div>
         )}
 
         {state === 'error' && (
-          <div className="flex flex-col items-center justify-center py-12">
-            <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
-              <AlertCircle size={32} className="text-red-400" />
+          <div className="flex flex-col items-center justify-center py-10">
+            <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
+              <AlertCircle size={28} className="text-red-400" />
             </div>
             <p className="text-white font-semibold mb-2">Falha ao importar</p>
             <p className="text-textMuted text-sm text-center mb-6">{errorMsg}</p>
@@ -129,7 +195,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
         {state === 'success' && (
           <div>
             {/* Success summary */}
-            <div className="flex items-center justify-between mb-5 p-4 bg-accent/10 border border-accent/20 rounded-xl">
+            <div className="flex items-center justify-between mb-4 p-4 bg-accent/10 border border-accent/20 rounded-xl">
               <div className="flex items-center gap-3">
                 <CheckCircle size={20} className="text-accent shrink-0" />
                 <div>
@@ -144,7 +210,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
 
               <div className="flex flex-col gap-1 items-end">
                 <label className="text-[10px] text-textMuted uppercase font-bold pr-2">Importar para:</label>
-                <select 
+                <select
                   value={selectedAccountId}
                   onChange={e => setSelectedAccountId(e.target.value)}
                   className="bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-accent transition-colors cursor-pointer"
@@ -156,8 +222,26 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
               </div>
             </div>
 
+            {/* Auto-debt notice */}
+            {willCreateDebt && (
+              <div
+                className="mb-4 p-3 rounded-xl flex items-center gap-2.5 text-xs font-medium"
+                style={{
+                  backgroundColor: `${selectedPayment.color}12`,
+                  border: `1px solid ${selectedPayment.color}35`,
+                  color: selectedPayment.color,
+                }}
+              >
+                <span>{selectedPayment.icon}</span>
+                <span>
+                  Uma dívida de <strong>R$ {expense.toFixed(2).replace('.', ',')}</strong> será criada automaticamente
+                  na aba <strong>Dívidas</strong> como "{selectedPayment.label}".
+                </span>
+              </div>
+            )}
+
             {/* Preview table */}
-            <div className="max-h-64 overflow-y-auto rounded-xl border border-white/5">
+            <div className="max-h-52 overflow-y-auto rounded-xl border border-white/5">
               <table className="w-full text-left">
                 <thead className="sticky top-0 bg-card/80 backdrop-blur">
                   <tr className="text-xs text-textMuted uppercase tracking-wider">
@@ -188,14 +272,21 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-3 mt-5">
+            <div className="flex gap-3 mt-4">
               <button onClick={() => { setState('idle'); setPreview([]); }} className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm text-textMuted transition-colors">
                 Cancelar
               </button>
-              <button onClick={handleConfirm} className="flex-1 py-2.5 bg-primary hover:bg-primary/90 rounded-xl text-sm text-white font-semibold transition-colors shadow-lg shadow-primary/20">
+              <button
+                onClick={handleConfirm}
+                className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-all shadow-lg active:scale-95"
+                style={{
+                  background: `linear-gradient(135deg, ${selectedPayment.color}cc, ${selectedPayment.color}88)`,
+                  boxShadow: `0 4px 20px ${selectedPayment.color}30`,
+                }}
+              >
                 <div className="flex items-center justify-center gap-2">
                   <FileText size={16} />
-                  Importar {preview.length} transações
+                  Importar {preview.length} transações como {selectedPayment.label}
                 </div>
               </button>
             </div>

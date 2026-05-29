@@ -13,7 +13,7 @@ import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
-import type { Account, Debt, Transaction } from './types';
+import type { Account, Debt, Transaction, PaymentType } from './types';
 
 const CATEGORY_COLORS: Record<string, string> = {
   'Alimentação': '#f59e0b', 'Transporte': '#3b82f6', 'Lazer': '#a855f7',
@@ -97,12 +97,58 @@ export default function App() {
   };
 
   /* --- API Mappers --- */
-  const handleImport = async (newTxs: Transaction[]) => {
+  const handleImport = async (newTxs: Transaction[], paymentType: PaymentType) => {
     try {
-      const res = await fetchAPI('/api/transactions', 'POST', { transactions: newTxs });
+      // Attach paymentType to all transactions
+      const txsWithType = newTxs.map(t => ({ ...t, paymentType }));
+      const res = await fetchAPI('/api/transactions', 'POST', { transactions: txsWithType });
       if (res.success) {
         const txsData = await fetchAPI('/api/transactions');
         setTxs(txsData);
+
+        // Auto-create debt for credit or pix_installment payments
+        if (paymentType === 'credit' || paymentType === 'pix_installment') {
+          const expenseTxs = txsWithType.filter(t => t.amount < 0);
+          if (expenseTxs.length > 0) {
+            const totalExpense = expenseTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
+            const now = new Date();
+            const monthName = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+            const label = paymentType === 'credit' ? 'Crédito' : 'PIX Parcelado';
+            const category = paymentType === 'credit' ? 'Cartão de Crédito' : 'Pessoal';
+            // Due date: last day of current month
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            const nextDueDate = lastDay.toISOString().slice(0, 10);
+
+            // Build account hint from first tx
+            const accountId = txsWithType[0]?.accountId;
+            const accountName = accounts.find(a => a.id === accountId);
+            const debtName = accountName
+              ? `Fatura ${accountName.bank} – ${monthName}`
+              : `Fatura ${label} – ${monthName}`;
+
+            const newDebt = {
+              name: debtName,
+              description: `Criada automaticamente a partir de ${expenseTxs.length} transação(ões) importadas`,
+              category,
+              totalAmount: totalExpense,
+              paidAmount: 0,
+              monthlyPayment: totalExpense,
+              totalInstallments: 1,
+              paidInstallments: 0,
+              nextDueDate,
+              interestRate: 0,
+              accountId: accountId || undefined,
+              subItems: expenseTxs.map(t => ({
+                id: String(Math.random()),
+                name: t.name,
+                amount: Math.abs(t.amount),
+                date: t.date,
+              }))
+            };
+            const createdDebt = await fetchAPI('/api/debts', 'POST', newDebt);
+            setDebts(prev => [...prev, createdDebt]);
+          }
+        }
       }
     } catch (e: any) { alert("Erro ao importar: " + e.message); }
   };
@@ -563,7 +609,7 @@ export default function App() {
         </div>
       </main>
 
-      {showImport && <ImportModal accounts={accounts} onClose={() => setShowImport(false)} onImport={handleImport} />}
+      {showImport && <ImportModal accounts={accounts} onClose={() => setShowImport(false)} onImport={(txs, pt) => handleImport(txs, pt)} />}
     </div>
   );
 }
@@ -587,6 +633,13 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: any) {
   );
 }
 
+const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
+  debit:           { label: 'Débito',       color: '#3b82f6' },
+  credit:          { label: 'Crédito',      color: '#ec4899' },
+  pix:             { label: 'PIX',          color: '#10b981' },
+  pix_installment: { label: 'PIX Parc.',    color: '#f59e0b' },
+};
+
 function TxTable({ rows }: { rows: Transaction[] }) {
   return (
     <div className="overflow-x-auto min-h-[400px]">
@@ -596,29 +649,45 @@ function TxTable({ rows }: { rows: Transaction[] }) {
             <th className="pb-3 font-semibold w-24">Data</th>
             <th className="pb-3 font-semibold">Descrição</th>
             <th className="pb-3 font-semibold">Categoria</th>
+            <th className="pb-3 font-semibold">Tipo</th>
             <th className="pb-3 font-semibold text-right">Valor</th>
           </tr>
         </thead>
         <tbody className="text-sm divide-y divide-white/5">
-          {rows.map(t => (
-            <tr key={t.id} className="group hover:bg-white/[0.02] transition-colors">
-              <td className="py-4 text-textMuted">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
-              <td className="py-4 font-medium text-white">{t.name}</td>
-              <td className="py-4">
-                <span className="px-2.5 py-1 rounded-full text-xs border"
-                  style={{
-                    backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'rgba(255,255,255,0.05)',
-                    borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'rgba(255,255,255,0.1)',
-                    color: CATEGORY_COLORS[t.category] || '#9ca3af'
-                  }}>
-                  {t.category}
-                </span>
-              </td>
-              <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
-                {t.amount >= 0 ? '+' : ''}{t.amount.toLocaleString('pt-BR', { minimumFractionDigits:2 })}
-              </td>
-            </tr>
-          ))}
+          {rows.map(t => {
+            const pt = PAYMENT_TYPE_META[t.paymentType ?? 'debit'] ?? PAYMENT_TYPE_META['debit'];
+            return (
+              <tr key={t.id} className="group hover:bg-white/[0.02] transition-colors">
+                <td className="py-4 text-textMuted">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                <td className="py-4 font-medium text-white">{t.name}</td>
+                <td className="py-4">
+                  <span className="px-2.5 py-1 rounded-full text-xs border"
+                    style={{
+                      backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'rgba(255,255,255,0.05)',
+                      borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'rgba(255,255,255,0.1)',
+                      color: CATEGORY_COLORS[t.category] || '#9ca3af'
+                    }}>
+                    {t.category}
+                  </span>
+                </td>
+                <td className="py-4">
+                  <span
+                    className="px-2.5 py-1 rounded-full text-xs font-semibold border"
+                    style={{
+                      backgroundColor: `${pt.color}15`,
+                      borderColor: `${pt.color}35`,
+                      color: pt.color,
+                    }}
+                  >
+                    {pt.label}
+                  </span>
+                </td>
+                <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
+                  {t.amount >= 0 ? '+' : ''}{t.amount.toLocaleString('pt-BR', { minimumFractionDigits:2 })}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -47,6 +47,7 @@ model Transaction {
   category    String
   date        String
   amount      Float
+  paymentType String   @default("debit")
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id])

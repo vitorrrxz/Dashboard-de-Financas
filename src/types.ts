@@ -1,12 +1,15 @@
 // Shared types for the finance dashboard
 
+export type PaymentType = 'debit' | 'credit' | 'pix' | 'pix_installment';
+
 export interface Transaction {
   id: string;
   name: string;
   category: string;
   date: string;
   amount: number;
-  accountId?: string; // Link to an Account
+  accountId?: string;    // Link to an Account
+  paymentType?: PaymentType;
 }
 
 export type AccountType = 'checking' | 'savings' | 'credit' | 'investment' | 'cash';
