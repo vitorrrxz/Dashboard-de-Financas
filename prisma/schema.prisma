@@ -42,7 +42,8 @@ model Transaction {
   id          String   @id @default(uuid())
   userId      String
   accountId   String?
-  pluggyId    String?  
+  pluggyId    String?
+  importHash  String?  // chave de deduplicação de importações manuais (CSV/OFX) — ver FIN-003
   name        String
   category    String
   date        String
@@ -52,6 +53,8 @@ model Transaction {
 
   user        User     @relation(fields: [userId], references: [id])
   account     Account? @relation(fields: [accountId], references: [id])
+
+  @@index([userId, importHash])
 }
 
 model Debt {

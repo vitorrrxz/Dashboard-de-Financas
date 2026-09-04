@@ -104,6 +104,9 @@ export default function App() {
       const txsWithType = newTxs.map(t => ({ ...t, paymentType }));
       const res = await fetchAPI('/api/transactions', 'POST', { transactions: txsWithType });
       if (res.success) {
+        if (res.skipped > 0) {
+          alert(`${res.count} transação(ões) importada(s). ${res.skipped} ignorada(s) por já existir (duplicata).`);
+        }
         const txsData = await fetchAPI('/api/transactions');
         setTxs(txsData);
 

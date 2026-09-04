@@ -17,15 +17,14 @@
 - [x] Corrigir `JWT_SECRET` com fallback inseguro hardcoded (FIN-006)
 - [x] Corrigir sync Pluggy que nao atualiza fatura pendente de cartao de credito (FIN-001)
 - [x] Corrigir mapeamento de tipo de conta importada via Pluggy (FIN-002)
-- [ ] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
+- [x] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
 - [ ] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
 
-Status validado em 2026-09-04:
-- FIN-006 concluida: `server.js` agora recusa subir sem `JWT_SECRET` valido (>=32 caracteres); testado com e sem `.env`, login continua funcionando normalmente.
-- FIN-001 concluida: sync agora busca a fatura real via `pluggyClient.fetchCreditCardBills(accountId)` e grava em `pendingBill` a fatura mais recentemente fechada. Validado ponta a ponta contra o sandbox real da Pluggy: `pendingBill` passou de `null` para `5000` (valor correto).
-- FIN-002 concluida: criada `mapPluggyAccountType()` em `server.js`, usando `type`+`subtype` reais da Pluggy (`BANK`/`CREDIT` + `CHECKING_ACCOUNT`/`SAVINGS_ACCOUNT`) em vez de `pluggyAcc.type.toLowerCase()`. Validado contra o mesmo sandbox: conta corrente sincronizada agora vem com `type:"checking"` (antes vinha `"bank"`, valor invalido que quebrava icone/rotulo no frontend); cartao continua `type:"credit"`. Teste rodado contra banco SQLite isolado (`test_fin002.db`, removido ao final), sem tocar no `dev.db` real.
-- Nota operacional (FIN-001): durante aquele teste, `dev.db` foi apagado por engano e precisou ser restaurado via `git checkout -- dev.db` (felizmente estava versionado). A partir da validacao do FIN-002, passou a usar banco de teste isolado (`DATABASE_URL` apontando para um arquivo `.db` proprio) para nunca mais repetir esse risco.
-- Proxima tarefa: FIN-003.
+Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- FIN-006, FIN-001, FIN-002, FIN-003 concluidas e validadas (as 3 ultimas com testes ponta a ponta contra sandbox Pluggy real / banco SQLite isolado).
+- FIN-003: nova coluna `importHash` em `Transaction` + dedupe no `POST /api/transactions`; reimportar o mesmo extrato agora ignora as transacoes repetidas (testado: reimportacao total, parcial e duplicata dentro do mesmo lote).
+- Novo achado registrado: FIN-089 (2 erros de `tsc` pre-existentes em `App.tsx`, nao relacionados as tarefas concluidas).
+- Proxima tarefa: FIN-004.
 
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
@@ -98,6 +97,7 @@ Status validado em 2026-09-04:
 - [ ] Extrair calculo financeiro (`stats`) de `App.tsx` para modulo/hook dedicado (FIN-086, depende de FIN-034)
 - [ ] Centralizar padrao de formulario (`FormField`) entre AccountsManager e DebtManager (FIN-087)
 - [ ] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
+- [ ] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
 
 ## Fase 3 - Planejamento Financeiro (Orcamento)
 

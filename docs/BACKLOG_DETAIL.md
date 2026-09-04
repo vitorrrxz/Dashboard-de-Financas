@@ -181,7 +181,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P0 — FIN-003 — Importação manual de extrato (CSV/OFX) não verifica duplicidade de transações**
+- [x] **P0 — FIN-003 — Importação manual de extrato (CSV/OFX) não verifica duplicidade de transações** ✅ Concluída
 
   **Objetivo**
   Impedir que reimportar o mesmo extrato (ou um extrato com transações sobrepostas) gere transações duplicadas no banco.
@@ -216,9 +216,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que a segunda importação não duplica as transações (contagem de transações no banco permanece igual).
 
   **Critérios de aceite**
-  - [ ] Reimportar o mesmo arquivo não cria transações duplicadas.
-  - [ ] Importar um arquivo com transações parcialmente novas importa apenas as novas.
-  - [ ] Frontend informa ao usuário quantas transações foram ignoradas por duplicidade.
+  - [x] Reimportar o mesmo arquivo não cria transações duplicadas.
+  - [x] Importar um arquivo com transações parcialmente novas importa apenas as novas.
+  - [x] Frontend informa ao usuário quantas transações foram ignoradas por duplicidade.
+
+  **Nota de implementação (04/09/2026)**
+  A chave de dedupe (`importHash`) foi computada **no backend** (não no parser, como a descrição original sugeria) a partir de `userId + accountId + date + amount + name`, via SHA-256 (`computeImportHash()` em `server.js`) — mesmos dados que o parser já produz, evitando duplicar a lógica de hash em duas linguagens/camadas. Também trata duplicata **dentro do próprio lote** importado (ex.: CSV com a mesma linha repetida), não só contra o que já existe no banco. Novo campo opcional `importHash` em `Transaction` (schema.prisma), com índice `@@index([userId, importHash])`. `POST /api/transactions` agora retorna `{ success, count, skipped }`; `App.tsx` mostra um alerta quando `skipped > 0`.
+
+  **Validação executada**
+  Contra banco SQLite isolado (`test_fin003.db`, removido ao final). 4 cenários via chamadas HTTP reais: (1) importar 2 transações novas → `count:2, skipped:0`; (2) reimportar exatamente as mesmas → `count:0, skipped:2`; (3) importar 1 repetida + 1 nova → `count:1, skipped:1`; (4) importar um lote com 2 linhas idênticas entre si → `count:1, skipped:1`. Total final no banco: 4 transações únicas, sem duplicatas. `npx tsc -b --noEmit` e `npx eslint src/App.tsx` rodados após a mudança — sem novos erros (2 erros de tipo pré-existentes em `App.tsx`, confirmados via `git stash` como anteriores a esta tarefa, viraram FIN-089).
 
 ---
 
@@ -1551,6 +1557,8 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 **Dependências:** FIN-086 depende de FIN-034 para ter cobertura de teste antes/depois da extração (evitar regressão silenciosa). FIN-087 não tem dependências. FIN-088 depende de FIN-005.
 
+- FIN-089 — `npx tsc -b --noEmit` falha com 2 erros de tipo em `App.tsx` (linhas ~506/526, tooltips do Recharts: `Formatter<ValueType, NameType>` incompatível com `(v: number) => [string, string]`). Pré-existente, confirmado via `git stash` antes de qualquer trabalho da Fase 0 — não bloqueia `npm run build` nem `npm run dev`, mas quebra checagem de tipo isolada. Corrigir tipando o formatter conforme os genéricos do Recharts (`ValueType`, `NameType`).
+
 ---
 
 # 📊 Resumo
@@ -1589,11 +1597,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-003 — Importação manual de extrato (CSV/OFX) não verifica duplicidade de transações**
+**FIN-004 — Reimportar extrato de crédito/PIX parcelado cria uma nova dívida duplicada a cada vez**
 
 ### Por quê?
 
-FIN-006, FIN-001 e FIN-002 foram concluídas em 04/09/2026, todas validadas ponta a ponta (as duas últimas contra o sandbox real da Pluggy). Das tarefas P0 restantes, FIN-003 é a próxima na ordem do documento — resolve um bug de duplicação de dados financeiros na importação manual (CSV/OFX), e é pré-requisito de FIN-004 (que depende dela).
+FIN-006, FIN-001, FIN-002 e FIN-003 concluídas em 04/09/2026. FIN-004 depende diretamente de FIN-003 (agora satisfeita) e fecha o último bug P0 de duplicação — falta apenas FIN-005 (dívida vencida) para a Fase 0 estar 100% concluída.
 
 ### Bloqueios
 

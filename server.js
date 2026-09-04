@@ -6,6 +6,7 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PluggyClient } from 'pluggy-sdk';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -50,6 +51,20 @@ function mapPluggyAccountType(pluggyAcc) {
     return pluggyAcc.subtype === 'SAVINGS_ACCOUNT' ? 'savings' : 'checking';
   }
   return 'checking';
+}
+
+// Chave determinística de deduplicação para importação manual (CSV/OFX) — ver FIN-003.
+// Baseada em conta + data + valor + nome (não em `id`, que é gerado aleatoriamente no
+// cliente a cada parse e por isso não serve para detectar reimportação do mesmo extrato).
+function computeImportHash(userId, tx) {
+  const key = [
+    userId,
+    tx.accountId || '',
+    tx.date || '',
+    Number(tx.amount).toFixed(2),
+    String(tx.name || '').trim().toLowerCase(),
+  ].join('|');
+  return crypto.createHash('sha256').update(key).digest('hex');
 }
 
 // Middleware de autenticação
@@ -194,15 +209,39 @@ app.get('/api/transactions', authenticateToken, async (req, res) => {
 
 app.post('/api/transactions', authenticateToken, async (req, res) => {
   try {
-    const { transactions } = req.body; 
+    const { transactions } = req.body;
     // Supports batch insert
     if (Array.isArray(transactions)) {
+      const userId = req.user.userId;
       const mapped = transactions.map(t => {
         const { id, ...rest } = t;
-        return { ...rest, userId: req.user.userId };
+        const data = { ...rest, userId };
+        data.importHash = computeImportHash(userId, data);
+        return data;
       });
-      await prisma.transaction.createMany({ data: mapped });
-      res.json({ success: true, count: mapped.length });
+
+      // Filtra transações cuja chave de deduplicação já existe para este usuário —
+      // evita duplicar dados ao reimportar o mesmo extrato (ver FIN-003).
+      const hashes = mapped.map(t => t.importHash);
+      const existing = await prisma.transaction.findMany({
+        where: { userId, importHash: { in: hashes } },
+        select: { importHash: true },
+      });
+      // Também descarta duplicatas dentro do próprio arquivo importado (ex.: mesma
+      // linha repetida no CSV), não só as que já existem no banco.
+      const seenHashes = new Set(existing.map(e => e.importHash));
+      const newTxs = [];
+      for (const t of mapped) {
+        if (seenHashes.has(t.importHash)) continue;
+        seenHashes.add(t.importHash);
+        newTxs.push(t);
+      }
+      const skipped = mapped.length - newTxs.length;
+
+      if (newTxs.length > 0) {
+        await prisma.transaction.createMany({ data: newTxs });
+      }
+      res.json({ success: true, count: newTxs.length, skipped });
     } else {
       const data = { ...req.body, userId: req.user.userId };
       if (data.id) delete data.id;
