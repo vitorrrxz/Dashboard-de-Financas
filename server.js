@@ -372,6 +372,31 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
         });
       }
 
+      // Para cartões de crédito, busca a fatura real via endpoint dedicado da Pluggy
+      // e atualiza `pendingBill` — não é possível inferir a fatura a partir de `balance`
+      // para contas do tipo CREDIT (ver FIN-001 em docs/BACKLOG_DETAIL.md).
+      if (pluggyAcc.type === 'CREDIT') {
+        try {
+          const billsRes = await pluggyClient.fetchCreditCardBills(pluggyAcc.id);
+          const bills = billsRes?.results ?? [];
+          if (bills.length > 0) {
+            // A fatura pendente é a mais recentemente fechada (maior billClosingDate/dueDate) —
+            // não a de menor data, que representaria uma fatura antiga já superada.
+            const currentBill = [...bills].sort((a, b) => {
+              const dateA = new Date(a.billClosingDate ?? a.dueDate).getTime();
+              const dateB = new Date(b.billClosingDate ?? b.dueDate).getTime();
+              return dateB - dateA;
+            })[0];
+            await prisma.account.updateMany({
+              where: { id: localAccount.id, userId },
+              data: { pendingBill: currentBill.totalAmount },
+            });
+          }
+        } catch (billError) {
+          console.error(`Erro ao buscar fatura do cartão (accountId=${pluggyAcc.id}):`, billError);
+        }
+      }
+
       // Busca transações do último mês
       const oneMonthAgo = new Date();
       oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
