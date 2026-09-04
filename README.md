@@ -22,39 +22,86 @@ O **FinFlow** é um sistema completo e moderno para controle e gestão de finan�
 
 ---
 
-## ✨ Funcionalidades Principais
+## ✨ Funcionalidades
 
-1. **Autenticação Segura**:
-   * Tela de Login e Cadastro de Usuário de fácil uso.
-   * Senhas salvas de forma segura no banco SQLite usando hashing (bcrypt).
-   * Controle de sessão utilizando tokens JWT com validade de 7 dias.
+Checklist completo do que um dashboard de finanças pessoais deve oferecer. Itens marcados com ✅ já estão implementados no FinFlow; itens com ⬜ são sugestões de evolução (roadmap) para deixar o produto ainda mais completo.
 
-2. **Dashboard Interativo (Visão Geral)**:
-   * Filtro global de visualização por conta/cartão específica ou consolidado.
-   * Indicadores de **Saldo Real** (somatório de contas correntes, poupanças, carteira), **Faturas Pendentes** de cartões de crédito e **Dívidas Ativas**.
-   * Resumo de total de Receitas, Despesas e Gastos do mês corrente.
-   * Gráficos dinâmicos com alternância de períodos (últimos 30 dias com evolução diária ou histórico de saldo por mês).
-   * Alertas visuais em caso de dívidas vencidas e não quitadas.
+### Implementado ✅
 
-3. **Gestão de Contas e Cartões (CRUD)**:
-   * Criação, edição e exclusão de contas do tipo: Corrente, Poupança, Cartão de Crédito, Investimento e Dinheiro.
-   * Para cartões de crédito, permite cadastrar limite total, dia de vencimento, dia de fechamento e valor da fatura pendente.
-   * Cores personalizáveis para cada conta cadastrada.
+1. **Autenticação e Segurança**
+   - ✅ Cadastro e login de usuário.
+   - ✅ Senhas com hashing seguro (bcrypt) — nunca armazenadas em texto puro.
+   - ✅ Sessão via JWT (token com validade de 7 dias), guardado no `localStorage`.
+   - ✅ Todas as rotas de dados protegidas por middleware de autenticação, isolando os dados por usuário.
 
-4. **Importação Manual de Extratos**:
-   * Suporte nativo para importação de extratos bancários nos formatos **CSV** e **OFX**.
-   * Filtro e mapeamento automático inteligente de transações durante a importação.
+2. **Dashboard / Visão Geral**
+   - ✅ Cards de resumo: Saldo Real, Fatura Pendente, Dívidas Ativas, Receitas, Despesas e Gastos do mês corrente.
+   - ✅ Filtro global por conta/cartão específico ou consolidado.
+   - ✅ Gráfico de fluxo financeiro com alternância entre "últimos 30 dias" (evolução diária) e "histórico" (saldo por mês).
+   - ✅ Gráfico de despesas por categoria (barras horizontais, cores por categoria).
+   - ✅ Alerta visual de dívidas vencidas e não quitadas.
+   - ✅ Estado vazio (onboarding) guiando o usuário a cadastrar conta/importar extrato.
 
-5. **Controle de Transações**:
-   * Tabela organizada de transações com categorização colorida.
-   * Filtros rápidos para visualização de: Todas, apenas Receitas ou apenas Despesas.
-   * Busca em tempo real por descrição ou categoria.
-   * Opção para limpar todo o histórico de transações vinculadas ao usuário.
+3. **Contas e Cartões (CRUD)**
+   - ✅ Tipos: Corrente, Poupança, Cartão de Crédito, Investimento e Dinheiro.
+   - ✅ Para cartões: limite total, dia de fechamento, dia de vencimento e valor da fatura pendente.
+   - ✅ Cor personalizável por conta.
+   - ✅ Edição e exclusão de contas já cadastradas.
 
-6. **Gerenciador de Dívidas**:
-   * Controle refinado de parcelamentos e passivos a longo prazo.
-   * Detalhamento com valor total da dívida, valor já pago, valor de cada parcela mensal, número de parcelas (pagas vs. totais), taxa de juros e próxima data de vencimento.
-   * Suporte a importação de sub-itens vinculados à dívida.
+4. **Transações**
+   - ✅ Importação manual de extratos em **CSV** e **OFX**, com mapeamento automático de colunas/campos.
+   - ✅ Classificação por tipo de pagamento (Débito, Crédito, PIX, PIX Parcelado).
+   - ✅ Criação automática de dívida/fatura ao importar transações de crédito ou PIX parcelado.
+   - ✅ Tabela com categorização colorida, filtro (Todas / Receitas / Despesas) e busca em tempo real por descrição ou categoria.
+   - ✅ Lançamento manual e exclusão em lote do histórico de transações.
+
+5. **Dívidas e Parcelamentos**
+   - ✅ Valor total, valor pago, parcela mensal, parcelas pagas vs. totais, taxa de juros e próxima data de vencimento.
+   - ✅ Sub-itens vinculados a cada dívida (ex.: itens de uma fatura).
+   - ✅ Vínculo opcional da dívida a uma conta/cartão.
+
+6. **Open Finance (Pluggy)**
+   - ✅ Conexão de contas bancárias reais via widget da Pluggy.
+   - ✅ Sincronização de saldo de contas e importação idempotente de transações (últimos 30 dias).
+
+### Roadmap sugerido ⬜
+
+Funcionalidades comuns em dashboards financeiros maduros que ainda não existem neste projeto — boas candidatas para próximas iterações:
+
+7. **Planejamento financeiro**
+   - ⬜ Orçamento (budget) mensal por categoria, com barra de progresso e alerta ao estourar o limite.
+   - ⬜ Metas financeiras (ex.: "Juntar R$10.000 até dezembro") com acompanhamento de progresso.
+   - ⬜ Transações recorrentes (assinaturas, salário, aluguel) com lançamento automático e lembrete de vencimento.
+   - ⬜ Projeção de saldo futuro com base em recorrências e dívidas em aberto.
+
+8. **Relatórios e exportação**
+   - ⬜ Exportação de relatórios em PDF/Excel/CSV.
+   - ⬜ Comparativo mês a mês / ano a ano de receitas e despesas.
+   - ⬜ Relatório de patrimônio líquido (net worth) somando contas, investimentos e dívidas.
+
+9. **Notificações e alertas**
+   - ⬜ Notificações por e-mail/push para vencimento de faturas e dívidas.
+   - ⬜ Central de notificações (o sino no header hoje é apenas visual).
+   - ⬜ Alertas de gastos incomuns ou acima da média por categoria.
+
+10. **Personalização e organização**
+    - ⬜ Categorias e subcategorias customizáveis pelo usuário (hoje são fixas no código).
+    - ⬜ Tags e anotações em transações.
+    - ⬜ Edição inline de transações importadas (hoje só é possível excluir tudo em lote).
+    - ⬜ Tema claro (o app hoje é fixo em modo escuro).
+
+11. **Investimentos e multi-moeda**
+    - ⬜ Acompanhamento de carteira de investimentos (renda fixa, ações, cripto).
+    - ⬜ Suporte a múltiplas moedas e conversão automática.
+
+12. **Colaboração e acesso**
+    - ⬜ Compartilhamento de conta/orçamento entre membros da família.
+    - ⬜ Autenticação em duas etapas (2FA).
+    - ⬜ Backup/restore e exportação completa dos dados do usuário.
+
+13. **Experiência mobile**
+    - ⬜ Layout responsivo dedicado a mobile (o sidebar atual é ocultado em telas pequenas, sem navegação alternativa).
+    - ⬜ PWA instalável.
 
 ---
 
@@ -77,6 +124,10 @@ DATABASE_URL="file:./dev.db"
 
 # Chave secreta para assinatura dos tokens JWT do usuário
 JWT_SECRET="chave_secreta_finance_app"
+
+# Credenciais da Pluggy (Open Finance) — necessárias apenas para conectar bancos reais
+PLUGGY_CLIENT_ID=""
+PLUGGY_CLIENT_SECRET=""
 ```
 
 ### Passo 3: Geração do Prisma Client e Banco de Dados
