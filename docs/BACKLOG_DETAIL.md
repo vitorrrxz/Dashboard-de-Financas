@@ -228,7 +228,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P0 — FIN-004 — Reimportar extrato de crédito/PIX parcelado cria uma nova dívida duplicada a cada vez**
+- [x] **P0 — FIN-004 — Reimportar extrato de crédito/PIX parcelado cria uma nova dívida duplicada a cada vez** ✅ Concluída
 
   **Objetivo**
   Evitar que a criação automática de dívida a partir de importação (crédito/PIX parcelado) gere dívidas duplicadas quando o mesmo extrato é importado mais de uma vez.
@@ -251,8 +251,14 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que apenas uma dívida "Fatura X – mês/ano" existe após as duas importações.
 
   **Critérios de aceite**
-  - [ ] Reimportar o mesmo extrato de crédito/PIX parcelado não cria uma segunda dívida para o mesmo período/conta.
-  - [ ] O usuário é avisado quando uma importação repetida é detectada.
+  - [x] Reimportar o mesmo extrato de crédito/PIX parcelado não cria uma segunda dívida para o mesmo período/conta.
+  - [x] O usuário é avisado quando uma importação repetida é detectada.
+
+  **Nota de implementação (04/09/2026)**
+  Duas proteções em `App.tsx` (`handleImport`): (1) o bloco de auto-criação de dívida só roda se `res.count > 0` (nada de novo foi de fato importado — reimportação 100% duplicada, já filtrada pelo FIN-003, não cria dívida); (2) antes de criar, verifica em `debts` (estado já carregado) se já existe uma dívida com o mesmo `name` (`Fatura {banco} – {mês/ano}`) e `accountId` — se existir, mostra `alert` e não cria outra.
+
+  **Validação executada**
+  Backend (via API real, banco isolado `test_fin004.db`): reimportar o mesmo extrato de crédito duas vezes confirma `count:0` na segunda vez — condição que, no código, bloqueia toda a criação de dívida. Lógica de deduplicação por nome+conta testada isoladamente (script Node reproduzindo a mesma expressão usada em `App.tsx`) em 3 cenários: sem dívida prévia → cria; mesma fatura/conta já existe → bloqueia; mesmo nome em conta diferente → não bloqueia (contas diferentes podem ter fatura com nome igual no mesmo mês). `npx tsc -b --noEmit` e `npx eslint src/App.tsx` sem novos erros (os 2 erros pré-existentes de FIN-089 persistem, agora em linhas 519/539).
 
 ---
 
@@ -1597,11 +1603,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-004 — Reimportar extrato de crédito/PIX parcelado cria uma nova dívida duplicada a cada vez**
+**FIN-005 — Cálculo de "dívida vencida" inconsistente e com risco de bug de fuso horário**
 
 ### Por quê?
 
-FIN-006, FIN-001, FIN-002 e FIN-003 concluídas em 04/09/2026. FIN-004 depende diretamente de FIN-003 (agora satisfeita) e fecha o último bug P0 de duplicação — falta apenas FIN-005 (dívida vencida) para a Fase 0 estar 100% concluída.
+FIN-006, FIN-001, FIN-002, FIN-003 e FIN-004 concluídas em 04/09/2026. FIN-005 é a última tarefa P0 — concluí-la fecha 100% a Fase 0 (Bugs Críticos) do `TODO.md`.
 
 ### Bloqueios
 

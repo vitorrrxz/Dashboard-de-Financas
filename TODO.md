@@ -18,13 +18,13 @@
 - [x] Corrigir sync Pluggy que nao atualiza fatura pendente de cartao de credito (FIN-001)
 - [x] Corrigir mapeamento de tipo de conta importada via Pluggy (FIN-002)
 - [x] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
-- [ ] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
+- [x] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
 
 Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
-- FIN-006, FIN-001, FIN-002, FIN-003 concluidas e validadas (as 3 ultimas com testes ponta a ponta contra sandbox Pluggy real / banco SQLite isolado).
-- FIN-003: nova coluna `importHash` em `Transaction` + dedupe no `POST /api/transactions`; reimportar o mesmo extrato agora ignora as transacoes repetidas (testado: reimportacao total, parcial e duplicata dentro do mesmo lote).
+- FIN-006, FIN-001, FIN-002, FIN-003, FIN-004 concluidas e validadas.
+- FIN-004: `handleImport` (App.tsx) so cria divida automatica se `res.count > 0` e se ainda nao existir divida com mesmo nome/conta.
 - Novo achado registrado: FIN-089 (2 erros de `tsc` pre-existentes em `App.tsx`, nao relacionados as tarefas concluidas).
-- Proxima tarefa: FIN-004.
+- Proxima tarefa: FIN-005 (ultima P0 da Fase 0).
 
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
