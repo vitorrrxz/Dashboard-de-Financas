@@ -141,7 +141,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P0 — FIN-002 — Tipo de conta importado via Pluggy não corresponde ao enum `AccountType` do frontend**
+- [x] **P0 — FIN-002 — Tipo de conta importado via Pluggy não corresponde ao enum `AccountType` do frontend** ✅ Concluída
 
   **Objetivo**
   Mapear corretamente o `type` retornado pela Pluggy para um dos valores válidos de `AccountType` (`checking | savings | credit | investment | cash`) antes de gravar no banco.
@@ -170,8 +170,14 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Verificar visualmente no frontend que ícone e rótulo aparecem corretamente para contas sincronizadas.
 
   **Critérios de aceite**
-  - [ ] Toda conta criada via sync Pluggy tem um `type` dentre os 5 valores válidos de `AccountType`.
-  - [ ] Nenhuma conta sincronizada aparece com rótulo/ícone quebrado no frontend.
+  - [x] Toda conta criada via sync Pluggy tem um `type` dentre os 5 valores válidos de `AccountType`.
+  - [x] Nenhuma conta sincronizada aparece com rótulo/ícone quebrado no frontend.
+
+  **Nota de implementação (04/09/2026)**
+  Investigando o SDK (`node_modules/pluggy-sdk/dist/types/account.d.ts`), confirmou-se que `pluggyAcc.type` só assume dois valores reais: `"BANK"` ou `"CREDIT"` (`ACCOUNT_TYPES = ["BANK", "CREDIT"]`) — não existe um valor `"INVESTMENT"` nesse campo como a descrição original da tarefa supunha. A distinção entre conta corrente e poupança vem de um campo separado, `pluggyAcc.subtype` (`"CHECKING_ACCOUNT"` | `"SAVINGS_ACCOUNT"` | `"CREDIT_CARD"`). A função `mapPluggyAccountType()` criada em `server.js` usa os dois campos: `CREDIT` → `credit`; `BANK` + `subtype === 'SAVINGS_ACCOUNT'` → `savings`; qualquer outro `BANK` → `checking`; fallback → `checking`. Contas de investimento não aparecem em `fetchAccounts` (têm endpoint próprio, `fetchInvestments` — fora do escopo desta tarefa, relacionado a FIN-070).
+
+  **Validação executada**
+  Contra o mesmo item sandbox real usado em FIN-001 (`618baddd-...`, conector "Pluggy Bank"), rodado desta vez contra um banco SQLite **isolado** (`DATABASE_URL=file:./test_fin002.db`, arquivo removido ao final) para não repetir o incidente de FIN-001 com `dev.db`. Resultado via `GET /api/accounts` após `sync`: a conta "Conta Corrente" (`BANK`/`CHECKING_ACCOUNT`) passou a vir com `type: "checking"` (antes: `"bank"`, valor inválido); a conta "Mastercard Black" (`CREDIT`) permaneceu `type: "credit"`, com `pendingBill: 5000` (FIN-001 continua funcionando em conjunto). Não havia conta `SAVINGS_ACCOUNT` disponível no item sandbox gerado para testar esse branch especificamente, mas a lógica usa o valor de enum exato documentado no próprio SDK, sem inferência.
 
 ---
 
@@ -1583,11 +1589,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-002 — Tipo de conta importado via Pluggy não corresponde ao enum `AccountType` do frontend**
+**FIN-003 — Importação manual de extrato (CSV/OFX) não verifica duplicidade de transações**
 
 ### Por quê?
 
-FIN-006 (JWT_SECRET inseguro) e FIN-001 (fatura de cartão não atualizada no sync) foram concluídas em 04/09/2026, ambas validadas ponta a ponta contra o sandbox real da Pluggy. Das tarefas P0 restantes (FIN-002 a FIN-005), FIN-002 é a próxima na ordem do documento, tem escopo pequeno e isolado (mesmo arquivo/rota já tocados em FIN-001) e corrige outro dado incorreto gravado pelo mesmo fluxo de sincronização — faz sentido resolver em sequência antes de sair de `server.js`.
+FIN-006, FIN-001 e FIN-002 foram concluídas em 04/09/2026, todas validadas ponta a ponta (as duas últimas contra o sandbox real da Pluggy). Das tarefas P0 restantes, FIN-003 é a próxima na ordem do documento — resolve um bug de duplicação de dados financeiros na importação manual (CSV/OFX), e é pré-requisito de FIN-004 (que depende dela).
 
 ### Bloqueios
 

@@ -38,6 +38,20 @@ const pluggyClient = new PluggyClient({
   clientSecret: process.env.PLUGGY_CLIENT_SECRET || '',
 });
 
+// Mapeia o `type`/`subtype` retornado pela Pluggy para o enum AccountType do frontend
+// (checking | savings | credit | investment | cash). A Pluggy só retorna `type` como
+// "BANK" ou "CREDIT" (ver node_modules/pluggy-sdk/dist/types/account.d.ts) — a distinção
+// entre conta corrente e poupança vem do `subtype` ("CHECKING_ACCOUNT"/"SAVINGS_ACCOUNT").
+// Sem esse mapeamento, `pluggyAcc.type.toLowerCase()` gerava "bank", que não é nenhum
+// AccountType válido e quebrava ícone/rótulo no frontend (ver FIN-002 em docs/BACKLOG_DETAIL.md).
+function mapPluggyAccountType(pluggyAcc) {
+  if (pluggyAcc.type === 'CREDIT') return 'credit';
+  if (pluggyAcc.type === 'BANK') {
+    return pluggyAcc.subtype === 'SAVINGS_ACCOUNT' ? 'savings' : 'checking';
+  }
+  return 'checking';
+}
+
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -360,7 +374,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
             pluggyId: pluggyAcc.id,
             name: pluggyAcc.name,
             bank: pluggyAcc.marketingName || 'Banco Conectado',
-            type: pluggyAcc.type.toLowerCase(),
+            type: mapPluggyAccountType(pluggyAcc),
             balance: pluggyAcc.balance,
             color: '#6366f1',
           }
