@@ -18,7 +18,19 @@ const adapter = new PrismaBetterSqlite3({
   url: process.env.DATABASE_URL || 'file:./dev.db',
 });
 const prisma = new PrismaClient({ adapter });
-const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_finance_app';
+
+// JWT_SECRET é obrigatório — sem fallback. Um valor hardcoded no código-fonte
+// tornaria trivial forjar tokens válidos para qualquer usuário (ver FIN-006 no TODO.md).
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  console.error(
+    '\n❌ JWT_SECRET ausente ou fraco (mínimo 32 caracteres).\n' +
+    '   Defina JWT_SECRET no arquivo .env antes de iniciar o servidor.\n' +
+    '   Para gerar uma chave segura, rode:\n' +
+    '   node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"\n'
+  );
+  process.exit(1);
+}
 
 // Pluggy Client — inicializado com as credenciais do .env
 const pluggyClient = new PluggyClient({
