@@ -15,14 +15,16 @@
 ## Fase 0 - Bugs Criticos (P0)
 
 - [x] Corrigir `JWT_SECRET` com fallback inseguro hardcoded (FIN-006)
-- [ ] Corrigir sync Pluggy que nao atualiza fatura pendente de cartao de credito (FIN-001)
-- [ ] Corrigir mapeamento de tipo de conta importada via Pluggy (FIN-002)
-- [ ] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
-- [ ] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
+- [x] Corrigir sync Pluggy que nao atualiza fatura pendente de cartao de credito (FIN-001)
+- [x] Corrigir mapeamento de tipo de conta importada via Pluggy (FIN-002)
+- [x] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
+- [x] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
 
-Status validado em 2026-09-04:
-- FIN-006 concluida: `server.js` agora recusa subir sem `JWT_SECRET` valido (>=32 caracteres); testado com e sem `.env`, login continua funcionando normalmente.
-- Proxima tarefa: FIN-001.
+Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- FIN-006, FIN-001, FIN-002, FIN-003, FIN-004 concluidas e validadas.
+- FIN-004: `handleImport` (App.tsx) so cria divida automatica se `res.count > 0` e se ainda nao existir divida com mesmo nome/conta.
+- Novo achado registrado: FIN-089 (2 erros de `tsc` pre-existentes em `App.tsx`, nao relacionados as tarefas concluidas).
+- Proxima tarefa: FIN-005 (ultima P0 da Fase 0).
 
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
@@ -95,6 +97,7 @@ Status validado em 2026-09-04:
 - [ ] Extrair calculo financeiro (`stats`) de `App.tsx` para modulo/hook dedicado (FIN-086, depende de FIN-034)
 - [ ] Centralizar padrao de formulario (`FormField`) entre AccountsManager e DebtManager (FIN-087)
 - [ ] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
+- [ ] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
 
 ## Fase 3 - Planejamento Financeiro (Orcamento)
 

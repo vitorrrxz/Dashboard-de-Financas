@@ -104,11 +104,16 @@ export default function App() {
       const txsWithType = newTxs.map(t => ({ ...t, paymentType }));
       const res = await fetchAPI('/api/transactions', 'POST', { transactions: txsWithType });
       if (res.success) {
+        if (res.skipped > 0) {
+          alert(`${res.count} transação(ões) importada(s). ${res.skipped} ignorada(s) por já existir (duplicata).`);
+        }
         const txsData = await fetchAPI('/api/transactions');
         setTxs(txsData);
 
         // Auto-create debt for credit or pix_installment payments
-        if (paymentType === 'credit' || paymentType === 'pix_installment') {
+        // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
+        // já existia (res.count === 0), reimportar o mesmo extrato não deve gerar dívida.
+        if ((paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0) {
           const expenseTxs = txsWithType.filter(t => t.amount < 0);
           if (expenseTxs.length > 0) {
             const totalExpense = expenseTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -126,6 +131,14 @@ export default function App() {
             const debtName = accountName
               ? `Fatura ${accountName.bank} – ${monthName}`
               : `Fatura ${label} – ${monthName}`;
+
+            // Evita dívida duplicada: se já existe uma dívida com o mesmo nome/conta
+            // (ex.: reimportação parcial do mesmo extrato), não cria outra (ver FIN-004).
+            const alreadyExists = debts.some(d => d.name === debtName && (d.accountId || undefined) === accountId);
+            if (alreadyExists) {
+              alert(`Já existe uma dívida "${debtName}" para esta conta/mês. Nenhuma dívida nova foi criada — edite a existente se necessário.`);
+              return;
+            }
 
             const newDebt = {
               name: debtName,

@@ -6,6 +6,7 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PluggyClient } from 'pluggy-sdk';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -37,6 +38,34 @@ const pluggyClient = new PluggyClient({
   clientId: process.env.PLUGGY_CLIENT_ID || '',
   clientSecret: process.env.PLUGGY_CLIENT_SECRET || '',
 });
+
+// Mapeia o `type`/`subtype` retornado pela Pluggy para o enum AccountType do frontend
+// (checking | savings | credit | investment | cash). A Pluggy só retorna `type` como
+// "BANK" ou "CREDIT" (ver node_modules/pluggy-sdk/dist/types/account.d.ts) — a distinção
+// entre conta corrente e poupança vem do `subtype` ("CHECKING_ACCOUNT"/"SAVINGS_ACCOUNT").
+// Sem esse mapeamento, `pluggyAcc.type.toLowerCase()` gerava "bank", que não é nenhum
+// AccountType válido e quebrava ícone/rótulo no frontend (ver FIN-002 em docs/BACKLOG_DETAIL.md).
+function mapPluggyAccountType(pluggyAcc) {
+  if (pluggyAcc.type === 'CREDIT') return 'credit';
+  if (pluggyAcc.type === 'BANK') {
+    return pluggyAcc.subtype === 'SAVINGS_ACCOUNT' ? 'savings' : 'checking';
+  }
+  return 'checking';
+}
+
+// Chave determinística de deduplicação para importação manual (CSV/OFX) — ver FIN-003.
+// Baseada em conta + data + valor + nome (não em `id`, que é gerado aleatoriamente no
+// cliente a cada parse e por isso não serve para detectar reimportação do mesmo extrato).
+function computeImportHash(userId, tx) {
+  const key = [
+    userId,
+    tx.accountId || '',
+    tx.date || '',
+    Number(tx.amount).toFixed(2),
+    String(tx.name || '').trim().toLowerCase(),
+  ].join('|');
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
 
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
@@ -180,15 +209,39 @@ app.get('/api/transactions', authenticateToken, async (req, res) => {
 
 app.post('/api/transactions', authenticateToken, async (req, res) => {
   try {
-    const { transactions } = req.body; 
+    const { transactions } = req.body;
     // Supports batch insert
     if (Array.isArray(transactions)) {
+      const userId = req.user.userId;
       const mapped = transactions.map(t => {
         const { id, ...rest } = t;
-        return { ...rest, userId: req.user.userId };
+        const data = { ...rest, userId };
+        data.importHash = computeImportHash(userId, data);
+        return data;
       });
-      await prisma.transaction.createMany({ data: mapped });
-      res.json({ success: true, count: mapped.length });
+
+      // Filtra transações cuja chave de deduplicação já existe para este usuário —
+      // evita duplicar dados ao reimportar o mesmo extrato (ver FIN-003).
+      const hashes = mapped.map(t => t.importHash);
+      const existing = await prisma.transaction.findMany({
+        where: { userId, importHash: { in: hashes } },
+        select: { importHash: true },
+      });
+      // Também descarta duplicatas dentro do próprio arquivo importado (ex.: mesma
+      // linha repetida no CSV), não só as que já existem no banco.
+      const seenHashes = new Set(existing.map(e => e.importHash));
+      const newTxs = [];
+      for (const t of mapped) {
+        if (seenHashes.has(t.importHash)) continue;
+        seenHashes.add(t.importHash);
+        newTxs.push(t);
+      }
+      const skipped = mapped.length - newTxs.length;
+
+      if (newTxs.length > 0) {
+        await prisma.transaction.createMany({ data: newTxs });
+      }
+      res.json({ success: true, count: newTxs.length, skipped });
     } else {
       const data = { ...req.body, userId: req.user.userId };
       if (data.id) delete data.id;
@@ -360,7 +413,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
             pluggyId: pluggyAcc.id,
             name: pluggyAcc.name,
             bank: pluggyAcc.marketingName || 'Banco Conectado',
-            type: pluggyAcc.type.toLowerCase(),
+            type: mapPluggyAccountType(pluggyAcc),
             balance: pluggyAcc.balance,
             color: '#6366f1',
           }
@@ -370,6 +423,31 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           where: { id: localAccount.id, userId },
           data: { balance: pluggyAcc.balance, name: pluggyAcc.name }
         });
+      }
+
+      // Para cartões de crédito, busca a fatura real via endpoint dedicado da Pluggy
+      // e atualiza `pendingBill` — não é possível inferir a fatura a partir de `balance`
+      // para contas do tipo CREDIT (ver FIN-001 em docs/BACKLOG_DETAIL.md).
+      if (pluggyAcc.type === 'CREDIT') {
+        try {
+          const billsRes = await pluggyClient.fetchCreditCardBills(pluggyAcc.id);
+          const bills = billsRes?.results ?? [];
+          if (bills.length > 0) {
+            // A fatura pendente é a mais recentemente fechada (maior billClosingDate/dueDate) —
+            // não a de menor data, que representaria uma fatura antiga já superada.
+            const currentBill = [...bills].sort((a, b) => {
+              const dateA = new Date(a.billClosingDate ?? a.dueDate).getTime();
+              const dateB = new Date(b.billClosingDate ?? b.dueDate).getTime();
+              return dateB - dateA;
+            })[0];
+            await prisma.account.updateMany({
+              where: { id: localAccount.id, userId },
+              data: { pendingBill: currentBill.totalAmount },
+            });
+          }
+        } catch (billError) {
+          console.error(`Erro ao buscar fatura do cartão (accountId=${pluggyAcc.id}):`, billError);
+        }
       }
 
       // Busca transações do último mês
