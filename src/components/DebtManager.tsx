@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
 import type { Debt, DebtCategory, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
+import { isDebtOverdue, isDebtPaid } from '../utils/debts';
 
 const CATEGORY_COLORS: Record<DebtCategory, string> = {
   'Empréstimo':        '#f59e0b',
@@ -149,8 +150,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
   const remaining = (d: Debt) => Math.max(0, d.totalAmount - d.paidAmount);
   const progress = (d: Debt) => d.totalInstallments > 0 ? (d.paidInstallments / d.totalInstallments) * 100 : 0;
-  const isPaid = (d: Debt) => d.paidInstallments >= d.totalInstallments;
-  const isOverdue = (d: Debt) => !isPaid(d) && new Date(d.nextDueDate) < new Date();
+  const isPaid = isDebtPaid;
+  const isOverdue = isDebtOverdue;
 
   const exportCSV = () => {
     if (debts.length === 0) return;

@@ -262,7 +262,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P1 — FIN-005 — Cálculo de "dívida vencida" inconsistente e com risco de bug de fuso horário**
+- [x] **P1 — FIN-005 — Cálculo de "dívida vencida" inconsistente e com risco de bug de fuso horário** ✅ Concluída
 
   **Objetivo**
   Unificar e corrigir a lógica de detecção de dívida vencida.
@@ -287,9 +287,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Criar uma dívida com vencimento em uma data específica e verificar que o badge "Vencida" aparece de forma consistente entre o alerta do Dashboard e o card em Dívidas, incluindo em horários próximos à meia-noite.
 
   **Critérios de aceite**
-  - [ ] Existe uma única função para determinar se uma dívida está vencida.
-  - [ ] `App.tsx` e `DebtManager.tsx` usam essa função.
-  - [ ] Nenhuma dependência de fuso horário local na comparação.
+  - [x] Existe uma única função para determinar se uma dívida está vencida.
+  - [x] `App.tsx` e `DebtManager.tsx` usam essa função.
+  - [x] Nenhuma dependência de fuso horário local na comparação.
+
+  **Nota de implementação (04/09/2026)**
+  Criado `src/utils/debts.ts` com `isDebtPaid`, `isDebtOverdue` e `todayISO()`. `todayISO()` usa `getFullYear/getMonth/getDate` (data local) em vez de `toISOString().slice(0,10)` (data UTC) — o método usado em `App.tsx` antes desta tarefa também tinha esse resquício de dependência de fuso horário, então foi corrigido junto. `App.tsx` (`overdueDebts` e a variável `today`) e `DebtManager.tsx` (`isPaid`, `isOverdue`) agora usam as funções compartilhadas.
+
+  **Validação executada**
+  Reproduzida a lógica antiga do `DebtManager` (`new Date(nextDueDate) < new Date()`) contra o fuso horário real desta máquina (GMT-3, Brasília): para uma dívida com `nextDueDate` = hoje, a lógica antiga retornava `true` (vencida — **errado**, pois vence hoje, não antes), enquanto `isDebtOverdue()` retorna `false` (correto). `npx tsc -b --noEmit` e `npx eslint` sem novos erros (persistem só os 2 de FIN-089).
 
 ---
 
@@ -609,7 +615,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P2 — FIN-016 — Centralizar lógica de "dívida vencida" (depende de FIN-005)**
+- [x] **P2 — FIN-016 — Centralizar lógica de "dívida vencida" (depende de FIN-005)** ✅ Concluída junto com FIN-005
 
   Já coberta integralmente pela tarefa **FIN-005**. Mantida aqui apenas como referência cruzada da seção de Integridade Financeira — não duplicar o trabalho.
 
@@ -1559,7 +1565,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 - FIN-086 — Extrair a lógica de cálculo financeiro (bloco `stats`, [App.tsx:202-266](src/App.tsx#L202-L266)) de dentro do componente `App.tsx` para um módulo/hook dedicado (ex. `src/hooks/useFinancialStats.ts`), separando regra de negócio da camada de UI. Facilita testes (depende de FIN-034) e reduz o tamanho do componente `App.tsx` (hoje com mais de 700 linhas, concentrando estado, chamadas HTTP, cálculo financeiro e renderização).
 - FIN-087 — Centralizar padrões de formulário (`FormField`, validação de campos numéricos) hoje duplicados entre `AccountsManager.tsx` e `DebtManager.tsx` em um módulo compartilhado `src/components/shared/FormField.tsx`.
-- FIN-088 — Após FIN-005, remover qualquer lógica remanescente de verificação de vencimento duplicada entre componentes, garantindo um único ponto de verdade.
+- [x] FIN-088 — ✅ Concluída junto com FIN-005: `App.tsx` e `DebtManager.tsx` agora usam `isDebtOverdue`/`isDebtPaid` de `src/utils/debts.ts`, sem lógica de vencimento duplicada remanescente.
 
 **Dependências:** FIN-086 depende de FIN-034 para ter cobertura de teste antes/depois da extração (evitar regressão silenciosa). FIN-087 não tem dependências. FIN-088 depende de FIN-005.
 
@@ -1603,11 +1609,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-005 — Cálculo de "dívida vencida" inconsistente e com risco de bug de fuso horário**
+**FIN-007 — Rotas de autenticação sem rate limiting (força bruta)**
 
 ### Por quê?
 
-FIN-006, FIN-001, FIN-002, FIN-003 e FIN-004 concluídas em 04/09/2026. FIN-005 é a última tarefa P0 — concluí-la fecha 100% a Fase 0 (Bugs Críticos) do `TODO.md`.
+Fase 0 (Bugs Críticos) 100% concluída em 04/09/2026 — FIN-006, FIN-001, FIN-002, FIN-003, FIN-004 e FIN-005 todas fechadas e validadas (FIN-016 e FIN-088 resolvidas de brinde junto com FIN-005). Início da Fase 1 (Segurança): FIN-007 é a primeira tarefa HIGH, sem dependências.
 
 ### Bloqueios
 

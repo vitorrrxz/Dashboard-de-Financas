@@ -19,12 +19,13 @@
 - [x] Corrigir mapeamento de tipo de conta importada via Pluggy (FIN-002)
 - [x] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
 - [x] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
+- [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
 
 Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
-- FIN-006, FIN-001, FIN-002, FIN-003, FIN-004 concluidas e validadas.
-- FIN-004: `handleImport` (App.tsx) so cria divida automatica se `res.count > 0` e se ainda nao existir divida com mesmo nome/conta.
+- **Fase 0 100% concluida**: FIN-006, FIN-001, FIN-002, FIN-003, FIN-004, FIN-005 fechadas e validadas.
+- FIN-005: criado `src/utils/debts.ts` (`isDebtOverdue`/`isDebtPaid`/`todayISO`); App.tsx e DebtManager.tsx unificados. De brinde, ja resolve FIN-016 e FIN-088 (marcadas concluidas no detalhe).
 - Novo achado registrado: FIN-089 (2 erros de `tsc` pre-existentes em `App.tsx`, nao relacionados as tarefas concluidas).
-- Proxima tarefa: FIN-005 (ultima P0 da Fase 0).
+- Proxima tarefa: FIN-007 (primeira da Fase 1 - Seguranca).
 
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
@@ -45,7 +46,7 @@ Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DE
   - [ ] Migrar schema Prisma e dados existentes para centavos (FIN-015b)
   - [ ] Atualizar `server.js` para centavos (FIN-015c)
   - [ ] Atualizar frontend para converter centavos/reais em todos os pontos de entrada e exibicao (FIN-015d)
-- [ ] Referencia cruzada: centralizar logica de divida vencida (FIN-016, coberta por FIN-005)
+- [x] Referencia cruzada: centralizar logica de divida vencida (FIN-016, coberta por FIN-005)
 - [ ] Tornar "pagar todas as parcelas" / "excluir todas as dividas" resiliente a falha parcial (FIN-017)
 - [ ] Separar "Saldo Real" de saldo de contas de investimento no dashboard (FIN-018)
 
@@ -96,7 +97,7 @@ Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DE
 ### Debitos tecnicos
 - [ ] Extrair calculo financeiro (`stats`) de `App.tsx` para modulo/hook dedicado (FIN-086, depende de FIN-034)
 - [ ] Centralizar padrao de formulario (`FormField`) entre AccountsManager e DebtManager (FIN-087)
-- [ ] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
+- [x] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
 - [ ] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
 
 ## Fase 3 - Planejamento Financeiro (Orcamento)

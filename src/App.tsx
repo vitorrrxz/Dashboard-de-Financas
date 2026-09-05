@@ -13,6 +13,7 @@ import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
+import { isDebtOverdue, todayISO } from './utils/debts';
 import type { Account, Debt, Transaction, PaymentType } from './types';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -249,15 +250,15 @@ export default function App() {
       .sort(([, a], [, b]) => b - a).slice(0, 6)
       .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
     const mPrefix = today.slice(0, 7);
     const monthExpense = activeTxs.filter(t => t.amount < 0 && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
 
     const realBalance = activeAccs.filter(a => a.type !== 'credit').reduce((s, a) => s + a.balance, 0);
     const pendingBills = activeAccs.filter(a => a.type === 'credit').reduce((s, a) => s + (a.pendingBill ?? 0), 0);
     const totalActiveDebts = activeDebts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
-    
-    const overdueDebts = activeDebts.filter(d => d.nextDueDate < today && d.paidInstallments < d.totalInstallments);
+
+    const overdueDebts = activeDebts.filter(isDebtOverdue);
 
     const dailyMap: Record<string, number> = {};
     const thirtyDaysAgo = new Date();
