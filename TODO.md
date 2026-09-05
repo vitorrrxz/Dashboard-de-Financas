@@ -30,14 +30,19 @@ Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DE
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
 ### Seguranca
-- [ ] Rate limiting nas rotas de login/registro (FIN-007)
-- [ ] Validacao de payload no backend para accounts/transactions/debts (FIN-008)
-- [ ] Restringir CORS a origem conhecida do frontend (FIN-009)
-- [ ] Adicionar cabecalhos de seguranca HTTP via helmet (FIN-010)
-- [ ] Parar de expor mensagens de erro internas do Prisma ao cliente (FIN-011)
-- [ ] Revisar expiracao/revogacao de token JWT (FIN-012)
-- [ ] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
-- [ ] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
+- [x] Rate limiting nas rotas de login/registro (FIN-007)
+- [x] Validacao de payload no backend para accounts/transactions/debts (FIN-008)
+- [x] Restringir CORS a origem conhecida do frontend (FIN-009)
+- [x] Adicionar cabecalhos de seguranca HTTP via helmet (FIN-010)
+- [x] Parar de expor mensagens de erro internas do Prisma ao cliente (FIN-011)
+- [x] Revisar expiracao/revogacao de token JWT (FIN-012)
+- [x] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
+- [x] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
+
+Status validado em 2026-09-05 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- Secao Seguranca da Fase 1 100% concluida: rate limit, validacao Zod (accounts/transactions/debts), CORS restrito, helmet, erros internos nao vazam mais, JWT 24h, email normalizado, decisao de enumeracao documentada.
+- Achado durante a validacao (corrigido): em Zod v4, `z.string().min(1,'msg')` sozinho nao usa a mensagem customizada quando o campo esta totalmente ausente — precisa de `z.string({ error: 'msg' })`.
+- Proxima: subsecao "Integridade financeira" da Fase 1 (FIN-015, FIN-017, FIN-018 — FIN-005/016 ja feitas).
 
 ### Integridade financeira
 - [ ] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)

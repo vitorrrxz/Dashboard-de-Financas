@@ -329,7 +329,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P1 — HIGH — FIN-007 — Rotas de autenticação sem rate limiting (força bruta)**
+- [x] **P1 — HIGH — FIN-007 — Rotas de autenticação sem rate limiting (força bruta)** ✅ Concluída
 
   **Objetivo**
   Limitar tentativas de login/registro por IP para mitigar ataques de força bruta e enumeração.
@@ -356,12 +356,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que login legítimo continua funcionando dentro do limite.
 
   **Critérios de aceite**
-  - [ ] Excesso de tentativas de login/registro retorna `429 Too Many Requests`.
-  - [ ] Limite não afeta uso normal do app.
+  - [x] Excesso de tentativas de login/registro retorna `429 Too Many Requests`.
+  - [x] Limite não afeta uso normal do app.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `express-rate-limit` aplicado como `authLimiter` (10 req/15min por IP) somente em `/api/auth/login` e `/api/auth/register`. Testado: 10 tentativas de login inválidas retornam `400`; a 11ª e 12ª retornam `429`.
 
 ---
 
-- [ ] **P1 — HIGH — FIN-008 — Nenhuma validação de payload no backend para accounts/transactions/debts**
+- [x] **P1 — HIGH — FIN-008 — Nenhuma validação de payload no backend para accounts/transactions/debts** ✅ Concluída
 
   **Objetivo**
   Validar e sanear os dados recebidos nas rotas de CRUD antes de persistir no banco.
@@ -389,13 +392,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que payloads válidos continuam funcionando sem regressão.
 
   **Critérios de aceite**
-  - [ ] Todas as rotas de CRUD financeiro validam o payload antes de tocar o banco.
-  - [ ] Payloads inválidos retornam `400` com mensagem clara, nunca `500`.
-  - [ ] Nenhuma regressão nos fluxos existentes do frontend.
+  - [x] Todas as rotas de CRUD financeiro validam o payload antes de tocar o banco.
+  - [x] Payloads inválidos retornam `400` com mensagem clara, nunca `500`.
+  - [x] Nenhuma regressão nos fluxos existentes do frontend.
+
+  **Nota de implementação (05/09/2026)**
+  Schemas Zod (`accountSchema`/`accountUpdateSchema`, `transactionSchema`/`transactionBatchSchema`, `debtSchema`/`debtUpdateSchema`) validam create e update das 3 entidades. Zod v4: campos string obrigatórios precisam de `z.string({ error: 'msg' })` (não só `.min(1,'msg')`), senão o erro de "campo ausente" cai na mensagem genérica de tipo em inglês — corrigido para `name`/`bank`/`color`/`category` (achado durante a validação, não previsto na descrição original). `paidAmount`/`paidInstallments` ficaram opcionais no schema (para não forçar reset a 0 num update parcial via `debtUpdateSchema`, que reaproveita o mesmo schema base) — o default de `0` na criação é aplicado no código da rota (`POST /api/debts`), não no schema. Zod também substitui os `delete data.id/userId/createdAt` manuais (unknown keys já são descartados por padrão).
+
+  **Validação executada**
+  Contra banco isolado (`test_fase1.db`): conta sem nome/tipo inválido → `400` com mensagem em português; conta válida → criada. Dívida com `totalInstallments:0` e com `totalAmount` negativo → `400`; dívida válida → criada com `paidAmount:0`/`paidInstallments:0`; `PUT` parcial (só `paidInstallments`+`paidAmount`+`nextDueDate`) → demais campos preservados. Transação com data fora do formato `YYYY-MM-DD` → `400`; lote válido → importado (dedupe do FIN-003 continua funcionando). `PUT`/`DELETE` de conta continuam funcionando.
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-009 — CORS totalmente aberto sem allowlist de origem**
+- [x] **P2 — MEDIUM — FIN-009 — CORS totalmente aberto sem allowlist de origem** ✅ Concluída
 
   **Objetivo**
   Restringir CORS às origens conhecidas do frontend.
@@ -419,12 +428,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar (via `curl -H "Origin: http://evil.com"`) que outra origem não recebe os headers de CORS liberando a resposta.
 
   **Critérios de aceite**
-  - [ ] Apenas a origem configurada consegue fazer requisições cross-origin bem-sucedidas.
-  - [ ] App em desenvolvimento continua funcionando sem alteração de fluxo.
+  - [x] Apenas a origem configurada consegue fazer requisições cross-origin bem-sucedidas.
+  - [x] App em desenvolvimento continua funcionando sem alteração de fluxo.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' })`. `FRONTEND_URL` documentada em `.env.example`. Validado via `curl -I`: o header `Access-Control-Allow-Origin` sempre reflete a origem configurada (nunca a do request) — uma página em `evil.com` recebe de volta `http://localhost:5173` no header, que o navegador rejeita por não bater com a origem real da página (é assim que o `cors` com origem fixa bloqueia terceiros; o `curl` em si não aplica a política, só o navegador).
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-010 — Ausência de cabeçalhos de segurança HTTP**
+- [x] **P2 — MEDIUM — FIN-010 — Ausência de cabeçalhos de segurança HTTP** ✅ Concluída
 
   **Objetivo**
   Adicionar cabeçalhos de segurança padrão (X-Content-Type-Options, X-Frame-Options, etc.) à API.
@@ -448,12 +460,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que o frontend continua funcionando sem bloqueios inesperados (CSP não deve quebrar o app — se necessário, desabilitar CSP do helmet nesta etapa e tratar CSP em tarefa futura).
 
   **Critérios de aceite**
-  - [ ] Respostas da API incluem os cabeçalhos de segurança padrão do helmet.
-  - [ ] Nenhuma regressão funcional no frontend.
+  - [x] Respostas da API incluem os cabeçalhos de segurança padrão do helmet.
+  - [x] Nenhuma regressão funcional no frontend.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `app.use(helmet())` com config padrão (API é JSON-only, nunca serve HTML — CSP do helmet não afeta o frontend, que é uma origem separada consumindo via `fetch`). Validado via `curl -I`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` presentes; `X-Powered-By` removido.
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-011 — Mensagens de erro expõem detalhes internos do Prisma ao cliente**
+- [x] **P2 — MEDIUM — FIN-011 — Mensagens de erro expõem detalhes internos do Prisma ao cliente** ✅ Concluída
 
   **Objetivo**
   Parar de retornar `error.message`/`err.message` bruto do Prisma/Node para o cliente em respostas de erro.
@@ -475,12 +490,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que o erro completo continua aparecendo no log do servidor para debug.
 
   **Critérios de aceite**
-  - [ ] Nenhuma rota retorna mensagem de erro interna (Prisma/Node) diretamente ao cliente.
-  - [ ] Erros continuam logados no servidor para investigação.
+  - [x] Nenhuma rota retorna mensagem de erro interna (Prisma/Node) diretamente ao cliente.
+  - [x] Erros continuam logados no servidor para investigação.
+
+  **Nota de implementação (05/09/2026)**
+  Helper `sendInternalError(res, error, publicMessage)` — loga o erro completo via `console.error` e responde `500` só com `publicMessage` (uma frase por rota, ex. "Erro ao criar conta."). Todas as ~16 ocorrências de `res.status(500).json({ error: err.message })`/`details: error.message` em `server.js` substituídas. Confirmado via `grep` que nenhuma referência a `error.message`/`err.message` chega ao cliente.
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-012 — Token JWT sem mecanismo de revogação/logout server-side**
+- [x] **P2 — MEDIUM — FIN-012 — Token JWT sem mecanismo de revogação/logout server-side** ✅ Concluída (mitigação parcial, conforme escopo original)
 
   **Objetivo**
   Documentar/mitigar o fato de que tokens JWT de 7 dias não podem ser invalidados antes de expirar.
@@ -503,12 +521,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que tokens emitidos após a mudança expiram no novo prazo definido.
 
   **Critérios de aceite**
-  - [ ] Prazo de expiração do token revisado e documentado.
-  - [ ] Decisão sobre blocklist/refresh token registrada (implementada ou formalmente adiada como item de roadmap).
+  - [x] Prazo de expiração do token revisado e documentado.
+  - [x] Decisão sobre blocklist/refresh token registrada (implementada ou formalmente adiada como item de roadmap).
+
+  **Nota de implementação/validação (05/09/2026)**
+  `expiresIn` reduzido de `7d` para `24h` (constante `JWT_EXPIRES_IN`, comentário no código documenta a decisão de adiar blocklist/refresh token). Validado decodificando um token real: `(exp - iat) / 3600 = 24`. Blocklist/refresh token permanece como item de roadmap (não implementado agora — custo/benefício maior, exigiria nova tabela e verificação em toda requisição autenticada).
 
 ---
 
-- [ ] **P3 — LOW — FIN-013 — E-mail não normalizado permite cadastro "duplicado" por variação de maiúsculas/minúsculas**
+- [x] **P3 — LOW — FIN-013 — E-mail não normalizado permite cadastro "duplicado" por variação de maiúsculas/minúsculas** ✅ Concluída
 
   **Objetivo**
   Normalizar e-mails (lowercase + trim) antes de checar unicidade e salvar.
@@ -530,12 +551,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Fazer login com capitalização diferente da usada no cadastro e confirmar sucesso.
 
   **Critérios de aceite**
-  - [ ] E-mails são normalizados antes de checagem de unicidade e login.
-  - [ ] Não é mais possível ter duas contas para o mesmo e-mail em capitalizações diferentes.
+  - [x] E-mails são normalizados antes de checagem de unicidade e login.
+  - [x] Não é mais possível ter duas contas para o mesmo e-mail em capitalizações diferentes.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `email.trim().toLowerCase()` aplicado em `/api/auth/register` e `/api/auth/login` antes de qualquer consulta. Testado: cadastro com `Teste.CASE@Example.com` salva como `teste.case@example.com`; segundo cadastro com o mesmo e-mail em minúsculas é rejeitado como duplicado; login com minúsculas funciona normalmente.
 
 ---
 
-- [ ] **P3 — LOW — FIN-014 — Enumeração de e-mails cadastrados via mensagem de erro do registro**
+- [x] **P3 — LOW — FIN-014 — Enumeração de e-mails cadastrados via mensagem de erro do registro** ✅ Concluída (decisão documentada, sem mudança de código)
 
   **Objetivo**
   Reduzir a capacidade de um atacante descobrir quais e-mails já estão cadastrados.
@@ -557,7 +581,10 @@ Classificação por funcionalidade (código como fonte da verdade):
   Não aplicável além da revisão de decisão.
 
   **Critérios de aceite**
-  - [ ] Decisão documentada (manter mensagem específica ou genérica) e, se manter, FIN-007 confirmado como mitigação suficiente.
+  - [x] Decisão documentada (manter mensagem específica ou genérica) e, se manter, FIN-007 confirmado como mitigação suficiente.
+
+  **Decisão (05/09/2026)**
+  Mantida a mensagem específica "Email já cadastrado." — necessária para o UX de registro, risco baixo, e FIN-007 (rate limit) já mitiga o principal vetor de abuso. Comentário registrado no código (`server.js`, na rota de registro) documentando essa decisão.
 
 ---
 
@@ -1609,11 +1636,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-007 — Rotas de autenticação sem rate limiting (força bruta)**
+**FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)**
 
 ### Por quê?
 
-Fase 0 (Bugs Críticos) 100% concluída em 04/09/2026 — FIN-006, FIN-001, FIN-002, FIN-003, FIN-004 e FIN-005 todas fechadas e validadas (FIN-016 e FIN-088 resolvidas de brinde junto com FIN-005). Início da Fase 1 (Segurança): FIN-007 é a primeira tarefa HIGH, sem dependências.
+Fase 0 e a subseção "Segurança" da Fase 1 100% concluídas em 05/09/2026 (FIN-006, FIN-001 a FIN-005, FIN-007 a FIN-014). Próxima subseção do `TODO.md`, na ordem: "Integridade financeira" da Fase 1 — FIN-005/FIN-016 já feitas, restam FIN-015 (e subtarefas FIN-015a–d), FIN-017 e FIN-018.
 
 ### Bloqueios
 
