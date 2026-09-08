@@ -136,7 +136,7 @@ Gere as classes de cliente do Prisma e aplique as migrations no banco SQLite loc
 npx prisma generate
 npx prisma migrate dev
 ```
-> O projeto usa histórico de migrations versionado em `prisma/migrations` (não apenas `db push`) — isso garante que mudanças de schema fiquem registradas e sejam reproduzíveis em qualquer ambiente, sem risco de perda de dados silenciosa.
+> O projeto usa histórico de migrations versionado em `prisma/migrations` (não apenas `db push`) — isso torna mudanças de schema explícitas, reproduzíveis em qualquer ambiente e revisáveis antes de aplicar, reduzindo (mas não eliminando) o risco de mudanças destrutivas silenciosas.
 
 ### Passo 4: Executar o Projeto
 O projeto está configurado para iniciar o servidor backend (API Express na porta `3001`) e o servidor frontend (Vite na porta padrão) de forma simultânea e concorrente usando apenas um comando:

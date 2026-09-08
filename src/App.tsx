@@ -161,7 +161,14 @@ export default function App() {
         // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
         // já existia (res.count === 0), reimportar o mesmo extrato não deve gerar dívida.
         if ((paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0) {
-          const expenseTxs = txsWithType.filter(t => t.amount < 0);
+          // Usa apenas as transações que a API de fato aceitou (res.acceptedIndices,
+          // posições no array original) — não todas as `txsWithType`. Numa reimportação
+          // parcial (algumas linhas já existiam, outras são novas), incluir as duplicatas
+          // descartadas aqui somaria valores já contabilizados em uma dívida anterior,
+          // inflando `totalAmount` e duplicando `subItems`.
+          const acceptedIndices: number[] = res.acceptedIndices ?? [];
+          const acceptedTxs = txsWithType.filter((_, i) => acceptedIndices.includes(i));
+          const expenseTxs = acceptedTxs.filter(t => t.amount < 0);
           if (expenseTxs.length > 0) {
             const totalExpense = expenseTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
             const now = new Date();
