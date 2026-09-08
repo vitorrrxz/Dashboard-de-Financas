@@ -725,7 +725,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ## 3. 🗄️ Banco de Dados
 
-- [ ] **P2 — FIN-019 — Adicionar índices compostos para consultas por usuário**
+- [x] **P2 — FIN-019 — Adicionar índices compostos para consultas por usuário** ✅ Concluída
 
   **Objetivo**
   Melhorar a performance das consultas mais frequentes, todas filtradas por `userId`.
@@ -752,13 +752,16 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que a aplicação inicia normalmente e as rotas de listagem continuam funcionando.
 
   **Critérios de aceite**
-  - [ ] Índices criados conforme especificado.
-  - [ ] Prisma Client atualizado sem erros.
-  - [ ] Nenhuma regressão nos endpoints de transações/contas/dívidas.
+  - [x] Índices criados conforme especificado.
+  - [x] Prisma Client atualizado sem erros.
+  - [x] Nenhuma regressão nos endpoints de transações/contas/dívidas.
+
+  **Nota de implementação/validação (08/09/2026)**
+  `@@index([userId])` em Account/Debt; `@@index([userId, date])` e `@@index([userId, importHash])` em Transaction (o índice `[userId, pluggyId]` foi substituído por `@@unique([userId, pluggyId])` no FIN-021, que já cobre o mesmo padrão de busca). Aplicado no `dev.db` real via `db push` (só índices, sem alteração de dados) — confirmado via `PRAGMA index_list`, contagem de linhas intacta antes/depois.
 
 ---
 
-- [ ] **P2 — FIN-020 — Adotar histórico de migrations do Prisma em vez de apenas `db push`**
+- [x] **P2 — FIN-020 — Adotar histórico de migrations do Prisma em vez de apenas `db push`** ✅ Concluída
 
   **Objetivo**
   Ter um histórico versionado e reproduzível das mudanças de schema, em vez de depender apenas de `prisma db push` (que não gera migrations).
@@ -783,13 +786,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Rodar `npx prisma migrate dev` em um banco limpo e confirmar que o schema resultante é idêntico ao gerado hoje por `db push`.
 
   **Critérios de aceite**
-  - [ ] Pasta `prisma/migrations` existe, versionada, com a migration inicial.
-  - [ ] README atualizado com o novo fluxo de setup.
-  - [ ] Banco criado do zero via migration funciona identicamente ao atual.
+  - [x] Pasta `prisma/migrations` existe, versionada, com a migration inicial.
+  - [x] README atualizado com o novo fluxo de setup.
+  - [x] Banco criado do zero via migration funciona identicamente ao atual.
+
+  **Nota de implementação (08/09/2026) — `migrate dev` exige TTY interativo**
+  `npx prisma migrate dev --name init` falha em ambiente não-interativo ("Prisma Migrate has detected that the environment is non-interactive"). Como o `dev.db` real já tinha dados (1 conta, 100 transações) e `migrate dev` pode propor reset do banco quando não há histórico de migrations, usei o procedimento oficial de **baseline** (não destrutivo): gerar o SQL do schema atual com `prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script`, salvar em `prisma/migrations/<timestamp>_init/migration.sql`, e marcar como já aplicado com `prisma migrate resolve --applied <nome>` — isso só grava um registro na tabela de controle `_prisma_migrations`, sem tocar nas tabelas de dados. Também precisei criar manualmente `prisma/migrations/migration_lock.toml` (`provider = "sqlite"`), que o `migrate dev` normalmente gera sozinho.
+
+  **Validação executada**
+  `npx prisma migrate status` → "Database schema is up to date!". Contagem/soma de `Account`/`Transaction` idêntica antes e depois do baseline. Migration reaplicada do zero num banco de teste isolado (`test_fin021.db`) via `prisma migrate deploy` — schema resultante idêntico ao gerado por `db push`. README atualizado (Passo 3) trocando `db push` por `migrate dev`.
 
 ---
 
-- [ ] **P2 — FIN-021 — Adicionar constraint de unicidade `(userId, pluggyId)` em `Account` e `Transaction`**
+- [x] **P2 — FIN-021 — Adicionar constraint de unicidade `(userId, pluggyId)` em `Account` e `Transaction`** ✅ Concluída
 
   **Objetivo**
   Reforçar a idempotência da sincronização Pluggy a nível de banco, não apenas de aplicação.
@@ -815,9 +824,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Disparar duas sincronizações do mesmo item em paralelo (ex. dois cliques rápidos) e confirmar que não há contas/transações duplicadas.
 
   **Critérios de aceite**
-  - [ ] Constraint única criada no schema.
-  - [ ] Sync usa `upsert` com a chave composta.
-  - [ ] Sincronizações concorrentes não geram duplicatas.
+  - [x] Constraint única criada no schema.
+  - [x] Sync usa `upsert` com a chave composta.
+  - [x] Sincronizações concorrentes não geram duplicatas.
+
+  **Nota de implementação (08/09/2026)**
+  `@@unique([userId, pluggyId])` em Account e Transaction (substituindo o índice simples criado em FIN-019). Antes de aplicar, conferido no `dev.db` real que não havia pares `(userId, pluggyId)` duplicados. Migration aplicada via `prisma migrate deploy` (não-interativo). `server.js`: as 3 rotas que faziam `findFirst` + `create`/`updateMany` (`connect-item`, sync de conta, sync de transação) agora usam `upsert` com `where: { userId_pluggyId: { userId, pluggyId } }`. Na transação, mantive um `findFirst` só para contabilizar `totalTxs` (quantas são novas) — a escrita em si é sempre via `upsert`.
+
+  **Validação executada**
+  Contra o mesmo sandbox real da Pluggy, banco isolado (`test_fin021.db`, migrado do zero via `prisma migrate deploy`): 1ª sincronização importa 8 transações; 2ª sincronização (idêntica) importa 0 — idempotente. Duas sincronizações disparadas **em paralelo** (`curl ... & curl ... & wait`) não geram nenhuma conta duplicada (3 contas únicas, confirmado por `pluggyId`).
 
 ---
 
@@ -1655,11 +1670,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-019 — Adicionar índices compostos para consultas por usuário**
+**FIN-022 — Criar endpoints `PUT`/`DELETE` para transação individual**
 
 ### Por quê?
 
-Fase 1 do `TODO.md` 100% concluída em 08/09/2026 — Segurança (FIN-007 a FIN-014) e Integridade financeira (FIN-005, FIN-015 com subtarefas a–d, FIN-016, FIN-017, FIN-018) todas fechadas e validadas. Próxima subseção do `TODO.md`: "Banco de dados" da Fase 2, começando por FIN-019.
+Fase 2 do `TODO.md`, subseção "Banco de dados" (FIN-019, FIN-020, FIN-021), 100% concluída em 08/09/2026. Próxima subseção, na ordem do documento: "Backend / API" — FIN-022 é a primeira (P1), sem dependências pendentes (depende de FIN-008, já concluída).
 
 ### Bloqueios
 

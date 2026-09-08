@@ -35,7 +35,15 @@ model Account {
 
   user        User     @relation(fields: [userId], references: [id])
   transactions Transaction[]
-  debts       Debt[]   
+  debts       Debt[]
+
+  // Toda listagem filtra por userId; o sync Pluggy busca por (userId, pluggyId) — ver FIN-019.
+  @@index([userId])
+  // Reforça a idempotência do sync Pluggy a nível de banco, não só de aplicação — evita
+  // condição de corrida se duas sincronizações rodarem em paralelo (ver FIN-021).
+  // SQLite/Prisma permitem múltiplos NULL num índice único, então contas sem pluggyId
+  // (a maioria, criadas manualmente) não são afetadas.
+  @@unique([userId, pluggyId])
 }
 
 model Transaction {
@@ -54,7 +62,11 @@ model Transaction {
   user        User     @relation(fields: [userId], references: [id])
   account     Account? @relation(fields: [accountId], references: [id])
 
+  // ver FIN-019 em docs/BACKLOG_DETAIL.md
   @@index([userId, importHash])
+  @@index([userId, date])
+  // Idempotência do sync Pluggy a nível de banco — ver FIN-021.
+  @@unique([userId, pluggyId])
 }
 
 model Debt {
@@ -76,6 +88,8 @@ model Debt {
   user              User       @relation(fields: [userId], references: [id])
   account           Account?   @relation(fields: [accountId], references: [id])
   subItems          DebtItem[]
+
+  @@index([userId]) // ver FIN-019
 }
 
 model DebtItem {

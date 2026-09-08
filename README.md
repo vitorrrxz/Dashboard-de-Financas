@@ -131,11 +131,12 @@ PLUGGY_CLIENT_SECRET=""
 ```
 
 ### Passo 3: Geração do Prisma Client e Banco de Dados
-Gere as classes de cliente do Prisma e sincronize a estrutura com o banco SQLite local (`dev.db`):
+Gere as classes de cliente do Prisma e aplique as migrations no banco SQLite local (`dev.db`):
 ```bash
 npx prisma generate
-npx prisma db push
+npx prisma migrate dev
 ```
+> O projeto usa histórico de migrations versionado em `prisma/migrations` (não apenas `db push`) — isso garante que mudanças de schema fiquem registradas e sejam reproduzíveis em qualquer ambiente, sem risco de perda de dados silenciosa.
 
 ### Passo 4: Executar o Projeto
 O projeto está configurado para iniciar o servidor backend (API Express na porta `3001`) e o servidor frontend (Vite na porta padrão) de forma simultânea e concorrente usando apenas um comando:

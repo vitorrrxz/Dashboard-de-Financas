@@ -65,9 +65,15 @@ Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DE
 ## Fase 2 - Qualidade (Banco, Backend, Frontend, Mobile, Testes)
 
 ### Banco de dados
-- [ ] Adicionar indices compostos por `userId` em Account/Transaction/Debt (FIN-019)
-- [ ] Adotar historico de migrations do Prisma em vez de `db push` (FIN-020, depende de FIN-015b)
-- [ ] Adicionar constraint de unicidade `(userId, pluggyId)` em Account e Transaction (FIN-021, depende de FIN-020)
+- [x] Adicionar indices compostos por `userId` em Account/Transaction/Debt (FIN-019)
+- [x] Adotar historico de migrations do Prisma em vez de `db push` (FIN-020, depende de FIN-015b)
+- [x] Adicionar constraint de unicidade `(userId, pluggyId)` em Account e Transaction (FIN-021, depende de FIN-020)
+
+Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- Secao "Banco de dados" completa. Indices aplicados no `dev.db` real sem perda de dados.
+- FIN-020: `migrate dev` nao funciona sem TTY interativo neste ambiente — usado o procedimento oficial de "baseline" (nao-destrutivo: so registra o schema atual como ja aplicado, sem tocar dados). `prisma/migrations/` agora versionado; README atualizado.
+- FIN-021: constraint unica `(userId, pluggyId)` + `server.js` trocado para `upsert`. Validado com o sandbox real da Pluggy: sync repetido e ate 2 syncs em paralelo nao geram duplicata.
+- Proxima: secao "Backend / API" (FIN-022, FIN-023, FIN-024).
 
 ### Backend / API
 - [ ] Criar endpoints `PUT`/`DELETE` para transacao individual (FIN-022, depende de FIN-008)
