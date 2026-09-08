@@ -39,11 +39,24 @@ if (!JWT_SECRET || JWT_SECRET.length < 32) {
   process.exit(1);
 }
 
-// Pluggy Client — inicializado com as credenciais do .env
-const pluggyClient = new PluggyClient({
-  clientId: process.env.PLUGGY_CLIENT_ID || '',
-  clientSecret: process.env.PLUGGY_CLIENT_SECRET || '',
-});
+// Pluggy Client — inicialização preguiçosa (lazy). O construtor do SDK lança exceção
+// síncrona ("Missing authorization for API communication") quando clientId/clientSecret
+// estão vazios — como essas credenciais são opcionais (só necessárias para conectar
+// bancos reais, ver .env.example), instanciar no topo do módulo derrubava o servidor
+// inteiro no boot para quem não configurou Pluggy. Agora só é criado (e só falha) quando
+// uma rota Pluggy é de fato chamada.
+let pluggyClient = null;
+function getPluggyClient() {
+  if (pluggyClient) return pluggyClient;
+  if (!process.env.PLUGGY_CLIENT_ID || !process.env.PLUGGY_CLIENT_SECRET) {
+    throw new Error('Integração com Pluggy não configurada (PLUGGY_CLIENT_ID/PLUGGY_CLIENT_SECRET ausentes no .env).');
+  }
+  pluggyClient = new PluggyClient({
+    clientId: process.env.PLUGGY_CLIENT_ID,
+    clientSecret: process.env.PLUGGY_CLIENT_SECRET,
+  });
+  return pluggyClient;
+}
 
 // Mapeia o `type`/`subtype` retornado pela Pluggy para o enum AccountType do frontend
 // (checking | savings | credit | investment | cash). A Pluggy só retorna `type` como
@@ -60,17 +73,22 @@ function mapPluggyAccountType(pluggyAcc) {
 }
 
 // Chave determinística de deduplicação para importação manual (CSV/OFX) — ver FIN-003.
-// Baseada em conta + data + valor + nome (não em `id`, que é gerado aleatoriamente no
-// cliente a cada parse e por isso não serve para detectar reimportação do mesmo extrato).
+// Quando o extrato traz um `externalId` (FITID do OFX — identificador estável atribuído
+// pelo próprio banco), ele é usado como chave: é a identidade real da transação, evitando
+// falso positivo quando duas transações distintas têm mesmo nome/data/valor (ex. duas
+// compras idênticas no mesmo dia). CSV não tem equivalente padronizado, então cai no
+// heurístico conta+data+valor+nome (não `id` do parser, que é aleatório a cada parse).
 function computeImportHash(userId, tx) {
-  const key = [
-    userId,
-    tx.accountId || '',
-    tx.date || '',
-    Number(tx.amount).toFixed(2),
-    String(tx.name || '').trim().toLowerCase(),
-  ].join('|');
-  return crypto.createHash('sha256').update(key).digest('hex');
+  const key = tx.externalId
+    ? [userId, tx.accountId || '', 'ext', tx.externalId]
+    : [
+        userId,
+        tx.accountId || '',
+        tx.date || '',
+        Number(tx.amount).toFixed(2),
+        String(tx.name || '').trim().toLowerCase(),
+      ];
+  return crypto.createHash('sha256').update(key.join('|')).digest('hex');
 }
 
 // Converte reais (decimal) para centavos (inteiro) — ver FIN-015. A API da Pluggy retorna
@@ -133,18 +151,29 @@ const accountSchema = z.object({
 });
 const accountUpdateSchema = accountSchema.partial();
 
+// Aceita `accountId: ''` (usado pelo frontend para "sem conta vinculada") como sinônimo
+// de `null` — sem isso, `z.string().min(1)` rejeitava string vazia com um erro de
+// validação antes mesmo do handler rodar, tornando inalcançável a normalização que a
+// rota PUT /api/debts/:id fazia depois (ver correção abaixo).
+const accountIdField = z.preprocess(
+  v => (v === '' ? null : v),
+  z.string().trim().min(1).nullable().optional()
+);
+
 const PAYMENT_TYPES = ['debit', 'credit', 'pix', 'pix_installment'];
 const transactionSchema = z.object({
   name: z.string({ error: 'Nome da transação é obrigatório.' }).trim().min(1, 'Nome da transação é obrigatório.'),
   category: z.string({ error: 'Categoria é obrigatória.' }).trim().min(1, 'Categoria é obrigatória.'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD.'),
   amount: z.coerce.number().int('Valor deve ser um inteiro em centavos.'),
-  accountId: z.string().trim().min(1).nullable().optional(),
+  accountId: accountIdField,
   paymentType: z.enum(PAYMENT_TYPES).optional(),
+  externalId: z.string().trim().min(1).optional(), // FITID do OFX — ver computeImportHash
 });
 const transactionBatchSchema = z.object({
   transactions: z.array(transactionSchema).min(1, 'Nenhuma transação enviada.'),
 });
+const transactionUpdateSchema = transactionSchema.partial();
 
 const DEBT_CATEGORIES = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
 const debtItemSchema = z.object({
@@ -163,7 +192,7 @@ const debtSchema = z.object({
   paidInstallments: z.coerce.number().int().min(0, 'Parcelas pagas não pode ser negativo.').optional(),
   nextDueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data de vencimento deve estar no formato YYYY-MM-DD.'),
   interestRate: z.coerce.number().finite().nullable().optional(), // % ao mês, não é dinheiro
-  accountId: z.string().trim().min(1).nullable().optional(),
+  accountId: accountIdField,
   subItems: z.array(debtItemSchema).optional(),
 });
 const debtUpdateSchema = debtSchema.partial();
@@ -308,14 +337,36 @@ app.delete('/api/accounts/:id', authenticateToken, async (req, res) => {
 });
 
 // --- TRANSACTIONS ---
+// Paginação real via `?page=`/`?pageSize=` (ver FIN-023) — opcional e aditiva: sem esses
+// parâmetros, mantém o comportamento original (array simples, limitado a 2000) para não
+// quebrar os callers existentes (carga inicial do dashboard, que soma todas as transações
+// para `stats`, e o reload após import/sync). Com os parâmetros, retorna um objeto
+// `{ transactions, total, page, pageSize }`, usado pelo frontend para "carregar mais"
+// além do limite de 2000.
 app.get('/api/transactions', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
   try {
-    const txs = await prisma.transaction.findMany({
-      where: { userId: req.user.userId },
-      orderBy: { date: 'desc' },
-      take: 2000
-    });
-    res.json(txs);
+    if (req.query.page === undefined && req.query.pageSize === undefined) {
+      const txs = await prisma.transaction.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        take: 2000
+      });
+      return res.json(txs);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(2000, Math.max(1, parseInt(req.query.pageSize, 10) || 200));
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.transaction.count({ where: { userId } }),
+    ]);
+    res.json({ transactions, total, page, pageSize });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao buscar transações.');
   }
@@ -328,34 +379,32 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     const validation = validateBody(transactionBatchSchema, req.body);
     if (!validation.ok) return res.status(400).json({ error: validation.message });
     try {
-      const mapped = validation.data.transactions.map(t => {
+      // Deduplicação aplicada linha a linha via `create` + constraint única
+      // `@@unique([userId, importHash])` (ver FIN-021/schema.prisma), não mais um
+      // pré-filtro em memória (findMany + Set) seguido de `createMany`: aquele padrão
+      // tinha uma janela de corrida — duas importações do mesmo arquivo disparadas em
+      // paralelo (ex. duplo clique) podiam ambas passar pela checagem antes de gravar e
+      // duplicar as transações, o mesmo problema já corrigido para o sync Pluggy em
+      // FIN-021. Criar linha a linha e capturar o erro de constraint (P2002) é mais
+      // lento que um `createMany` em lote, mas é atômico a nível de banco — inclusive
+      // para duplicatas dentro do próprio arquivo importado (mesma linha repetida).
+      // `acceptedIndices` (posição no array original enviado) permite ao frontend saber
+      // exatamente quais transações entraram, sem reimplementar o hash (ver FIN-004).
+      const acceptedIndices = [];
+      let skipped = 0;
+      for (let i = 0; i < validation.data.transactions.length; i++) {
+        const { externalId, ...t } = validation.data.transactions[i];
         const data = { ...t, userId };
-        data.importHash = computeImportHash(userId, data);
-        return data;
-      });
-
-      // Filtra transações cuja chave de deduplicação já existe para este usuário —
-      // evita duplicar dados ao reimportar o mesmo extrato (ver FIN-003).
-      const hashes = mapped.map(t => t.importHash);
-      const existing = await prisma.transaction.findMany({
-        where: { userId, importHash: { in: hashes } },
-        select: { importHash: true },
-      });
-      // Também descarta duplicatas dentro do próprio arquivo importado (ex.: mesma
-      // linha repetida no CSV), não só as que já existem no banco.
-      const seenHashes = new Set(existing.map(e => e.importHash));
-      const newTxs = [];
-      for (const t of mapped) {
-        if (seenHashes.has(t.importHash)) continue;
-        seenHashes.add(t.importHash);
-        newTxs.push(t);
+        data.importHash = computeImportHash(userId, { ...t, externalId });
+        try {
+          await prisma.transaction.create({ data });
+          acceptedIndices.push(i);
+        } catch (err) {
+          if (err.code === 'P2002') { skipped++; continue; }
+          throw err;
+        }
       }
-      const skipped = mapped.length - newTxs.length;
-
-      if (newTxs.length > 0) {
-        await prisma.transaction.createMany({ data: newTxs });
-      }
-      res.json({ success: true, count: newTxs.length, skipped });
+      res.json({ success: true, count: acceptedIndices.length, skipped, acceptedIndices });
     } catch (err) {
       sendInternalError(res, err, 'Erro ao importar transações.');
     }
@@ -363,7 +412,8 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     const validation = validateBody(transactionSchema, req.body);
     if (!validation.ok) return res.status(400).json({ error: validation.message });
     try {
-      const data = { ...validation.data, userId };
+      const { externalId: _externalId, ...rest } = validation.data;
+      const data = { ...rest, userId };
       const tx = await prisma.transaction.create({ data });
       res.json(tx);
     } catch (err) {
@@ -378,6 +428,32 @@ app.delete('/api/transactions/bulk', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao excluir transações.');
+  }
+});
+
+// Registradas depois de `/bulk` — Express casa rotas na ordem de registro, e `/:id`
+// capturaria "bulk" como id se viesse antes (ver FIN-022).
+app.put('/api/transactions/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(transactionUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const { externalId: _externalId, ...data } = validation.data;
+    const result = await prisma.transaction.updateMany({
+      where: { id: req.params.id, userId: req.user.userId },
+      data,
+    });
+    res.json({ success: true, changes: result.count });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao atualizar transação.');
+  }
+});
+
+app.delete('/api/transactions/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.transaction.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir transação.');
   }
 });
 
@@ -423,7 +499,6 @@ app.put('/api/debts/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { subItems: _subItems, ...data } = validation.data;
-    if (data.accountId === '') data.accountId = null;
 
     const debt = await prisma.debt.update({
       where: { id, userId: req.user.userId },
@@ -454,7 +529,7 @@ app.delete('/api/debts/:id', authenticateToken, async (req, res) => {
 // POST /api/pluggy/connect-token — Gera o token temporário para o widget
 app.post('/api/pluggy/connect-token', authenticateToken, async (req, res) => {
   try {
-    const response = await pluggyClient.createConnectToken(undefined, {
+    const response = await getPluggyClient().createConnectToken(undefined, {
       clientUserId: req.user.userId,
     });
     res.json({ accessToken: response.accessToken });
@@ -469,7 +544,7 @@ app.post('/api/pluggy/connect-item', authenticateToken, async (req, res) => {
   if (!itemId) return res.status(400).json({ error: 'itemId é obrigatório.' });
 
   try {
-    const pluggyItem = await pluggyClient.fetchItem(itemId);
+    const pluggyItem = await getPluggyClient().fetchItem(itemId);
     const userId = req.user.userId;
 
     // Upsert usando a constraint (userId, pluggyId) — atômico a nível de banco, evita
@@ -500,7 +575,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    const accountsRes = await pluggyClient.fetchAccounts(itemId);
+    const accountsRes = await getPluggyClient().fetchAccounts(itemId);
     if (!accountsRes.results || accountsRes.results.length === 0) {
       return res.status(404).json({ error: 'Nenhuma conta encontrada para este item.' });
     }
@@ -528,7 +603,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
       // para contas do tipo CREDIT (ver FIN-001 em docs/BACKLOG_DETAIL.md).
       if (pluggyAcc.type === 'CREDIT') {
         try {
-          const billsRes = await pluggyClient.fetchCreditCardBills(pluggyAcc.id);
+          const billsRes = await getPluggyClient().fetchCreditCardBills(pluggyAcc.id);
           const bills = billsRes?.results ?? [];
           if (bills.length > 0) {
             // A fatura pendente é a mais recentemente fechada (maior billClosingDate/dueDate) —
@@ -553,7 +628,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
       oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
       const fromDate = oneMonthAgo.toISOString().split('T')[0];
 
-      const txsRes = await pluggyClient.fetchTransactions(pluggyAcc.id, { from: fromDate });
+      const txsRes = await getPluggyClient().fetchTransactions(pluggyAcc.id, { from: fromDate });
 
       for (const tx of txsRes.results) {
         const txDate = tx.date.toISOString().split('T')[0];

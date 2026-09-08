@@ -6,6 +6,13 @@ export interface Transaction {
   category: string;
   date: string;
   amount: number;
+  // FITID do OFX: identificador estável atribuído pelo próprio banco, único por
+  // transação. Presente só quando o extrato é OFX/QFX; CSV não tem equivalente
+  // padronizado. Quando presente, o backend usa este valor (em vez do heurístico
+  // nome+data+valor) para deduplicar reimportações — evita falso positivo quando duas
+  // transações distintas têm mesmo nome/data/valor (ex. duas compras idênticas no
+  // mesmo dia). Ver computeImportHash em server.js.
+  externalId?: string;
 }
 
 const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
@@ -134,12 +141,14 @@ export function parseOFX(content: string): Transaction[] {
       const amount = parseAmount(get('TRNAMT'));
       const memo = get('MEMO') || get('NAME') || 'Transação';
       const dateRaw = get('DTPOSTED');
+      const fitId = get('FITID');
       transactions.push({
-        id: get('FITID') || `ofx-${i}-${Date.now()}`,
+        id: fitId || `ofx-${i}-${Date.now()}`,
         name: memo,
         category: autoCategory(memo),
         date: parseOFXDate(dateRaw),
         amount,
+        externalId: fitId || undefined,
       });
     });
   } else {
@@ -170,7 +179,7 @@ export function parseOFX(content: string): Transaction[] {
         current.name = val;
         current.category = autoCategory(val);
       }
-      if (tag === 'FITID') current.id = val;
+      if (tag === 'FITID') { current.id = val; current.externalId = val; }
     }
   }
 

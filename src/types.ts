@@ -10,6 +10,7 @@ export interface Transaction {
   amount: number;
   accountId?: string;    // Link to an Account
   paymentType?: PaymentType;
+  externalId?: string;   // FITID do OFX (identificador estável do banco) — ver computeImportHash em server.js
 }
 
 export type AccountType = 'checking' | 'savings' | 'credit' | 'investment' | 'cash';

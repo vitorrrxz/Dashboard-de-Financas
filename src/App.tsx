@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut
+  LogOut, Edit2, X
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -89,6 +89,11 @@ export default function App() {
   const [transactions, setTxs]        = useState<Transaction[]>([]);
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
+  // FIN-023: a carga inicial busca até 2000 transações (comportamento original,
+  // preservado). Se bater exatamente nesse limite, pode haver mais — `txHasMore` habilita
+  // o botão "Carregar mais", que busca o restante via paginação real da API.
+  const [txHasMore, setTxHasMore]     = useState(false);
+  const [txLoadingMore, setTxLoadingMore] = useState(false);
 
   const fetchAPI = async (endpoint: string, method = 'GET', body?: unknown) => {
     const res = await fetch(`http://localhost:3001${endpoint}`, {
@@ -127,6 +132,7 @@ export default function App() {
         setUser(meData.user);
         setAccounts((accsData as Account[]).map(accountFromApi));
         setTxs((txsData as Transaction[]).map(txFromApi));
+        setTxHasMore((txsData as Transaction[]).length >= 2000);
         setDebts((debtsData as Debt[]).map(debtFromApi));
       }).catch(err => {
         console.error('Sessão expirada ou erro:', err);
@@ -156,12 +162,20 @@ export default function App() {
         }
         const txsData = await fetchAPI('/api/transactions');
         setTxs((txsData as Transaction[]).map(txFromApi));
+        setTxHasMore((txsData as Transaction[]).length >= 2000);
 
         // Auto-create debt for credit or pix_installment payments
         // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
         // já existia (res.count === 0), reimportar o mesmo extrato não deve gerar dívida.
         if ((paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0) {
-          const expenseTxs = txsWithType.filter(t => t.amount < 0);
+          // Usa apenas as transações que a API de fato aceitou (res.acceptedIndices,
+          // posições no array original) — não todas as `txsWithType`. Numa reimportação
+          // parcial (algumas linhas já existiam, outras são novas), incluir as duplicatas
+          // descartadas aqui somaria valores já contabilizados em uma dívida anterior,
+          // inflando `totalAmount` e duplicando `subItems`.
+          const acceptedIndices: number[] = res.acceptedIndices ?? [];
+          const acceptedTxs = txsWithType.filter((_, i) => acceptedIndices.includes(i));
+          const expenseTxs = acceptedTxs.filter(t => t.amount < 0);
           if (expenseTxs.length > 0) {
             const totalExpense = expenseTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
             const now = new Date();
@@ -215,6 +229,37 @@ export default function App() {
   };
 
 
+
+  // CRUD TRANSACTIONS (FIN-022)
+  const updateTransaction = async (id: string, tx: Partial<Transaction>) => {
+    try {
+      await fetchAPI(`/api/transactions/${id}`, 'PUT', txToApi(tx));
+      setTxs(prev => prev.map(t => t.id === id ? { ...t, ...tx } : t));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  const deleteTransaction = async (id: string) => {
+    try {
+      await fetchAPI(`/api/transactions/${id}`, 'DELETE');
+      setTxs(prev => prev.filter(t => t.id !== id));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+
+  // FIN-023: busca a próxima página de 2000 além do que já está carregado. Só chamado
+  // quando `txHasMore` é true (a carga anterior bateu no limite de 2000).
+  const loadMoreTransactions = async () => {
+    setTxLoadingMore(true);
+    try {
+      const nextPage = Math.floor(transactions.length / 2000) + 1;
+      const res = await fetchAPI(`/api/transactions?page=${nextPage}&pageSize=2000`);
+      const more = (res.transactions as Transaction[]).map(txFromApi);
+      setTxs(prev => [...prev, ...more]);
+      setTxHasMore(transactions.length + more.length < res.total);
+    } catch (e: unknown) {
+      alert('Erro ao carregar mais transações: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setTxLoadingMore(false);
+    }
+  };
 
   // CRUD ACCOUNTS
   const addAccount = async (acc: Omit<Account, 'id' | 'createdAt'>) => {
@@ -410,6 +455,7 @@ export default function App() {
                 ]);
                 setAccounts((accsData as Account[]).map(accountFromApi));
                 setTxs((txsData as Transaction[]).map(txFromApi));
+                setTxHasMore((txsData as Transaction[]).length >= 2000);
               }}
             />
           )}
@@ -418,6 +464,7 @@ export default function App() {
                 if (confirm('Remover todas as transações?')) {
                     await fetchAPI('/api/transactions/bulk', 'DELETE');
                     setTxs([]);
+                    setTxHasMore(false);
                 }
             }}
               className="w-full py-2.5 rounded-xl border border-red-500/10 text-red-400 hover:bg-red-500/10 text-xs font-medium flex items-center justify-center gap-2 transition-all">
@@ -648,9 +695,23 @@ export default function App() {
                 {filtered.length === 0 ? (
                   <p className="text-center text-textMuted py-12 text-sm">Nenhuma transação encontrada.</p>
                 ) : (
-                  <TxTable rows={filtered.slice(0, 200)}/>
+                  <TxTable
+                    rows={filtered.slice(0, 200)}
+                    accounts={accounts}
+                    onUpdate={updateTransaction}
+                    onDelete={deleteTransaction}
+                  />
                 )}
               </div>
+
+              {/* FIN-023: a carga inicial busca no máximo 2000 transações — este botão só
+                  aparece quando esse limite foi atingido, permitindo acessar o restante. */}
+              {txHasMore && (
+                <button onClick={loadMoreTransactions} disabled={txLoadingMore}
+                  className="w-full mt-4 py-3 rounded-xl border border-white/10 text-sm text-textMuted hover:text-white hover:bg-white/5 transition-all disabled:opacity-50">
+                  {txLoadingMore ? 'Carregando...' : 'Carregar transações mais antigas'}
+                </button>
+              )}
             </>
           )}
 
@@ -720,7 +781,38 @@ const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
   pix_installment: { label: 'PIX Parc.',    color: '#f59e0b' },
 };
 
-function TxTable({ rows }: { rows: Transaction[] }) {
+// FIN-022: edição/exclusão individual de transação. `rows` continua sendo o recorte já
+// filtrado/paginado calculado pelo componente pai — este componente só adiciona a UI de
+// ação por linha e o modal de edição.
+function TxTable({ rows, accounts, onUpdate, onDelete }: {
+  rows: Transaction[];
+  accounts: Account[];
+  onUpdate: (id: string, tx: Partial<Transaction>) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<Transaction | null>(null);
+  const [form, setForm] = useState<Partial<Transaction>>({});
+  const [saving, setSaving] = useState(false);
+
+  const openEdit = (t: Transaction) => { setEditing(t); setForm({ ...t }); };
+
+  const handleSave = async () => {
+    if (!editing || !form.name?.trim() || !form.date || form.amount === undefined) return;
+    setSaving(true);
+    try {
+      await onUpdate(editing.id, form);
+      setEditing(null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (t: Transaction) => {
+    if (confirm(`Excluir a transação "${t.name}"?`)) await onDelete(t.id);
+  };
+
   return (
     <div className="overflow-x-auto min-h-[400px]">
       <table className="w-full text-left border-collapse">
@@ -731,6 +823,7 @@ function TxTable({ rows }: { rows: Transaction[] }) {
             <th className="pb-3 font-semibold">Categoria</th>
             <th className="pb-3 font-semibold">Tipo</th>
             <th className="pb-3 font-semibold text-right">Valor</th>
+            <th className="pb-3 font-semibold w-20 text-right">Ações</th>
           </tr>
         </thead>
         <tbody className="text-sm divide-y divide-white/5">
@@ -765,11 +858,80 @@ function TxTable({ rows }: { rows: Transaction[] }) {
                 <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
                   {t.amount >= 0 ? '+' : ''}{t.amount.toLocaleString('pt-BR', { minimumFractionDigits:2 })}
                 </td>
+                <td className="py-4">
+                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => openEdit(t)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                      <Edit2 size={13} />
+                    </button>
+                    <button onClick={() => handleDelete(t)} className="p-1.5 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+
+      {editing && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setEditing(null)}>
+          <div className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-bold text-white">Editar Transação</h3>
+              <button onClick={() => setEditing(null)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Descrição</label>
+                <input value={form.name ?? ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Data</label>
+                  <input type="date" value={form.date ?? ''} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="input-field" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Valor (R$)</label>
+                  <input type="number" step="0.01" value={form.amount ?? 0} onChange={e => setForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className="input-field" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Categoria</label>
+                  <select value={form.category ?? ''} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="input-field">
+                    {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Tipo</label>
+                  <select value={form.paymentType ?? 'debit'} onChange={e => setForm(f => ({ ...f, paymentType: e.target.value as PaymentType }))} className="input-field">
+                    {Object.entries(PAYMENT_TYPE_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Conta</label>
+                <select value={form.accountId ?? ''} onChange={e => setForm(f => ({ ...f, accountId: e.target.value }))} className="input-field">
+                  <option value="">Sem conta vinculada</option>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setEditing(null)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                {saving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
