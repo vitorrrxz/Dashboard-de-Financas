@@ -58,9 +58,9 @@
 - [x] Adicionar script `typecheck` no `package.json` (FIN-024)
 
 ### Frontend
-- [ ] Centralizar base URL da API (hoje hardcoded em 3 arquivos) (FIN-025)
-- [ ] Habilitar TypeScript `strict` mode (FIN-026)
-- [ ] Criar servico `apiFetch` unico, eliminando duplicacao (FIN-027, depende de FIN-025)
+- [x] Centralizar base URL da API (hoje hardcoded em 3 arquivos) (FIN-025)
+- [x] Habilitar TypeScript `strict` mode (FIN-026)
+- [x] Criar servico `apiFetch` unico, eliminando duplicacao (FIN-027, depende de FIN-025)
 
 ### Mobile / Responsividade
 - [ ] Criar navegacao mobile — sidebar hoje fica 100% inacessivel abaixo de `md` (FIN-028)
@@ -93,7 +93,7 @@
 - [ ] Extrair calculo financeiro (`stats`) de `App.tsx` para modulo/hook dedicado (FIN-086, depende de FIN-034)
 - [ ] Centralizar padrao de formulario (`FormField`) entre AccountsManager e DebtManager (FIN-087)
 - [x] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
-- [ ] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
+- [x] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
 
 ## Fase 3 - Planejamento Financeiro (Orcamento)
 

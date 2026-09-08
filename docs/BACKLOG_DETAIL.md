@@ -988,7 +988,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ## 5. 🖥️ Frontend
 
-- [ ] **P1 — FIN-025 — Centralizar a base URL da API (hoje hardcoded em 3 arquivos)**
+- [x] **P1 — FIN-025 — Centralizar a base URL da API (hoje hardcoded em 3 arquivos)** ✅ Concluída
 
   **Objetivo**
   Eliminar a URL `http://localhost:3001` hardcoded, hoje duplicada em três lugares diferentes, para permitir rodar o frontend contra outro host (staging, produção) sem editar código.
@@ -1016,13 +1016,16 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Trocar `VITE_API_URL` para outro valor e confirmar que as requisições vão para o novo host (pode ser validado apontando para um servidor mock).
 
   **Critérios de aceite**
-  - [ ] Nenhuma ocorrência hardcoded de `http://localhost:3001` no código-fonte de `src/`.
-  - [ ] App funciona normalmente com a configuração padrão.
-  - [ ] `.env.example` documenta a nova variável.
+  - [x] Nenhuma ocorrência hardcoded de `http://localhost:3001` no código-fonte de `src/`.
+  - [x] App funciona normalmente com a configuração padrão.
+  - [x] `.env.example` documenta a nova variável.
+
+  **Nota de implementação (08/09/2026)**
+  Implementada em conjunto com FIN-027 (dependência natural — o módulo criado aqui já nasce com o `apiFetch` compartilhado). Novo `src/services/api.ts` exporta `API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'` e `apiFetch()`. `VITE_API_URL` documentada em `.env.example` (prefixo `VITE_` obrigatório para o Vite expor a variável via `import.meta.env`).
 
 ---
 
-- [ ] **P2 — FIN-026 — Habilitar TypeScript `strict` mode**
+- [x] **P2 — FIN-026 — Habilitar TypeScript `strict` mode** ✅ Concluída
 
   **Objetivo**
   Ativar checagens estritas de tipo para reduzir bugs de `null`/`undefined` não tratados, especialmente relevante em um app financeiro.
@@ -1047,13 +1050,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Testar manualmente os principais fluxos (login, contas, transações, dívidas) para garantir que nenhuma correção de tipo alterou comportamento.
 
   **Critérios de aceite**
-  - [ ] `strict: true` habilitado.
-  - [ ] Build e typecheck passam sem erros.
-  - [ ] Nenhuma regressão funcional observável.
+  - [x] `strict: true` habilitado.
+  - [x] Build e typecheck passam sem erros.
+  - [x] Nenhuma regressão funcional observável.
+
+  **Nota de implementação (08/09/2026)**
+  `"strict": true` adicionado a `tsconfig.app.json`. Surpresa positiva: **nenhum erro novo** foi revelado — o código já era, na prática, strict-clean antes da flag existir. O único obstáculo para `npm run build`/`npm run typecheck` passarem 100% limpos eram os 2 erros pré-existentes de FIN-089 (tooltip do Recharts, não relacionados a `strict`), corrigidos junto nesta tarefa para poder fechar o critério de aceite "build e typecheck passam sem erros": os `formatter` dos dois `RechartsTooltip` tinham `(v: number) => ...` anotado manualmente, incompatível com o tipo real da lib (`Formatter<TValue>`, que aceita `TValue | undefined`); removida a anotação manual (deixando o parâmetro inferir o tipo esperado pela prop) e adicionado `Number(v)` antes de repassar a `fmt()`.
+
+  **Validação executada**
+  `npx tsc -b --noEmit` → 0 erros. `npm run build` → build completo sem erros (só o aviso pré-existente, não relacionado, de chunk >500kB). `npx eslint .` no projeto inteiro → 0 erros/warnings.
 
 ---
 
-- [ ] **P3 — FIN-027 — Criar serviço `apiFetch` único para eliminar duplicação do padrão fetch**
+- [x] **P3 — FIN-027 — Criar serviço `apiFetch` único para eliminar duplicação do padrão fetch** ✅ Concluída
 
   **Objetivo**
   Remover a duplicação do padrão `fetch` + header `Authorization` + tratamento de erro, hoje repetido em `App.tsx` (`fetchAPI`, [App.tsx:46-60](src/App.tsx#L46-L60)) e `PluggyConnectButton.tsx` (`fetchAPI`, [PluggyConnectButton.tsx:43-57](src/components/PluggyConnectButton.tsx#L43-L57)) — funções quase idênticas definidas separadamente.
@@ -1075,8 +1084,14 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que todos os fluxos que dependiam de `fetchAPI` (contas, transações, dívidas, sync Pluggy) continuam funcionando sem alteração de comportamento.
 
   **Critérios de aceite**
-  - [ ] Uma única implementação de `fetchAPI`/`apiFetch` é usada por todo o frontend.
-  - [ ] Nenhuma regressão funcional.
+  - [x] Uma única implementação de `fetchAPI`/`apiFetch` é usada por todo o frontend.
+  - [x] Nenhuma regressão funcional.
+
+  **Nota de implementação (08/09/2026)**
+  `apiFetch(endpoint, { method, body, token })` em `src/services/api.ts` é agora a única implementação real. `App.tsx` e `PluggyConnectButton.tsx` mantêm um wrapper local `fetchAPI(endpoint, method, body)` (assinatura posicional antiga, para não precisar tocar as dezenas de call sites existentes) que só delega para `apiFetch` injetando o `token` do escopo; `AuthForm.tsx` (que não tem token) chama `apiFetch` diretamente. Os wrappers tipam o retorno como `any` explicitamente (`eslint-disable` pontual) para preservar o comportamento de tipagem frouxa que `fetchAPI` já tinha antes — tipar corretamente a resposta de cada endpoint é um esforço maior, fora do escopo desta tarefa.
+
+  **Validação executada**
+  `npx tsc -b --noEmit`, `npm run build` e `npx eslint .` no projeto inteiro, todos sem erros (ver nota de FIN-026). Não foi feito teste manual em navegador nesta tarefa — a refatoração preserva exatamente a mesma URL, headers e lógica de erro do `fetch` original, só movida para um módulo compartilhado.
 
 ---
 
@@ -1684,7 +1699,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 **Dependências:** FIN-086 depende de FIN-034 para ter cobertura de teste antes/depois da extração (evitar regressão silenciosa). FIN-087 não tem dependências. FIN-088 depende de FIN-005.
 
-- FIN-089 — `npx tsc -b --noEmit` falha com 2 erros de tipo em `App.tsx` (linhas ~506/526, tooltips do Recharts: `Formatter<ValueType, NameType>` incompatível com `(v: number) => [string, string]`). Pré-existente, confirmado via `git stash` antes de qualquer trabalho da Fase 0 — não bloqueia `npm run build` nem `npm run dev`, mas quebra checagem de tipo isolada. Corrigir tipando o formatter conforme os genéricos do Recharts (`ValueType`, `NameType`).
+- [x] FIN-089 — ✅ Concluída em 08/09/2026 (junto com FIN-026): os dois `formatter` de `RechartsTooltip` em `App.tsx` tinham `(v: number) => ...` anotado manualmente, incompatível com `Formatter<TValue>` (que aceita `TValue | undefined`). Corrigido removendo a anotação manual do parâmetro e usando `Number(v)` antes de repassar a `fmt()`. `npx tsc -b --noEmit` e `npm run build` agora terminam com 0 erros.
 
 ---
 

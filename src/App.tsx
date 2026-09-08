@@ -15,6 +15,7 @@ import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { isDebtOverdue, todayISO } from './utils/debts';
 import { toCents, toReais } from './utils/money';
+import { apiFetch } from './services/api';
 import type { Account, Debt, DebtCategory, Transaction, PaymentType } from './types';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -95,21 +96,13 @@ export default function App() {
   const [txHasMore, setTxHasMore]     = useState(false);
   const [txLoadingMore, setTxLoadingMore] = useState(false);
 
-  const fetchAPI = async (endpoint: string, method = 'GET', body?: unknown) => {
-    const res = await fetch(`http://localhost:3001${endpoint}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Erro na API');
-    }
-    return res.json();
-  };
+  // Wrapper fino sobre o `apiFetch` compartilhado (ver FIN-025/FIN-027 em
+  // docs/BACKLOG_DETAIL.md) — mantém a assinatura posicional e o retorno `any` já usados
+  // em ~20 call sites deste arquivo (sem tipagem de resposta por endpoint; isso fica para
+  // FIN-026, `strict` mode), só injetando o `token` do estado local.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fetchAPI = (endpoint: string, method = 'GET', body?: unknown): Promise<any> =>
+    apiFetch(endpoint, { method, body, token });
 
   const handleLogout = () => {
     setToken(null);
@@ -621,7 +614,7 @@ export default function App() {
                           <YAxis stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
                           <RechartsTooltip 
                             contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
-                            formatter={(v: number) => [fmt(v), chartPeriod === '30d' ? 'Evolução' : 'Saldo']} 
+                            formatter={(v) => [fmt(Number(v)), chartPeriod === '30d' ? 'Evolução' : 'Saldo']}
                             labelStyle={{ color:'#9ca3af' }}
                           />
                           <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2.5} fill="url(#cg)" animationDuration={1000}/>
@@ -641,7 +634,7 @@ export default function App() {
                             <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} stroke="#6b7280" tick={{ fontSize:11 }} width={80}/>
                             <RechartsTooltip cursor={{ fill:'rgba(255,255,255,0.03)' }}
                               contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
-                              formatter={(v: number) => [fmt(v),'Gasto']}/>
+                              formatter={(v) => [fmt(Number(v)),'Gasto']}/>
                             <Bar dataKey="amount" radius={[0,4,4,0]} barSize={14}>
                               {stats.expenseByCategory.map(e => (
                                 <Cell key={e.name} fill={CATEGORY_COLORS[e.name] || '#6366f1'}/>

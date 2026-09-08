@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Link2, RefreshCw, CheckCircle2, Loader2, Building2 } from 'lucide-react';
+import { apiFetch } from '../services/api';
 
 interface PluggyConnectData {
   item: {
@@ -40,21 +41,11 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
   const [connectedItem, setConnectedItem] = useState<ConnectedItem | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchAPI = useCallback(async (endpoint: string, method = 'POST', body?: unknown) => {
-    const res = await fetch(`http://localhost:3001${endpoint}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Erro na API');
-    }
-    return res.json();
-  }, [token]);
+  const fetchAPI = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (endpoint: string, method = 'POST', body?: unknown): Promise<any> => apiFetch(endpoint, { method, body, token }),
+    [token]
+  );
 
   const handleConnect = async () => {
     setStatus('loading');
