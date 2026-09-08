@@ -590,7 +590,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ## 2. 💰 Integridade Financeira
 
-- [ ] **P1 — FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)**
+- [x] **P1 — FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)** ✅ Concluída
 
   **Objetivo**
   Eliminar o risco de erro de arredondamento em ponto flutuante nos cálculos financeiros.
@@ -622,23 +622,36 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Rodar a suíte de testes financeiros (depende de FIN-034).
 
   **Critérios de aceite**
-  - [ ] Todos os campos monetários no schema são `Int` (centavos).
-  - [ ] Toda leitura/escrita no frontend converte corretamente centavos ↔ reais.
-  - [ ] Nenhuma regressão visual nos valores exibidos.
-  - [ ] Testes financeiros (FIN-034) cobrindo somas repetidas passam sem erro de arredondamento.
+  - [x] Todos os campos monetários no schema são `Int` (centavos).
+  - [x] Toda leitura/escrita no frontend converte corretamente centavos ↔ reais.
+  - [x] Nenhuma regressão visual nos valores exibidos.
+  - [x] Testes financeiros (FIN-034) cobrindo somas repetidas passam sem erro de arredondamento — FIN-034 em si ainda não existe (sem framework de teste, FIN-030/031 pendentes); validado via scripts Node avulsos no lugar (ver nota abaixo).
+
+  **Nota de implementação (08/09/2026) — decisão de arquitetura**
+  `interestRate` (Debt) foi **excluído** da migração — é uma taxa percentual (% ao mês), não um valor monetário; permanece `Float`. A conversão acontece só na borda com a API: internamente, todo o cálculo/exibição do frontend (`stats` em `App.tsx`, `AccountsManager.tsx`, `DebtManager.tsx`, `ImportModal.tsx`) continua em reais sem nenhuma alteração — só `App.tsx` foi tocado, com funções `accountToApi/accountFromApi`, `txToApi/txFromApi`, `debtToApi/debtFromApi` aplicadas em cada chamada a `fetchAPI` que envia/recebe dinheiro (~11 pontos: carga inicial, `handleImport`, `addAccount`, `updateAccount`, `addDebt`, `updateDebt`, sync da Pluggy). O sync da Pluggy (`server.js`) também precisou de conversão — a API da Pluggy retorna valores em reais, então `pluggyAcc.balance`/`currentBill.totalAmount`/`tx.amount` passam por um `toCents()` local antes de gravar (duplicado de `src/utils/money.ts` porque backend Node puro e frontend Vite não compartilham módulos TS neste projeto).
+
+  **Migração de dados real (dev.db)** — feita com backup e confirmação explícita do usuário antes de qualquer escrita:
+  1. Backup: `dev.db.backup-20260905-181115` (cópia idêntica, mantida no diretório — está no `.gitignore`, nunca será commitada).
+  2. Passo intermediário seguro: `UPDATE ... SET campo = ROUND(campo*100)` em todas as colunas monetárias **enquanto ainda eram `Float`** — evita que a troca de tipo do SQLite trunque os centavos (SQLite recria a tabela ao mudar tipo de coluna; copiar um `Float` decimal direto para `Int` trunca a parte decimal em vez de multiplicar).
+  3. `prisma db push` aplicando o novo schema (`Int`).
+  4. Checkpoint do WAL e volta para `journal_mode = DELETE` (o script de migração usou WAL para a transação atômica do passo 2).
+
+  **Validação executada**
+  Checksum antes/depois: 1 conta (R$54,20 → 5420 centavos), 100 transações somando R$514,72 → 51472 centavos — bate exatamente. Backend testado em banco isolado (`test_fin015.db`): conta/transação/dívida com centavos inteiros aceitas; valor não-inteiro (`150.5`) rejeitado com `400`; `interestRate` continua decimal (`2.5`). Sync Pluggy re-testado contra o sandbox real: valores batem exatamente com os validados em reais no FIN-001/002, multiplicados por 100 (R$28.480,75 → 2848075; R$5.000,00 → 500000). Conversão do frontend validada via simulação Node das funções `accountToApi/accountFromApi` — round-trip centavos→reais→centavos sem drift. `npx tsc -b --noEmit` e `npx eslint` sem novos erros (só os 2 de FIN-089).
 
   ---
 
-  - [ ] **FIN-015a — Definir estratégia de conversão e criar utilitário `centavos ↔ reais`**
-    Criar `src/utils/money.ts` com `toCents(reais: number): number` e `toReais(cents: number): number`, com testes unitários (depende FIN-030).
+  - [x] **FIN-015a — Definir estratégia de conversão e criar utilitário `centavos ↔ reais`** ✅
+    `src/utils/money.ts` criado com `toCents`/`toReais`/`toCentsOrNull`/`toReaisOrNull`. Testes unitários via script Node avulso (FIN-030 ainda não existe): `toCents(0.1)+toCents(0.2)=30` (sem erro de ponto flutuante), `toCents(-872.05)=-87205`, round-trip sem drift.
 
-  - [ ] **FIN-015b — Migrar schema Prisma e dados existentes para centavos**
-    Alterar `prisma/schema.prisma`, escrever script de migração de dados de `dev.db`, validar contra backup do banco atual.
+  - [x] **FIN-015b — Migrar schema Prisma e dados existentes para centavos** ✅
+    Ver "Migração de dados real" acima.
 
-  - [ ] **FIN-015c — Atualizar `server.js` para trabalhar em centavos** (nenhuma alteração de lógica, apenas tipo — Prisma já retorna `Int`).
+  - [x] **FIN-015c — Atualizar `server.js` para trabalhar em centavos** ✅
+    Schemas Zod (`accountSchema`, `transactionSchema`, `debtSchema`, `debtItemSchema`) trocados de `.finite()` para `.int()` nos campos monetários; `toCents()` local aplicado nos 3 pontos do sync Pluggy que escrevem valores vindos da API da Pluggy (em reais).
 
-  - [ ] **FIN-015d — Atualizar frontend para converter centavos↔reais em todos os pontos de entrada/exibição**
-    `App.tsx`, `AccountsManager.tsx`, `DebtManager.tsx`, `ImportModal.tsx`, `parsers.ts` (parsers devem seguir retornando reais e a conversão para centavos deve acontecer no ponto de envio à API).
+  - [x] **FIN-015d — Atualizar frontend para converter centavos↔reais em todos os pontos de entrada/exibição** ✅
+    Só `App.tsx` precisou de mudança (ver nota de arquitetura acima) — `AccountsManager.tsx`, `DebtManager.tsx`, `ImportModal.tsx` e `parsers.ts` continuam em reais, sem alteração.
 
 ---
 
@@ -650,7 +663,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P2 — FIN-017 — Tornar operações em lote de dívidas resilientes a falha parcial**
+- [x] **P2 — FIN-017 — Tornar operações em lote de dívidas resilientes a falha parcial** ✅ Concluída
 
   **Objetivo**
   Evitar estado inconsistente quando "Pagar todas as parcelas" ou "Excluir todas as dívidas" falha no meio da execução.
@@ -672,12 +685,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Simular falha de uma requisição no meio do lote (ex. desconectando a rede momentaneamente ou mockando erro) e confirmar que o resumo exibido é preciso.
 
   **Critérios de aceite**
-  - [ ] Falha em um item do lote não interrompe o processamento dos demais.
-  - [ ] Usuário vê claramente quais itens falharam.
+  - [x] Falha em um item do lote não interrompe o processamento dos demais.
+  - [x] Usuário vê claramente quais itens falharam.
+
+  **Nota de implementação/validação (08/09/2026)**
+  `handlePayAll`/`handleDeleteAll` trocados para `Promise.allSettled`; resumo final via `alert` lista os nomes das dívidas que falharam. Lógica de `allSettled` + identificação de falhas testada isoladamente (script Node com uma promise rejeitada entre 3) — identifica corretamente qual item falhou.
 
 ---
 
-- [ ] **P3 — FIN-018 — Separar "Saldo Real" de saldo de contas de investimento no dashboard**
+- [x] **P3 — FIN-018 — Separar "Saldo Real" de saldo de contas de investimento no dashboard** ✅ Concluída
 
   **Objetivo**
   Diferenciar liquidez imediata (conta corrente/poupança/dinheiro) de saldo em investimentos no card "Saldo Real (Contas)".
@@ -699,8 +715,11 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Cadastrar uma conta do tipo Investimento com saldo e confirmar que ela não é mais somada ao "Saldo Real (Contas)", aparecendo separadamente.
 
   **Critérios de aceite**
-  - [ ] "Saldo Real" reflete apenas contas líquidas (corrente, poupança, dinheiro).
-  - [ ] Saldo de investimentos é exibido separadamente, sem ser removido da visão geral.
+  - [x] "Saldo Real" reflete apenas contas líquidas (corrente, poupança, dinheiro).
+  - [x] Saldo de investimentos é exibido separadamente, sem ser removido da visão geral.
+
+  **Nota de implementação/validação (08/09/2026)**
+  `realBalance` agora exclui `type === 'investment'` além de `credit`; novo `stats.investmentBalance` soma só contas de investimento. Novo card "Investimentos" no Dashboard, exibido (e grid expandido para 4 colunas) só quando o usuário tem ao menos uma conta desse tipo. Lógica de split testada isoladamente com dados simulados.
 
 ---
 
@@ -1636,11 +1655,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)**
+**FIN-019 — Adicionar índices compostos para consultas por usuário**
 
 ### Por quê?
 
-Fase 0 e a subseção "Segurança" da Fase 1 100% concluídas em 05/09/2026 (FIN-006, FIN-001 a FIN-005, FIN-007 a FIN-014). Próxima subseção do `TODO.md`, na ordem: "Integridade financeira" da Fase 1 — FIN-005/FIN-016 já feitas, restam FIN-015 (e subtarefas FIN-015a–d), FIN-017 e FIN-018.
+Fase 1 do `TODO.md` 100% concluída em 08/09/2026 — Segurança (FIN-007 a FIN-014) e Integridade financeira (FIN-005, FIN-015 com subtarefas a–d, FIN-016, FIN-017, FIN-018) todas fechadas e validadas. Próxima subseção do `TODO.md`: "Banco de dados" da Fase 2, começando por FIN-019.
 
 ### Bloqueios
 

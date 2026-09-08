@@ -73,6 +73,14 @@ function computeImportHash(userId, tx) {
   return crypto.createHash('sha256').update(key).digest('hex');
 }
 
+// Converte reais (decimal) para centavos (inteiro) — ver FIN-015. A API da Pluggy retorna
+// valores em reais; o schema local agora armazena tudo em centavos. Duplicado de
+// `src/utils/money.ts` porque backend (Node puro) e frontend (bundle Vite) não
+// compartilham módulos TS neste projeto.
+function toCents(reais) {
+  return Math.round(reais * 100);
+}
+
 // Loga o erro completo no servidor e retorna uma mensagem genérica ao cliente — nunca
 // `error.message`/detalhes internos do Prisma/Node, que podem vazar schema, nomes de
 // coluna etc. (ver FIN-011 em docs/BACKLOG_DETAIL.md).
@@ -108,16 +116,19 @@ function validateBody(schema, body) {
   return { ok: true, data: result.data };
 }
 
+// Campos monetários trafegam em CENTAVOS (inteiro) entre API e frontend — ver FIN-015
+// em docs/BACKLOG_DETAIL.md. `interestRate` é a única exceção: é uma taxa percentual
+// (% ao mês), não um valor monetário, e permanece decimal.
 const ACCOUNT_TYPES = ['checking', 'savings', 'credit', 'investment', 'cash'];
 const accountSchema = z.object({
   name: z.string({ error: 'Nome da conta é obrigatório.' }).trim().min(1, 'Nome da conta é obrigatório.'),
   bank: z.string({ error: 'Banco/operadora é obrigatório.' }).trim().min(1, 'Banco/operadora é obrigatório.'),
   type: z.enum(ACCOUNT_TYPES, { message: `Tipo de conta deve ser um de: ${ACCOUNT_TYPES.join(', ')}.` }),
-  balance: z.coerce.number().finite('Saldo inválido.'),
-  limit: z.coerce.number().finite().nullable().optional(),
+  balance: z.coerce.number().int('Saldo deve ser um valor inteiro em centavos.'),
+  limit: z.coerce.number().int('Limite deve ser um valor inteiro em centavos.').nullable().optional(),
   dueDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
   closingDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
-  pendingBill: z.coerce.number().finite().nullable().optional(),
+  pendingBill: z.coerce.number().int('Fatura deve ser um valor inteiro em centavos.').nullable().optional(),
   color: z.string({ error: 'Cor é obrigatória.' }).trim().min(1, 'Cor é obrigatória.'),
 });
 const accountUpdateSchema = accountSchema.partial();
@@ -127,7 +138,7 @@ const transactionSchema = z.object({
   name: z.string({ error: 'Nome da transação é obrigatório.' }).trim().min(1, 'Nome da transação é obrigatório.'),
   category: z.string({ error: 'Categoria é obrigatória.' }).trim().min(1, 'Categoria é obrigatória.'),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD.'),
-  amount: z.coerce.number().finite('Valor inválido.'),
+  amount: z.coerce.number().int('Valor deve ser um inteiro em centavos.'),
   accountId: z.string().trim().min(1).nullable().optional(),
   paymentType: z.enum(PAYMENT_TYPES).optional(),
 });
@@ -138,20 +149,20 @@ const transactionBatchSchema = z.object({
 const DEBT_CATEGORIES = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
 const debtItemSchema = z.object({
   name: z.string().trim().min(1),
-  amount: z.coerce.number().finite(),
+  amount: z.coerce.number().int(),
   date: z.string().trim().min(1),
 });
 const debtSchema = z.object({
   name: z.string({ error: 'Nome da dívida é obrigatório.' }).trim().min(1, 'Nome da dívida é obrigatório.'),
   description: z.string().trim().nullable().optional(),
   category: z.enum(DEBT_CATEGORIES, { message: `Categoria deve ser uma de: ${DEBT_CATEGORIES.join(', ')}.` }),
-  totalAmount: z.coerce.number().finite().min(0, 'Valor total não pode ser negativo.'),
-  paidAmount: z.coerce.number().finite().min(0, 'Valor pago não pode ser negativo.').optional(),
-  monthlyPayment: z.coerce.number().finite().min(0, 'Parcela mensal não pode ser negativa.'),
+  totalAmount: z.coerce.number().int('Valor total deve ser um inteiro em centavos.').min(0, 'Valor total não pode ser negativo.'),
+  paidAmount: z.coerce.number().int('Valor pago deve ser um inteiro em centavos.').min(0, 'Valor pago não pode ser negativo.').optional(),
+  monthlyPayment: z.coerce.number().int('Parcela mensal deve ser um inteiro em centavos.').min(0, 'Parcela mensal não pode ser negativa.'),
   totalInstallments: z.coerce.number().int().min(1, 'Deve haver ao menos 1 parcela.'),
   paidInstallments: z.coerce.number().int().min(0, 'Parcelas pagas não pode ser negativo.').optional(),
   nextDueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data de vencimento deve estar no formato YYYY-MM-DD.'),
-  interestRate: z.coerce.number().finite().nullable().optional(),
+  interestRate: z.coerce.number().finite().nullable().optional(), // % ao mês, não é dinheiro
   accountId: z.string().trim().min(1).nullable().optional(),
   subItems: z.array(debtItemSchema).optional(),
 });
@@ -513,14 +524,14 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
             name: pluggyAcc.name,
             bank: pluggyAcc.marketingName || 'Banco Conectado',
             type: mapPluggyAccountType(pluggyAcc),
-            balance: pluggyAcc.balance,
+            balance: toCents(pluggyAcc.balance),
             color: '#6366f1',
           }
         });
       } else {
         await prisma.account.updateMany({
           where: { id: localAccount.id, userId },
-          data: { balance: pluggyAcc.balance, name: pluggyAcc.name }
+          data: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name }
         });
       }
 
@@ -541,7 +552,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
             })[0];
             await prisma.account.updateMany({
               where: { id: localAccount.id, userId },
-              data: { pendingBill: currentBill.totalAmount },
+              data: { pendingBill: toCents(currentBill.totalAmount) },
             });
           }
         } catch (billError) {
@@ -574,7 +585,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               name: tx.description,
               category: tx.category || 'Outros',
               date: txDate,
-              amount: tx.amount,
+              amount: toCents(tx.amount),
             }
           });
           totalTxs++;
@@ -585,7 +596,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               name: tx.description,
               category: tx.category || 'Outros',
               date: txDate,
-              amount: tx.amount,
+              amount: toCents(tx.amount),
             }
           });
         }

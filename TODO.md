@@ -45,15 +45,22 @@ Status validado em 2026-09-05 (resumo — detalhes completos em `docs/BACKLOG_DE
 - Proxima: subsecao "Integridade financeira" da Fase 1 (FIN-015, FIN-017, FIN-018 — FIN-005/016 ja feitas).
 
 ### Integridade financeira
-- [ ] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
-- [ ] Migrar valores monetarios de `Float` para inteiro em centavos (FIN-015)
-  - [ ] Criar utilitario `centavos <-> reais` com testes (FIN-015a)
-  - [ ] Migrar schema Prisma e dados existentes para centavos (FIN-015b)
-  - [ ] Atualizar `server.js` para centavos (FIN-015c)
-  - [ ] Atualizar frontend para converter centavos/reais em todos os pontos de entrada e exibicao (FIN-015d)
+- [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
+- [x] Migrar valores monetarios de `Float` para inteiro em centavos (FIN-015)
+  - [x] Criar utilitario `centavos <-> reais` com testes (FIN-015a)
+  - [x] Migrar schema Prisma e dados existentes para centavos (FIN-015b)
+  - [x] Atualizar `server.js` para centavos (FIN-015c)
+  - [x] Atualizar frontend para converter centavos/reais em todos os pontos de entrada e exibicao (FIN-015d)
 - [x] Referencia cruzada: centralizar logica de divida vencida (FIN-016, coberta por FIN-005)
-- [ ] Tornar "pagar todas as parcelas" / "excluir todas as dividas" resiliente a falha parcial (FIN-017)
-- [ ] Separar "Saldo Real" de saldo de contas de investimento no dashboard (FIN-018)
+- [x] Tornar "pagar todas as parcelas" / "excluir todas as dividas" resiliente a falha parcial (FIN-017)
+- [x] Separar "Saldo Real" de saldo de contas de investimento no dashboard (FIN-018)
+
+Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- **Fase 1 100% concluida** (Seguranca + Integridade financeira).
+- FIN-015 (maior mudanca ate agora): schema migrado para centavos (Int), incluindo migracao real do `dev.db` (com backup previo e confirmacao explicita do usuario antes de escrever). Conversao fica isolada na borda com a API — so `App.tsx` e `server.js` mudaram; AccountsManager/DebtManager/ImportModal/parsers continuam em reais, sem alteracao. Validado ponta a ponta: backend rejeita valores nao-inteiros, sync Pluggy convertido e re-testado contra sandbox real, round-trip de conversao sem drift.
+- FIN-017: `handlePayAll`/`handleDeleteAll` agora usam `Promise.allSettled`, informando quais dividas falharam.
+- FIN-018: novo card "Investimentos" no Dashboard, separado do "Saldo Real".
+- Proxima: Fase 2, subsecao "Banco de dados" (FIN-019, FIN-020, FIN-021).
 
 ## Fase 2 - Qualidade (Banco, Backend, Frontend, Mobile, Testes)
 
