@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Plus, Trash2, Edit2, CreditCard, Landmark, PiggyBank, TrendingUp, Wallet } from 'lucide-react';
 import type { Account, AccountType } from '../types';
+import { FormField } from './shared/FormField';
 
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   checking:   'Conta Corrente',
@@ -80,8 +81,8 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete }: Account
 
   return (
     <div>
-      {/* Summary Strip */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      {/* Summary Strip — FIN-029: coluna única abaixo de `sm` para não espremer valores monetários */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <div className="glass-card rounded-2xl p-5">
           <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Saldo Real Total</p>
           <p className={`text-2xl font-bold ${totalBalance >= 0 ? 'text-white' : 'text-red-400'}`}>
@@ -249,15 +250,6 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete }: Account
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">{label}</label>
-      {children}
     </div>
   );
 }

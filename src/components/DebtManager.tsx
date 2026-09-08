@@ -2,7 +2,8 @@ import { useState, useRef } from 'react';
 import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
 import type { Debt, DebtCategory, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
-import { isDebtOverdue, isDebtPaid } from '../utils/debts';
+import { isDebtOverdue, isDebtPaid, computeNextInstallment } from '../utils/debts';
+import { FormField } from './shared/FormField';
 
 const CATEGORY_COLORS: Record<DebtCategory, string> = {
   'Empréstimo':        '#f59e0b',
@@ -32,25 +33,6 @@ interface DebtManagerProps {
   onUpdate: (id: string, debtData: Partial<Debt>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   accounts: Account[];
-}
-
-function advanceMonth(dateString: string): string {
-  const parts = dateString.split('-');
-  if (parts.length !== 3) return dateString;
-  let year = parseInt(parts[0]);
-  let month = parseInt(parts[1]);
-  const day = parseInt(parts[2]);
-
-  month += 1;
-  if (month > 12) {
-    month = 1;
-    year += 1;
-  }
-
-  const yearStr = String(year);
-  const monthStr = String(month).padStart(2, '0');
-  const dayStr = String(day).padStart(2, '0');
-  return `${yearStr}-${monthStr}-${dayStr}`;
 }
 
 export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: DebtManagerProps) {
@@ -120,22 +102,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
   const handlePayInstallment = async (debt: Debt) => {
     if (isPaid(debt)) return;
 
-    const nextPaidInstallments = debt.paidInstallments + 1;
-    let nextPaidAmount = debt.paidAmount + debt.monthlyPayment;
-    if (nextPaidInstallments >= debt.totalInstallments) {
-      nextPaidAmount = debt.totalAmount;
-    } else {
-      nextPaidAmount = Math.min(nextPaidAmount, debt.totalAmount);
-    }
-
-    const nextDueDate = advanceMonth(debt.nextDueDate);
-
     try {
-      await onUpdate(debt.id, {
-        paidInstallments: nextPaidInstallments,
-        paidAmount: nextPaidAmount,
-        nextDueDate,
-      });
+      await onUpdate(debt.id, computeNextInstallment(debt));
     } catch (err) {
       alert("Erro ao pagar parcela: " + (err instanceof Error ? err.message : String(err)));
     }
@@ -253,17 +221,9 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
     if (!confirm(`Deseja pagar uma parcela de todas as ${unpaidDebts.length} dívidas pendentes?`)) return;
 
-    const results = await Promise.allSettled(unpaidDebts.map(debt => {
-      const nextPaidInstallments = debt.paidInstallments + 1;
-      let nextPaidAmount = debt.paidAmount + debt.monthlyPayment;
-      if (nextPaidInstallments >= debt.totalInstallments) {
-        nextPaidAmount = debt.totalAmount;
-      } else {
-        nextPaidAmount = Math.min(nextPaidAmount, debt.totalAmount);
-      }
-      const nextDueDate = advanceMonth(debt.nextDueDate);
-      return onUpdate(debt.id, { paidInstallments: nextPaidInstallments, paidAmount: nextPaidAmount, nextDueDate });
-    }));
+    const results = await Promise.allSettled(
+      unpaidDebts.map(debt => onUpdate(debt.id, computeNextInstallment(debt)))
+    );
 
     const failedNames = results
       .map((r, i) => ({ r, debt: unpaidDebts[i] }))
@@ -327,8 +287,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
+      {/* Summary Cards — FIN-029: coluna única abaixo de `sm` para não espremer valores monetários */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <div className="glass-card rounded-2xl p-5">
           <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Total em Dívidas</p>
           <p className="text-2xl font-bold text-red-400">
@@ -618,15 +578,6 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">{label}</label>
-      {children}
     </div>
   );
 }

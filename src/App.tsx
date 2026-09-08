@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut, Edit2, X
+  LogOut, Edit2, X, Menu
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -13,9 +13,9 @@ import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
-import { isDebtOverdue, todayISO } from './utils/debts';
 import { toCents, toReais } from './utils/money';
 import { apiFetch } from './services/api';
+import { useFinancialStats } from './hooks/useFinancialStats';
 import type { Account, Debt, DebtCategory, Transaction, PaymentType } from './types';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -86,6 +86,8 @@ export default function App() {
   const [txFilter, setTxFilter]       = useState<'all' | 'income' | 'expense'>('all');
   const [dashboardAccountId, setDashboardAccountId] = useState<string | null>(null);
   const [chartPeriod, setChartPeriod] = useState<'30d' | 'all'>('30d');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false); // FIN-028
+  const [showNotifications, setShowNotifications] = useState(false); // FIN-039
   
   const [transactions, setTxs]        = useState<Transaction[]>([]);
   const [accounts, setAccounts]       = useState<Account[]>([]);
@@ -297,75 +299,10 @@ export default function App() {
 
 
   // ---------- Derived stats ----------
-  const stats = useMemo(() => {
-    const activeTxs = dashboardAccountId 
-      ? transactions.filter(t => t.accountId === dashboardAccountId)
-      : transactions;
-      
-    const activeAccs = dashboardAccountId 
-      ? accounts.filter(a => a.id === dashboardAccountId)
-      : accounts;
-      
-    const activeDebts = dashboardAccountId 
-      ? debts.filter(d => d.accountId === dashboardAccountId)
-      : debts;
-
-    const income  = activeTxs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-    const expense = activeTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-    const importedBalance = income - expense;
-
-    const monthMap: Record<string, number> = {};
-    activeTxs.forEach(tx => {
-      const m = tx.date.slice(0, 7);
-      monthMap[m] = (monthMap[m] ?? 0) + tx.amount;
-    });
-    const balanceByMonth = Object.entries(monthMap)
-      .sort(([a], [b]) => a.localeCompare(b)).slice(-7)
-      .map(([k, v]) => ({
-        name: new Date(k + '-15').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
-        balance: +v.toFixed(2),
-      }));
-
-    const catMap: Record<string, number> = {};
-    activeTxs.filter(t => t.amount < 0).forEach(t => {
-      catMap[t.category] = (catMap[t.category] ?? 0) + Math.abs(t.amount);
-    });
-    const expenseByCategory = Object.entries(catMap)
-      .sort(([, a], [, b]) => b - a).slice(0, 6)
-      .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
-
-    const today = todayISO();
-    const mPrefix = today.slice(0, 7);
-    const monthExpense = activeTxs.filter(t => t.amount < 0 && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
-
-    // "Saldo Real" reflete apenas dinheiro líquido disponível (corrente/poupança/dinheiro).
-    // Investimentos são somados separadamente — misturá-los ao saldo líquido pode enganar
-    // o usuário sobre quanto ele realmente tem disponível para gastar (ver FIN-018).
-    const realBalance = activeAccs.filter(a => a.type !== 'credit' && a.type !== 'investment').reduce((s, a) => s + a.balance, 0);
-    const investmentBalance = activeAccs.filter(a => a.type === 'investment').reduce((s, a) => s + a.balance, 0);
-    const pendingBills = activeAccs.filter(a => a.type === 'credit').reduce((s, a) => s + (a.pendingBill ?? 0), 0);
-    const totalActiveDebts = activeDebts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
-
-    const overdueDebts = activeDebts.filter(isDebtOverdue);
-
-    const dailyMap: Record<string, number> = {};
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const startStr = thirtyDaysAgo.toISOString().substring(0, 10);
-    
-    activeTxs.filter(t => t.date >= startStr).forEach(t => {
-       dailyMap[t.date] = (dailyMap[t.date] ?? 0) + t.amount;
-    });
-    const dailyEvolution = Object.entries(dailyMap).sort(([a],[b]) => a.localeCompare(b)).map(([k,v]) => {
-       return { name: k.substring(5).replace('-','/'), balance: v };
-    });
-
-    return {
-      income, expense, importedBalance, balanceByMonth, dailyEvolution,
-      expenseByCategory, monthExpense, realBalance, investmentBalance, pendingBills, activeDebts: totalActiveDebts, overdueDebts,
-      filteredTxsCount: activeTxs.length
-    };
-  }, [transactions, accounts, debts, dashboardAccountId]);
+  // Lógica extraída para src/hooks/useFinancialStats.ts (ver FIN-086 em
+  // docs/BACKLOG_DETAIL.md) — separa a regra de negócio da camada de UI e permite
+  // testá-la sem renderizar componentes (ver FIN-034).
+  const stats = useFinancialStats(transactions, accounts, debts, dashboardAccountId);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -390,25 +327,34 @@ export default function App() {
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 rounded-full blur-[100px] pointer-events-none" style={{ backgroundColor: 'rgba(99,102,241,0.12)' }} />
       <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style={{ backgroundColor: 'rgba(168,85,247,0.07)' }} />
 
-      {/* ── Sidebar ── */}
-      <aside className="w-64 glass-panel border-r border-white/5 hidden md:flex flex-col justify-between z-10">
+      {/* ── Sidebar (FIN-028: drawer off-canvas em mobile, estática em md+) ── */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 bg-black/70 z-40 md:hidden" onClick={() => setMobileNavOpen(false)} />
+      )}
+      <aside className={`w-64 glass-panel border-r border-white/5 flex-col justify-between z-50
+        ${mobileNavOpen ? 'fixed inset-y-0 left-0 flex' : 'hidden'} md:static md:z-10 md:flex`}>
         <div>
-          <div className="p-6 flex items-center space-x-3 text-white">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg"
-              style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>F</div>
-            <span className="text-xl font-bold">Fin<span style={{ color: 'var(--color-primary)', fontWeight: 300 }}>Flow</span></span>
+          <div className="p-6 flex items-center justify-between text-white">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg"
+                style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>F</div>
+              <span className="text-xl font-bold">Fin<span style={{ color: 'var(--color-primary)', fontWeight: 300 }}>Flow</span></span>
+            </div>
+            <button onClick={() => setMobileNavOpen(false)} className="md:hidden p-1.5 rounded-lg text-textMuted hover:text-white hover:bg-white/10 transition-colors">
+              <X size={18}/>
+            </button>
           </div>
 
           <nav className="mt-4 px-4 space-y-1">
-            <NavItem icon={<LayoutDashboard size={18}/>} label="Dashboard" active={activeTab==='dashboard'} onClick={() => setActiveTab('dashboard')} />
-            
+            <NavItem icon={<LayoutDashboard size={18}/>} label="Dashboard" active={activeTab==='dashboard'} onClick={() => { setActiveTab('dashboard'); setMobileNavOpen(false); }} />
+
             <div className="space-y-1">
-              <NavItem icon={<Wallet size={18}/>} label="Contas" active={activeTab==='accounts'} onClick={() => setActiveTab('accounts')} badge={accounts.length > 0 ? accounts.length : undefined} />
-              
+              <NavItem icon={<Wallet size={18}/>} label="Contas" active={activeTab==='accounts'} onClick={() => { setActiveTab('accounts'); setMobileNavOpen(false); }} badge={accounts.length > 0 ? accounts.length : undefined} />
+
               {accounts.length > 0 && (
                 <div className="ml-6 pl-2 border-l border-white/10 space-y-1 mt-1 transition-all">
-                  <NavItem icon={<ArrowRightLeft size={16}/>} label="Transações" active={activeTab==='transactions'} onClick={() => setActiveTab('transactions')} isSubItem />
-                  <NavItem icon={<TrendingDown size={16}/>} label="Dívidas" active={activeTab==='debts'} onClick={() => setActiveTab('debts')} isSubItem
+                  <NavItem icon={<ArrowRightLeft size={16}/>} label="Transações" active={activeTab==='transactions'} onClick={() => { setActiveTab('transactions'); setMobileNavOpen(false); }} isSubItem />
+                  <NavItem icon={<TrendingDown size={16}/>} label="Dívidas" active={activeTab==='debts'} onClick={() => { setActiveTab('debts'); setMobileNavOpen(false); }} isSubItem
                     badge={debts.filter(d => d.paidInstallments < d.totalInstallments).length > 0 ? debts.filter(d => d.paidInstallments < d.totalInstallments).length : undefined}
                     badgeColor={stats.overdueDebts.length > 0 ? '#ef4444' : undefined}
                   />
@@ -429,12 +375,12 @@ export default function App() {
               </button>
           </div>
 
-          <button onClick={() => setActiveTab('accounts')}
+          <button onClick={() => { setActiveTab('accounts'); setMobileNavOpen(false); }}
             className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all shadow-lg"
             style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.25)' }}>
             <Wallet size={15}/> Gerenciar Contas
           </button>
-          <button onClick={() => setShowImport(true)}
+          <button onClick={() => { setShowImport(true); setMobileNavOpen(false); }}
             className="w-full py-3 rounded-xl border border-white/10 text-xs font-medium text-textMuted hover:text-white flex items-center justify-center gap-2 transition-all hover:bg-white/5">
             <Upload size={14}/> Importação Manual
           </button>
@@ -469,19 +415,56 @@ export default function App() {
 
       {/* ── Main Content ── */}
       <main className="flex-1 overflow-y-auto z-10 custom-scrollbar">
-        <header className="sticky top-0 z-20 backdrop-blur-xl bg-[#0a0a0f]/80 border-b border-white/5 px-8 py-5 flex justify-between items-center">
-          <div className="flex items-center gap-4 flex-1">
+        <header className="sticky top-0 z-20 backdrop-blur-xl bg-[#0a0a0f]/80 border-b border-white/5 px-4 md:px-8 py-5 flex justify-between items-center gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            {/* FIN-028: botão hambúrguer, único ponto de entrada para a navegação em mobile */}
+            <button onClick={() => setMobileNavOpen(true)} className="md:hidden p-2 rounded-full hover:bg-white/5 transition-colors text-white shrink-0">
+              <Menu size={22}/>
+            </button>
             <div className="relative w-full max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" size={18} />
-              <input type="text" placeholder="Buscar transações, contas..." value={search} onChange={e => { setSearch(e.target.value); setActiveTab('transactions'); }}
+              {/* FIN-040: só troca para a aba Transações na transição vazio→preenchido
+                  (1ª tecla), não a cada tecla — evita arrancar o usuário de outra aba a
+                  cada caractere digitado. */}
+              <input type="text" placeholder="Buscar transações, contas..." value={search}
+                onChange={e => {
+                  const v = e.target.value;
+                  if (v && !search) setActiveTab('transactions');
+                  setSearch(v);
+                }}
                 className="w-full bg-white/5 border border-white/10 rounded-full pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-primary/50 transition-colors" />
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <button className="relative p-2 rounded-full hover:bg-white/5 transition-colors">
+          <div className="flex items-center gap-4 relative">
+            {/* FIN-039: sino agora abre um dropdown real com as dívidas vencidas, em vez
+                de ser puramente decorativo. */}
+            <button onClick={() => setShowNotifications(o => !o)} className="relative p-2 rounded-full hover:bg-white/5 transition-colors">
               <Bell size={20} className="text-textMuted" />
               {stats.overdueDebts.length > 0 && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#0a0a0f]"/>}
             </button>
+            {showNotifications && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowNotifications(false)} />
+                <div className="absolute right-0 top-full mt-2 w-72 max-w-[90vw] glass-card rounded-2xl p-3 z-40 shadow-2xl">
+                  <p className="text-xs font-semibold text-textMuted uppercase tracking-wide px-2 py-1.5">Notificações</p>
+                  {stats.overdueDebts.length === 0 ? (
+                    <p className="text-sm text-textMuted px-2 py-4 text-center">Nenhuma notificação.</p>
+                  ) : (
+                    <div className="space-y-1 max-h-72 overflow-y-auto">
+                      {stats.overdueDebts.map(d => (
+                        <div key={d.id} className="px-2 py-2 rounded-lg hover:bg-white/5 flex items-center gap-2">
+                          <AlertCircle size={14} className="text-red-400 shrink-0"/>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-white truncate">{d.name}</p>
+                            <p className="text-xs text-red-400">Vencida em {new Date(d.nextDueDate + 'T12:00:00').toLocaleDateString('pt-BR')}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </header>
 

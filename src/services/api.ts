@@ -12,6 +12,20 @@ export interface ApiFetchOptions {
   token?: string | null;
 }
 
+// Carrega o status HTTP e o corpo cru da resposta de erro — permite ao chamador
+// diferenciar tipos de falha (ex. FIN-041: 409 = reautenticação Pluggy necessária) sem
+// quebrar o código existente que só lê `.message` (todo `Error` tem essa propriedade).
+export class ApiError extends Error {
+  status: number;
+  body: Record<string, unknown>;
+  constructor(message: string, status: number, body: Record<string, unknown>) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export async function apiFetch<T = unknown>(endpoint: string, options: ApiFetchOptions = {}): Promise<T> {
   const { method = 'GET', body, token } = options;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -25,7 +39,7 @@ export async function apiFetch<T = unknown>(endpoint: string, options: ApiFetchO
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Erro na API');
+    throw new ApiError(err.error || 'Erro na API', res.status, err);
   }
   return res.json();
 }

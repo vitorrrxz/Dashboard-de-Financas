@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
@@ -72,6 +73,21 @@ function mapPluggyAccountType(pluggyAcc) {
   return 'checking';
 }
 
+// Traduz o `status` de um item Pluggy (ver node_modules/pluggy-sdk/dist/types/item.d.ts)
+// numa mensagem acionável quando indica que a conexão precisa de reautenticação — ver
+// FIN-041 em docs/BACKLOG_DETAIL.md. `null` significa "nada a avisar, prossiga
+// normalmente" (inclui UPDATED, UPDATING, MERGING e os estados de MFA em andamento, que
+// não são erros).
+function pluggyReauthMessage(status) {
+  if (status === 'LOGIN_ERROR') {
+    return 'A conexão com este banco expirou ou as credenciais mudaram. Reconecte o banco para continuar sincronizando.';
+  }
+  if (status === 'OUTDATED') {
+    return 'A última tentativa de sincronização deste banco falhou. Tente novamente; se o problema persistir, reconecte o banco.';
+  }
+  return null;
+}
+
 // Chave determinística de deduplicação para importação manual (CSV/OFX) — ver FIN-003.
 // Quando o extrato traz um `externalId` (FITID do OFX — identificador estável atribuído
 // pelo próprio banco), ele é usado como chave: é a identidade real da transação, evitando
@@ -109,9 +125,12 @@ function sendInternalError(res, error, publicMessage = 'Erro interno do servidor
 
 // Rate limit nas rotas de autenticação — mitiga força bruta e enumeração de credenciais
 // (ver FIN-007 em docs/BACKLOG_DETAIL.md). Não afeta as demais rotas da API.
+// Limite configurável via env var só para não estourar em testes de integração (FIN-031 a
+// FIN-033), que fazem dezenas de register/login em sequência contra o mesmo app — em
+// produção, sem AUTH_RATE_LIMIT definida, o limite continua 10 (mesmo valor de antes).
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  limit: 10,
+  limit: Number(process.env.AUTH_RATE_LIMIT) || 10,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' },
@@ -563,7 +582,14 @@ app.post('/api/pluggy/connect-item', authenticateToken, async (req, res) => {
       },
     });
 
-    res.json({ success: true, providerName: pluggyItem.connector.name });
+    // Reporta o status do item já na conexão inicial (ver FIN-041) — um item pode nascer
+    // em LOGIN_ERROR (ex. credenciais rejeitadas pelo banco na primeira tentativa).
+    res.json({
+      success: true,
+      providerName: pluggyItem.connector.name,
+      pluggyStatus: pluggyItem.status,
+      statusMessage: pluggyReauthMessage(pluggyItem.status),
+    });
   } catch (error) {
     sendInternalError(res, error, 'Erro ao registrar conexão bancária.');
   }
@@ -575,6 +601,16 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
 
   try {
+    // Verifica o status do item antes de tentar sincronizar (ver FIN-041 em
+    // docs/BACKLOG_DETAIL.md) — sem isso, uma conexão que exige reautenticação
+    // (LOGIN_ERROR/OUTDATED) falhava na sincronização com um erro genérico, sem indicar
+    // ao usuário que a ação necessária é reconectar o banco.
+    const pluggyItem = await getPluggyClient().fetchItem(itemId);
+    const reauthMessage = pluggyReauthMessage(pluggyItem.status);
+    if (reauthMessage) {
+      return res.status(409).json({ error: reauthMessage, pluggyStatus: pluggyItem.status });
+    }
+
     const accountsRes = await getPluggyClient().fetchAccounts(itemId);
     if (!accountsRes.results || accountsRes.results.length === 0) {
       return res.status(404).json({ error: 'Nenhuma conta encontrada para este item.' });
@@ -623,43 +659,69 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
         }
       }
 
-      // Busca transações do último mês
+      // Busca transações do último mês, paginando até obter todas — a API da Pluggy pagina
+      // por padrão (20 itens/página, máx. 500), então sem este loop uma conta com mais
+      // transações que uma página perderia dados silenciosamente (ver FIN-038 em
+      // docs/BACKLOG_DETAIL.md).
       const oneMonthAgo = new Date();
       oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
       const fromDate = oneMonthAgo.toISOString().split('T')[0];
 
-      const txsRes = await getPluggyClient().fetchTransactions(pluggyAcc.id, { from: fromDate });
+      const allPluggyTxs = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const txsRes = await getPluggyClient().fetchTransactions(pluggyAcc.id, { from: fromDate, page, pageSize: 500 });
+        allPluggyTxs.push(...txsRes.results);
+        totalPages = txsRes.totalPages;
+        page++;
+      } while (page <= totalPages);
 
-      for (const tx of txsRes.results) {
-        const txDate = tx.date.toISOString().split('T')[0];
-        const pluggyTxId = tx.id;
+      // FIN-037: busca de uma vez os `pluggyId` já existentes desta sincronização (1
+      // consulta), em vez de um `findFirst` por transação (N consultas). Transações já
+      // existentes não são mais atualizadas — dados bancários já efetivados raramente
+      // mudam — só as novas são gravadas, via `createMany` (1 round-trip em vez de N
+      // upserts), reduzindo o custo de N+1 consultas/gravações para O(1) por conta.
+      const existingIds = new Set(
+        (await prisma.transaction.findMany({
+          where: { userId, pluggyId: { in: allPluggyTxs.map(t => t.id) } },
+          select: { pluggyId: true },
+        })).map(t => t.pluggyId)
+      );
 
-        // Checagem só para contabilizar `totalTxs` (quantas são novas) — a escrita em si
-        // usa upsert com a constraint (userId, pluggyId), atômica a nível de banco e
-        // segura contra duas sincronizações concorrentes (ver FIN-021).
-        const existingTx = await prisma.transaction.findFirst({
-          where: { userId, pluggyId: pluggyTxId }
-        });
-        if (!existingTx) totalTxs++;
+      const newPluggyTxs = allPluggyTxs.filter(tx => !existingIds.has(tx.id));
+      totalTxs += newPluggyTxs.length;
 
-        await prisma.transaction.upsert({
-          where: { userId_pluggyId: { userId, pluggyId: pluggyTxId } },
-          create: {
-            userId,
-            accountId: localAccount.id,
-            pluggyId: pluggyTxId,
-            name: tx.description,
-            category: tx.category || 'Outros',
-            date: txDate,
-            amount: toCents(tx.amount),
-          },
-          update: {
-            name: tx.description,
-            category: tx.category || 'Outros',
-            date: txDate,
-            amount: toCents(tx.amount),
-          },
-        });
+      if (newPluggyTxs.length > 0) {
+        const data = newPluggyTxs.map(tx => ({
+          userId,
+          accountId: localAccount.id,
+          pluggyId: tx.id,
+          name: tx.description,
+          category: tx.category || 'Outros',
+          date: tx.date.toISOString().split('T')[0],
+          amount: toCents(tx.amount),
+        }));
+        try {
+          await prisma.transaction.createMany({ data });
+        } catch (err) {
+          // Corrida rara: outra sincronização inseriu a mesma transação entre o
+          // `findMany` acima e este `createMany` (que, ao contrário de `create`
+          // individual, falha inteiro — não por linha — ao violar a constraint única, e
+          // o SQLite não suporta `skipDuplicates` no Prisma). Cai para upsert linha a
+          // linha só neste caso raro, protegido pela constraint (ver FIN-021).
+          if (err.code === 'P2002') {
+            for (const t of data) {
+              await prisma.transaction.upsert({
+                where: { userId_pluggyId: { userId, pluggyId: t.pluggyId } },
+                create: t,
+                update: {},
+              });
+            }
+          } else {
+            throw err;
+          }
+        }
       }
     }
 
@@ -669,6 +731,18 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Finance Dashboard API Proxy running on http://localhost:${PORT}`);
-});
+// Só sobe o servidor de verdade quando este arquivo é executado diretamente (`node
+// server.js`/`nodemon server.js`) — não quando é importado por um teste (ver FIN-031 em
+// docs/BACKLOG_DETAIL.md). `app` é exportado para que os testes de integração (Supertest)
+// façam requisições contra ele em memória, sem abrir uma porta TCP real nem depender de um
+// servidor já rodando.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  app.listen(PORT, () => {
+    console.log(`Finance Dashboard API Proxy running on http://localhost:${PORT}`);
+  });
+}
+
+// `prisma` também exportado para que os testes possam chamar `$disconnect()` no
+// `afterAll` — sem isso, better-sqlite3 mantém o arquivo aberto e a limpeza do banco de
+// teste (`unlink`) falha com `EBUSY` no Windows (ver FIN-031).
+export { app, prisma, pluggyReauthMessage };
