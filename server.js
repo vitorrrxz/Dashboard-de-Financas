@@ -472,24 +472,21 @@ app.post('/api/pluggy/connect-item', authenticateToken, async (req, res) => {
     const pluggyItem = await pluggyClient.fetchItem(itemId);
     const userId = req.user.userId;
 
-    // Cria ou atualiza a conta representando o banco conectado
-    const existing = await prisma.account.findFirst({
-      where: { userId, pluggyId: itemId }
+    // Upsert usando a constraint (userId, pluggyId) — atômico a nível de banco, evita
+    // duplicar a conta se duas requisições chegarem em paralelo (ver FIN-021).
+    await prisma.account.upsert({
+      where: { userId_pluggyId: { userId, pluggyId: itemId } },
+      update: {}, // já existe — nada a atualizar aqui, o sync cuida dos dados reais da conta
+      create: {
+        userId,
+        pluggyId: itemId,
+        name: pluggyItem.connector.name,
+        bank: pluggyItem.connector.name,
+        type: 'checking',
+        balance: 0,
+        color: '#6366f1',
+      },
     });
-
-    if (!existing) {
-      await prisma.account.create({
-        data: {
-          userId,
-          pluggyId: itemId,
-          name: pluggyItem.connector.name,
-          bank: pluggyItem.connector.name,
-          type: 'checking',
-          balance: 0,
-          color: '#6366f1',
-        }
-      });
-    }
 
     res.json({ success: true, providerName: pluggyItem.connector.name });
   } catch (error) {
@@ -511,29 +508,20 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
     let totalTxs = 0;
 
     for (const pluggyAcc of accountsRes.results) {
-      // Upsert da conta usando pluggyId
-      let localAccount = await prisma.account.findFirst({
-        where: { userId, pluggyId: pluggyAcc.id }
+      // Upsert atômico via constraint (userId, pluggyId) — ver FIN-021.
+      const localAccount = await prisma.account.upsert({
+        where: { userId_pluggyId: { userId, pluggyId: pluggyAcc.id } },
+        create: {
+          userId,
+          pluggyId: pluggyAcc.id,
+          name: pluggyAcc.name,
+          bank: pluggyAcc.marketingName || 'Banco Conectado',
+          type: mapPluggyAccountType(pluggyAcc),
+          balance: toCents(pluggyAcc.balance),
+          color: '#6366f1',
+        },
+        update: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name },
       });
-
-      if (!localAccount) {
-        localAccount = await prisma.account.create({
-          data: {
-            userId,
-            pluggyId: pluggyAcc.id,
-            name: pluggyAcc.name,
-            bank: pluggyAcc.marketingName || 'Banco Conectado',
-            type: mapPluggyAccountType(pluggyAcc),
-            balance: toCents(pluggyAcc.balance),
-            color: '#6366f1',
-          }
-        });
-      } else {
-        await prisma.account.updateMany({
-          where: { id: localAccount.id, userId },
-          data: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name }
-        });
-      }
 
       // Para cartões de crédito, busca a fatura real via endpoint dedicado da Pluggy
       // e atualiza `pendingBill` — não é possível inferir a fatura a partir de `balance`
@@ -571,35 +559,32 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
         const txDate = tx.date.toISOString().split('T')[0];
         const pluggyTxId = tx.id;
 
-        // Upsert usando pluggyId como chave de idempotência
+        // Checagem só para contabilizar `totalTxs` (quantas são novas) — a escrita em si
+        // usa upsert com a constraint (userId, pluggyId), atômica a nível de banco e
+        // segura contra duas sincronizações concorrentes (ver FIN-021).
         const existingTx = await prisma.transaction.findFirst({
           where: { userId, pluggyId: pluggyTxId }
         });
+        if (!existingTx) totalTxs++;
 
-        if (!existingTx) {
-          await prisma.transaction.create({
-            data: {
-              userId,
-              accountId: localAccount.id,
-              pluggyId: pluggyTxId,
-              name: tx.description,
-              category: tx.category || 'Outros',
-              date: txDate,
-              amount: toCents(tx.amount),
-            }
-          });
-          totalTxs++;
-        } else {
-          await prisma.transaction.updateMany({
-            where: { id: existingTx.id, userId },
-            data: {
-              name: tx.description,
-              category: tx.category || 'Outros',
-              date: txDate,
-              amount: toCents(tx.amount),
-            }
-          });
-        }
+        await prisma.transaction.upsert({
+          where: { userId_pluggyId: { userId, pluggyId: pluggyTxId } },
+          create: {
+            userId,
+            accountId: localAccount.id,
+            pluggyId: pluggyTxId,
+            name: tx.description,
+            category: tx.category || 'Outros',
+            date: txDate,
+            amount: toCents(tx.amount),
+          },
+          update: {
+            name: tx.description,
+            category: tx.category || 'Outros',
+            date: txDate,
+            amount: toCents(tx.amount),
+          },
+        });
       }
     }
 
