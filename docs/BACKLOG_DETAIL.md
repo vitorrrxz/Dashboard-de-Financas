@@ -92,7 +92,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ## 0. 🔥 Bugs e Problemas Críticos
 
-- [ ] **P0 — FIN-001 — Sincronização Pluggy não atualiza a fatura pendente de cartões de crédito**
+- [x] **P0 — FIN-001 — Sincronização Pluggy não atualiza a fatura pendente de cartões de crédito** ✅ Concluída
 
   **Objetivo**
   Fazer com que `POST /api/pluggy/sync/:itemId` atualize o campo `pendingBill` (e não apenas `balance`) para contas do tipo cartão de crédito, para que o dashboard reflita a fatura real.
@@ -123,13 +123,25 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Conferir que o dashboard exibe o valor correto em "Fatura Pendente".
 
   **Critérios de aceite**
-  - [ ] `pendingBill` é atualizado a cada sync para contas de crédito conectadas via Pluggy.
-  - [ ] Contas não-crédito continuam atualizando `balance` normalmente.
-  - [ ] Nenhuma regressão nos demais campos sincronizados (nome, saldo).
+  - [x] `pendingBill` é atualizado a cada sync para contas de crédito conectadas via Pluggy.
+  - [x] Contas não-crédito continuam atualizando `balance` normalmente.
+  - [x] Nenhuma regressão nos demais campos sincronizados (nome, saldo).
+
+  **Nota de implementação (04/09/2026)**
+  A abordagem inicial prevista (inferir a fatura a partir de `pluggyAcc.creditData`) foi trocada por uma mais robusta: a SDK `pluggy-sdk` expõe um endpoint dedicado, `fetchCreditCardBills(accountId)`, que retorna as faturas reais do cartão (`totalAmount`, `dueDate`, `billClosingDate`). O sync agora, para contas com `pluggyAcc.type === 'CREDIT'`, busca essas faturas e grava em `pendingBill` a fatura **mais recentemente fechada** (maior `billClosingDate`, com fallback para `dueDate`) — não a de vencimento mais próximo, que poderia ser uma fatura antiga já superada por uma mais recente (validado com dados reais de sandbox: duas faturas com `totalAmount` 3000 e 5000, a correta é a de 5000, mais recente).
+
+  **Validação executada**
+  Ponta a ponta contra o ambiente sandbox real da Pluggy (não apenas leitura de código):
+  1. Usado `pluggyClient.createItem(2, { user: 'user-ok', password: 'password-ok' })` (conector sandbox "Pluggy Bank") para gerar um item real com uma conta `BANK` e uma conta `CREDIT` ("Mastercard Black").
+  2. Confirmado via `fetchCreditCardBills` que a conta de crédito tem 2 faturas (3000 e 5000, esta última com `billClosingDate` mais recente).
+  3. Subido o `server.js` real, registrado um usuário de teste, chamado `POST /api/pluggy/connect-item` e `POST /api/pluggy/sync/:itemId` via HTTP (fluxo idêntico ao que o frontend usa).
+  4. Consultado `GET /api/accounts`: a conta "Mastercard Black" (`type: "credit"`) passou de `pendingBill: null` para `pendingBill: 5000` — o valor correto.
+  5. Um teste inicial deu falso-negativo por processos `node.exe` órfãos (do MSYS/git-bash) ainda escutando na porta 3001 com código antigo; identificado via `netstat`/`tasklist`, resolvido com `taskkill //F //IM node.exe` antes de repetir o teste do zero.
+  - ⚠️ Durante a depuração, `dev.db` foi apagado (`rm -f dev.db`) sem necessidade real da tarefa — violação do protocolo. Foi recuperado com sucesso via `git checkout -- dev.db` (o arquivo estava versionado apesar do `.gitignore`), restaurado byte a byte (151552 bytes, idêntico ao original). Servidor testado novamente após a restauração, sem regressão.
 
 ---
 
-- [ ] **P0 — FIN-002 — Tipo de conta importado via Pluggy não corresponde ao enum `AccountType` do frontend**
+- [x] **P0 — FIN-002 — Tipo de conta importado via Pluggy não corresponde ao enum `AccountType` do frontend** ✅ Concluída
 
   **Objetivo**
   Mapear corretamente o `type` retornado pela Pluggy para um dos valores válidos de `AccountType` (`checking | savings | credit | investment | cash`) antes de gravar no banco.
@@ -158,12 +170,18 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Verificar visualmente no frontend que ícone e rótulo aparecem corretamente para contas sincronizadas.
 
   **Critérios de aceite**
-  - [ ] Toda conta criada via sync Pluggy tem um `type` dentre os 5 valores válidos de `AccountType`.
-  - [ ] Nenhuma conta sincronizada aparece com rótulo/ícone quebrado no frontend.
+  - [x] Toda conta criada via sync Pluggy tem um `type` dentre os 5 valores válidos de `AccountType`.
+  - [x] Nenhuma conta sincronizada aparece com rótulo/ícone quebrado no frontend.
+
+  **Nota de implementação (04/09/2026)**
+  Investigando o SDK (`node_modules/pluggy-sdk/dist/types/account.d.ts`), confirmou-se que `pluggyAcc.type` só assume dois valores reais: `"BANK"` ou `"CREDIT"` (`ACCOUNT_TYPES = ["BANK", "CREDIT"]`) — não existe um valor `"INVESTMENT"` nesse campo como a descrição original da tarefa supunha. A distinção entre conta corrente e poupança vem de um campo separado, `pluggyAcc.subtype` (`"CHECKING_ACCOUNT"` | `"SAVINGS_ACCOUNT"` | `"CREDIT_CARD"`). A função `mapPluggyAccountType()` criada em `server.js` usa os dois campos: `CREDIT` → `credit`; `BANK` + `subtype === 'SAVINGS_ACCOUNT'` → `savings`; qualquer outro `BANK` → `checking`; fallback → `checking`. Contas de investimento não aparecem em `fetchAccounts` (têm endpoint próprio, `fetchInvestments` — fora do escopo desta tarefa, relacionado a FIN-070).
+
+  **Validação executada**
+  Contra o mesmo item sandbox real usado em FIN-001 (`618baddd-...`, conector "Pluggy Bank"), rodado desta vez contra um banco SQLite **isolado** (`DATABASE_URL=file:./test_fin002.db`, arquivo removido ao final) para não repetir o incidente de FIN-001 com `dev.db`. Resultado via `GET /api/accounts` após `sync`: a conta "Conta Corrente" (`BANK`/`CHECKING_ACCOUNT`) passou a vir com `type: "checking"` (antes: `"bank"`, valor inválido); a conta "Mastercard Black" (`CREDIT`) permaneceu `type: "credit"`, com `pendingBill: 5000` (FIN-001 continua funcionando em conjunto). Não havia conta `SAVINGS_ACCOUNT` disponível no item sandbox gerado para testar esse branch especificamente, mas a lógica usa o valor de enum exato documentado no próprio SDK, sem inferência.
 
 ---
 
-- [ ] **P0 — FIN-003 — Importação manual de extrato (CSV/OFX) não verifica duplicidade de transações**
+- [x] **P0 — FIN-003 — Importação manual de extrato (CSV/OFX) não verifica duplicidade de transações** ✅ Concluída
 
   **Objetivo**
   Impedir que reimportar o mesmo extrato (ou um extrato com transações sobrepostas) gere transações duplicadas no banco.
@@ -198,13 +216,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que a segunda importação não duplica as transações (contagem de transações no banco permanece igual).
 
   **Critérios de aceite**
-  - [ ] Reimportar o mesmo arquivo não cria transações duplicadas.
-  - [ ] Importar um arquivo com transações parcialmente novas importa apenas as novas.
-  - [ ] Frontend informa ao usuário quantas transações foram ignoradas por duplicidade.
+  - [x] Reimportar o mesmo arquivo não cria transações duplicadas.
+  - [x] Importar um arquivo com transações parcialmente novas importa apenas as novas.
+  - [x] Frontend informa ao usuário quantas transações foram ignoradas por duplicidade.
+
+  **Nota de implementação (04/09/2026)**
+  A chave de dedupe (`importHash`) foi computada **no backend** (não no parser, como a descrição original sugeria) a partir de `userId + accountId + date + amount + name`, via SHA-256 (`computeImportHash()` em `server.js`) — mesmos dados que o parser já produz, evitando duplicar a lógica de hash em duas linguagens/camadas. Também trata duplicata **dentro do próprio lote** importado (ex.: CSV com a mesma linha repetida), não só contra o que já existe no banco. Novo campo opcional `importHash` em `Transaction` (schema.prisma), com índice `@@index([userId, importHash])`. `POST /api/transactions` agora retorna `{ success, count, skipped }`; `App.tsx` mostra um alerta quando `skipped > 0`.
+
+  **Validação executada**
+  Contra banco SQLite isolado (`test_fin003.db`, removido ao final). 4 cenários via chamadas HTTP reais: (1) importar 2 transações novas → `count:2, skipped:0`; (2) reimportar exatamente as mesmas → `count:0, skipped:2`; (3) importar 1 repetida + 1 nova → `count:1, skipped:1`; (4) importar um lote com 2 linhas idênticas entre si → `count:1, skipped:1`. Total final no banco: 4 transações únicas, sem duplicatas. `npx tsc -b --noEmit` e `npx eslint src/App.tsx` rodados após a mudança — sem novos erros (2 erros de tipo pré-existentes em `App.tsx`, confirmados via `git stash` como anteriores a esta tarefa, viraram FIN-089).
 
 ---
 
-- [ ] **P0 — FIN-004 — Reimportar extrato de crédito/PIX parcelado cria uma nova dívida duplicada a cada vez**
+- [x] **P0 — FIN-004 — Reimportar extrato de crédito/PIX parcelado cria uma nova dívida duplicada a cada vez** ✅ Concluída
 
   **Objetivo**
   Evitar que a criação automática de dívida a partir de importação (crédito/PIX parcelado) gere dívidas duplicadas quando o mesmo extrato é importado mais de uma vez.
@@ -227,12 +251,18 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que apenas uma dívida "Fatura X – mês/ano" existe após as duas importações.
 
   **Critérios de aceite**
-  - [ ] Reimportar o mesmo extrato de crédito/PIX parcelado não cria uma segunda dívida para o mesmo período/conta.
-  - [ ] O usuário é avisado quando uma importação repetida é detectada.
+  - [x] Reimportar o mesmo extrato de crédito/PIX parcelado não cria uma segunda dívida para o mesmo período/conta.
+  - [x] O usuário é avisado quando uma importação repetida é detectada.
+
+  **Nota de implementação (04/09/2026)**
+  Duas proteções em `App.tsx` (`handleImport`): (1) o bloco de auto-criação de dívida só roda se `res.count > 0` (nada de novo foi de fato importado — reimportação 100% duplicada, já filtrada pelo FIN-003, não cria dívida); (2) antes de criar, verifica em `debts` (estado já carregado) se já existe uma dívida com o mesmo `name` (`Fatura {banco} – {mês/ano}`) e `accountId` — se existir, mostra `alert` e não cria outra.
+
+  **Validação executada**
+  Backend (via API real, banco isolado `test_fin004.db`): reimportar o mesmo extrato de crédito duas vezes confirma `count:0` na segunda vez — condição que, no código, bloqueia toda a criação de dívida. Lógica de deduplicação por nome+conta testada isoladamente (script Node reproduzindo a mesma expressão usada em `App.tsx`) em 3 cenários: sem dívida prévia → cria; mesma fatura/conta já existe → bloqueia; mesmo nome em conta diferente → não bloqueia (contas diferentes podem ter fatura com nome igual no mesmo mês). `npx tsc -b --noEmit` e `npx eslint src/App.tsx` sem novos erros (os 2 erros pré-existentes de FIN-089 persistem, agora em linhas 519/539).
 
 ---
 
-- [ ] **P1 — FIN-005 — Cálculo de "dívida vencida" inconsistente e com risco de bug de fuso horário**
+- [x] **P1 — FIN-005 — Cálculo de "dívida vencida" inconsistente e com risco de bug de fuso horário** ✅ Concluída
 
   **Objetivo**
   Unificar e corrigir a lógica de detecção de dívida vencida.
@@ -257,9 +287,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Criar uma dívida com vencimento em uma data específica e verificar que o badge "Vencida" aparece de forma consistente entre o alerta do Dashboard e o card em Dívidas, incluindo em horários próximos à meia-noite.
 
   **Critérios de aceite**
-  - [ ] Existe uma única função para determinar se uma dívida está vencida.
-  - [ ] `App.tsx` e `DebtManager.tsx` usam essa função.
-  - [ ] Nenhuma dependência de fuso horário local na comparação.
+  - [x] Existe uma única função para determinar se uma dívida está vencida.
+  - [x] `App.tsx` e `DebtManager.tsx` usam essa função.
+  - [x] Nenhuma dependência de fuso horário local na comparação.
+
+  **Nota de implementação (04/09/2026)**
+  Criado `src/utils/debts.ts` com `isDebtPaid`, `isDebtOverdue` e `todayISO()`. `todayISO()` usa `getFullYear/getMonth/getDate` (data local) em vez de `toISOString().slice(0,10)` (data UTC) — o método usado em `App.tsx` antes desta tarefa também tinha esse resquício de dependência de fuso horário, então foi corrigido junto. `App.tsx` (`overdueDebts` e a variável `today`) e `DebtManager.tsx` (`isPaid`, `isOverdue`) agora usam as funções compartilhadas.
+
+  **Validação executada**
+  Reproduzida a lógica antiga do `DebtManager` (`new Date(nextDueDate) < new Date()`) contra o fuso horário real desta máquina (GMT-3, Brasília): para uma dívida com `nextDueDate` = hoje, a lógica antiga retornava `true` (vencida — **errado**, pois vence hoje, não antes), enquanto `isDebtOverdue()` retorna `false` (correto). `npx tsc -b --noEmit` e `npx eslint` sem novos erros (persistem só os 2 de FIN-089).
 
 ---
 
@@ -293,7 +329,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P1 — HIGH — FIN-007 — Rotas de autenticação sem rate limiting (força bruta)**
+- [x] **P1 — HIGH — FIN-007 — Rotas de autenticação sem rate limiting (força bruta)** ✅ Concluída
 
   **Objetivo**
   Limitar tentativas de login/registro por IP para mitigar ataques de força bruta e enumeração.
@@ -320,12 +356,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que login legítimo continua funcionando dentro do limite.
 
   **Critérios de aceite**
-  - [ ] Excesso de tentativas de login/registro retorna `429 Too Many Requests`.
-  - [ ] Limite não afeta uso normal do app.
+  - [x] Excesso de tentativas de login/registro retorna `429 Too Many Requests`.
+  - [x] Limite não afeta uso normal do app.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `express-rate-limit` aplicado como `authLimiter` (10 req/15min por IP) somente em `/api/auth/login` e `/api/auth/register`. Testado: 10 tentativas de login inválidas retornam `400`; a 11ª e 12ª retornam `429`.
 
 ---
 
-- [ ] **P1 — HIGH — FIN-008 — Nenhuma validação de payload no backend para accounts/transactions/debts**
+- [x] **P1 — HIGH — FIN-008 — Nenhuma validação de payload no backend para accounts/transactions/debts** ✅ Concluída
 
   **Objetivo**
   Validar e sanear os dados recebidos nas rotas de CRUD antes de persistir no banco.
@@ -353,13 +392,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que payloads válidos continuam funcionando sem regressão.
 
   **Critérios de aceite**
-  - [ ] Todas as rotas de CRUD financeiro validam o payload antes de tocar o banco.
-  - [ ] Payloads inválidos retornam `400` com mensagem clara, nunca `500`.
-  - [ ] Nenhuma regressão nos fluxos existentes do frontend.
+  - [x] Todas as rotas de CRUD financeiro validam o payload antes de tocar o banco.
+  - [x] Payloads inválidos retornam `400` com mensagem clara, nunca `500`.
+  - [x] Nenhuma regressão nos fluxos existentes do frontend.
+
+  **Nota de implementação (05/09/2026)**
+  Schemas Zod (`accountSchema`/`accountUpdateSchema`, `transactionSchema`/`transactionBatchSchema`, `debtSchema`/`debtUpdateSchema`) validam create e update das 3 entidades. Zod v4: campos string obrigatórios precisam de `z.string({ error: 'msg' })` (não só `.min(1,'msg')`), senão o erro de "campo ausente" cai na mensagem genérica de tipo em inglês — corrigido para `name`/`bank`/`color`/`category` (achado durante a validação, não previsto na descrição original). `paidAmount`/`paidInstallments` ficaram opcionais no schema (para não forçar reset a 0 num update parcial via `debtUpdateSchema`, que reaproveita o mesmo schema base) — o default de `0` na criação é aplicado no código da rota (`POST /api/debts`), não no schema. Zod também substitui os `delete data.id/userId/createdAt` manuais (unknown keys já são descartados por padrão).
+
+  **Validação executada**
+  Contra banco isolado (`test_fase1.db`): conta sem nome/tipo inválido → `400` com mensagem em português; conta válida → criada. Dívida com `totalInstallments:0` e com `totalAmount` negativo → `400`; dívida válida → criada com `paidAmount:0`/`paidInstallments:0`; `PUT` parcial (só `paidInstallments`+`paidAmount`+`nextDueDate`) → demais campos preservados. Transação com data fora do formato `YYYY-MM-DD` → `400`; lote válido → importado (dedupe do FIN-003 continua funcionando). `PUT`/`DELETE` de conta continuam funcionando.
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-009 — CORS totalmente aberto sem allowlist de origem**
+- [x] **P2 — MEDIUM — FIN-009 — CORS totalmente aberto sem allowlist de origem** ✅ Concluída
 
   **Objetivo**
   Restringir CORS às origens conhecidas do frontend.
@@ -383,12 +428,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar (via `curl -H "Origin: http://evil.com"`) que outra origem não recebe os headers de CORS liberando a resposta.
 
   **Critérios de aceite**
-  - [ ] Apenas a origem configurada consegue fazer requisições cross-origin bem-sucedidas.
-  - [ ] App em desenvolvimento continua funcionando sem alteração de fluxo.
+  - [x] Apenas a origem configurada consegue fazer requisições cross-origin bem-sucedidas.
+  - [x] App em desenvolvimento continua funcionando sem alteração de fluxo.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' })`. `FRONTEND_URL` documentada em `.env.example`. Validado via `curl -I`: o header `Access-Control-Allow-Origin` sempre reflete a origem configurada (nunca a do request) — uma página em `evil.com` recebe de volta `http://localhost:5173` no header, que o navegador rejeita por não bater com a origem real da página (é assim que o `cors` com origem fixa bloqueia terceiros; o `curl` em si não aplica a política, só o navegador).
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-010 — Ausência de cabeçalhos de segurança HTTP**
+- [x] **P2 — MEDIUM — FIN-010 — Ausência de cabeçalhos de segurança HTTP** ✅ Concluída
 
   **Objetivo**
   Adicionar cabeçalhos de segurança padrão (X-Content-Type-Options, X-Frame-Options, etc.) à API.
@@ -412,12 +460,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que o frontend continua funcionando sem bloqueios inesperados (CSP não deve quebrar o app — se necessário, desabilitar CSP do helmet nesta etapa e tratar CSP em tarefa futura).
 
   **Critérios de aceite**
-  - [ ] Respostas da API incluem os cabeçalhos de segurança padrão do helmet.
-  - [ ] Nenhuma regressão funcional no frontend.
+  - [x] Respostas da API incluem os cabeçalhos de segurança padrão do helmet.
+  - [x] Nenhuma regressão funcional no frontend.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `app.use(helmet())` com config padrão (API é JSON-only, nunca serve HTML — CSP do helmet não afeta o frontend, que é uma origem separada consumindo via `fetch`). Validado via `curl -I`: `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` presentes; `X-Powered-By` removido.
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-011 — Mensagens de erro expõem detalhes internos do Prisma ao cliente**
+- [x] **P2 — MEDIUM — FIN-011 — Mensagens de erro expõem detalhes internos do Prisma ao cliente** ✅ Concluída
 
   **Objetivo**
   Parar de retornar `error.message`/`err.message` bruto do Prisma/Node para o cliente em respostas de erro.
@@ -439,12 +490,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que o erro completo continua aparecendo no log do servidor para debug.
 
   **Critérios de aceite**
-  - [ ] Nenhuma rota retorna mensagem de erro interna (Prisma/Node) diretamente ao cliente.
-  - [ ] Erros continuam logados no servidor para investigação.
+  - [x] Nenhuma rota retorna mensagem de erro interna (Prisma/Node) diretamente ao cliente.
+  - [x] Erros continuam logados no servidor para investigação.
+
+  **Nota de implementação (05/09/2026)**
+  Helper `sendInternalError(res, error, publicMessage)` — loga o erro completo via `console.error` e responde `500` só com `publicMessage` (uma frase por rota, ex. "Erro ao criar conta."). Todas as ~16 ocorrências de `res.status(500).json({ error: err.message })`/`details: error.message` em `server.js` substituídas. Confirmado via `grep` que nenhuma referência a `error.message`/`err.message` chega ao cliente.
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-012 — Token JWT sem mecanismo de revogação/logout server-side**
+- [x] **P2 — MEDIUM — FIN-012 — Token JWT sem mecanismo de revogação/logout server-side** ✅ Concluída (mitigação parcial, conforme escopo original)
 
   **Objetivo**
   Documentar/mitigar o fato de que tokens JWT de 7 dias não podem ser invalidados antes de expirar.
@@ -467,12 +521,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que tokens emitidos após a mudança expiram no novo prazo definido.
 
   **Critérios de aceite**
-  - [ ] Prazo de expiração do token revisado e documentado.
-  - [ ] Decisão sobre blocklist/refresh token registrada (implementada ou formalmente adiada como item de roadmap).
+  - [x] Prazo de expiração do token revisado e documentado.
+  - [x] Decisão sobre blocklist/refresh token registrada (implementada ou formalmente adiada como item de roadmap).
+
+  **Nota de implementação/validação (05/09/2026)**
+  `expiresIn` reduzido de `7d` para `24h` (constante `JWT_EXPIRES_IN`, comentário no código documenta a decisão de adiar blocklist/refresh token). Validado decodificando um token real: `(exp - iat) / 3600 = 24`. Blocklist/refresh token permanece como item de roadmap (não implementado agora — custo/benefício maior, exigiria nova tabela e verificação em toda requisição autenticada).
 
 ---
 
-- [ ] **P3 — LOW — FIN-013 — E-mail não normalizado permite cadastro "duplicado" por variação de maiúsculas/minúsculas**
+- [x] **P3 — LOW — FIN-013 — E-mail não normalizado permite cadastro "duplicado" por variação de maiúsculas/minúsculas** ✅ Concluída
 
   **Objetivo**
   Normalizar e-mails (lowercase + trim) antes de checar unicidade e salvar.
@@ -494,12 +551,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Fazer login com capitalização diferente da usada no cadastro e confirmar sucesso.
 
   **Critérios de aceite**
-  - [ ] E-mails são normalizados antes de checagem de unicidade e login.
-  - [ ] Não é mais possível ter duas contas para o mesmo e-mail em capitalizações diferentes.
+  - [x] E-mails são normalizados antes de checagem de unicidade e login.
+  - [x] Não é mais possível ter duas contas para o mesmo e-mail em capitalizações diferentes.
+
+  **Nota de implementação/validação (05/09/2026)**
+  `email.trim().toLowerCase()` aplicado em `/api/auth/register` e `/api/auth/login` antes de qualquer consulta. Testado: cadastro com `Teste.CASE@Example.com` salva como `teste.case@example.com`; segundo cadastro com o mesmo e-mail em minúsculas é rejeitado como duplicado; login com minúsculas funciona normalmente.
 
 ---
 
-- [ ] **P3 — LOW — FIN-014 — Enumeração de e-mails cadastrados via mensagem de erro do registro**
+- [x] **P3 — LOW — FIN-014 — Enumeração de e-mails cadastrados via mensagem de erro do registro** ✅ Concluída (decisão documentada, sem mudança de código)
 
   **Objetivo**
   Reduzir a capacidade de um atacante descobrir quais e-mails já estão cadastrados.
@@ -521,13 +581,16 @@ Classificação por funcionalidade (código como fonte da verdade):
   Não aplicável além da revisão de decisão.
 
   **Critérios de aceite**
-  - [ ] Decisão documentada (manter mensagem específica ou genérica) e, se manter, FIN-007 confirmado como mitigação suficiente.
+  - [x] Decisão documentada (manter mensagem específica ou genérica) e, se manter, FIN-007 confirmado como mitigação suficiente.
+
+  **Decisão (05/09/2026)**
+  Mantida a mensagem específica "Email já cadastrado." — necessária para o UX de registro, risco baixo, e FIN-007 (rate limit) já mitiga o principal vetor de abuso. Comentário registrado no código (`server.js`, na rota de registro) documentando essa decisão.
 
 ---
 
 ## 2. 💰 Integridade Financeira
 
-- [ ] **P1 — FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)**
+- [x] **P1 — FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)** ✅ Concluída
 
   **Objetivo**
   Eliminar o risco de erro de arredondamento em ponto flutuante nos cálculos financeiros.
@@ -559,27 +622,40 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Rodar a suíte de testes financeiros (depende de FIN-034).
 
   **Critérios de aceite**
-  - [ ] Todos os campos monetários no schema são `Int` (centavos).
-  - [ ] Toda leitura/escrita no frontend converte corretamente centavos ↔ reais.
-  - [ ] Nenhuma regressão visual nos valores exibidos.
-  - [ ] Testes financeiros (FIN-034) cobrindo somas repetidas passam sem erro de arredondamento.
+  - [x] Todos os campos monetários no schema são `Int` (centavos).
+  - [x] Toda leitura/escrita no frontend converte corretamente centavos ↔ reais.
+  - [x] Nenhuma regressão visual nos valores exibidos.
+  - [x] Testes financeiros (FIN-034) cobrindo somas repetidas passam sem erro de arredondamento — FIN-034 em si ainda não existe (sem framework de teste, FIN-030/031 pendentes); validado via scripts Node avulsos no lugar (ver nota abaixo).
+
+  **Nota de implementação (08/09/2026) — decisão de arquitetura**
+  `interestRate` (Debt) foi **excluído** da migração — é uma taxa percentual (% ao mês), não um valor monetário; permanece `Float`. A conversão acontece só na borda com a API: internamente, todo o cálculo/exibição do frontend (`stats` em `App.tsx`, `AccountsManager.tsx`, `DebtManager.tsx`, `ImportModal.tsx`) continua em reais sem nenhuma alteração — só `App.tsx` foi tocado, com funções `accountToApi/accountFromApi`, `txToApi/txFromApi`, `debtToApi/debtFromApi` aplicadas em cada chamada a `fetchAPI` que envia/recebe dinheiro (~11 pontos: carga inicial, `handleImport`, `addAccount`, `updateAccount`, `addDebt`, `updateDebt`, sync da Pluggy). O sync da Pluggy (`server.js`) também precisou de conversão — a API da Pluggy retorna valores em reais, então `pluggyAcc.balance`/`currentBill.totalAmount`/`tx.amount` passam por um `toCents()` local antes de gravar (duplicado de `src/utils/money.ts` porque backend Node puro e frontend Vite não compartilham módulos TS neste projeto).
+
+  **Migração de dados real (dev.db)** — feita com backup e confirmação explícita do usuário antes de qualquer escrita:
+  1. Backup: `dev.db.backup-20260905-181115` (cópia idêntica, mantida no diretório — está no `.gitignore`, nunca será commitada).
+  2. Passo intermediário seguro: `UPDATE ... SET campo = ROUND(campo*100)` em todas as colunas monetárias **enquanto ainda eram `Float`** — evita que a troca de tipo do SQLite trunque os centavos (SQLite recria a tabela ao mudar tipo de coluna; copiar um `Float` decimal direto para `Int` trunca a parte decimal em vez de multiplicar).
+  3. `prisma db push` aplicando o novo schema (`Int`).
+  4. Checkpoint do WAL e volta para `journal_mode = DELETE` (o script de migração usou WAL para a transação atômica do passo 2).
+
+  **Validação executada**
+  Checksum antes/depois: 1 conta (R$54,20 → 5420 centavos), 100 transações somando R$514,72 → 51472 centavos — bate exatamente. Backend testado em banco isolado (`test_fin015.db`): conta/transação/dívida com centavos inteiros aceitas; valor não-inteiro (`150.5`) rejeitado com `400`; `interestRate` continua decimal (`2.5`). Sync Pluggy re-testado contra o sandbox real: valores batem exatamente com os validados em reais no FIN-001/002, multiplicados por 100 (R$28.480,75 → 2848075; R$5.000,00 → 500000). Conversão do frontend validada via simulação Node das funções `accountToApi/accountFromApi` — round-trip centavos→reais→centavos sem drift. `npx tsc -b --noEmit` e `npx eslint` sem novos erros (só os 2 de FIN-089).
 
   ---
 
-  - [ ] **FIN-015a — Definir estratégia de conversão e criar utilitário `centavos ↔ reais`**
-    Criar `src/utils/money.ts` com `toCents(reais: number): number` e `toReais(cents: number): number`, com testes unitários (depende FIN-030).
+  - [x] **FIN-015a — Definir estratégia de conversão e criar utilitário `centavos ↔ reais`** ✅
+    `src/utils/money.ts` criado com `toCents`/`toReais`/`toCentsOrNull`/`toReaisOrNull`. Testes unitários via script Node avulso (FIN-030 ainda não existe): `toCents(0.1)+toCents(0.2)=30` (sem erro de ponto flutuante), `toCents(-872.05)=-87205`, round-trip sem drift.
 
-  - [ ] **FIN-015b — Migrar schema Prisma e dados existentes para centavos**
-    Alterar `prisma/schema.prisma`, escrever script de migração de dados de `dev.db`, validar contra backup do banco atual.
+  - [x] **FIN-015b — Migrar schema Prisma e dados existentes para centavos** ✅
+    Ver "Migração de dados real" acima.
 
-  - [ ] **FIN-015c — Atualizar `server.js` para trabalhar em centavos** (nenhuma alteração de lógica, apenas tipo — Prisma já retorna `Int`).
+  - [x] **FIN-015c — Atualizar `server.js` para trabalhar em centavos** ✅
+    Schemas Zod (`accountSchema`, `transactionSchema`, `debtSchema`, `debtItemSchema`) trocados de `.finite()` para `.int()` nos campos monetários; `toCents()` local aplicado nos 3 pontos do sync Pluggy que escrevem valores vindos da API da Pluggy (em reais).
 
-  - [ ] **FIN-015d — Atualizar frontend para converter centavos↔reais em todos os pontos de entrada/exibição**
-    `App.tsx`, `AccountsManager.tsx`, `DebtManager.tsx`, `ImportModal.tsx`, `parsers.ts` (parsers devem seguir retornando reais e a conversão para centavos deve acontecer no ponto de envio à API).
+  - [x] **FIN-015d — Atualizar frontend para converter centavos↔reais em todos os pontos de entrada/exibição** ✅
+    Só `App.tsx` precisou de mudança (ver nota de arquitetura acima) — `AccountsManager.tsx`, `DebtManager.tsx`, `ImportModal.tsx` e `parsers.ts` continuam em reais, sem alteração.
 
 ---
 
-- [ ] **P2 — FIN-016 — Centralizar lógica de "dívida vencida" (depende de FIN-005)**
+- [x] **P2 — FIN-016 — Centralizar lógica de "dívida vencida" (depende de FIN-005)** ✅ Concluída junto com FIN-005
 
   Já coberta integralmente pela tarefa **FIN-005**. Mantida aqui apenas como referência cruzada da seção de Integridade Financeira — não duplicar o trabalho.
 
@@ -587,7 +663,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P2 — FIN-017 — Tornar operações em lote de dívidas resilientes a falha parcial**
+- [x] **P2 — FIN-017 — Tornar operações em lote de dívidas resilientes a falha parcial** ✅ Concluída
 
   **Objetivo**
   Evitar estado inconsistente quando "Pagar todas as parcelas" ou "Excluir todas as dívidas" falha no meio da execução.
@@ -609,12 +685,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Simular falha de uma requisição no meio do lote (ex. desconectando a rede momentaneamente ou mockando erro) e confirmar que o resumo exibido é preciso.
 
   **Critérios de aceite**
-  - [ ] Falha em um item do lote não interrompe o processamento dos demais.
-  - [ ] Usuário vê claramente quais itens falharam.
+  - [x] Falha em um item do lote não interrompe o processamento dos demais.
+  - [x] Usuário vê claramente quais itens falharam.
+
+  **Nota de implementação/validação (08/09/2026)**
+  `handlePayAll`/`handleDeleteAll` trocados para `Promise.allSettled`; resumo final via `alert` lista os nomes das dívidas que falharam. Lógica de `allSettled` + identificação de falhas testada isoladamente (script Node com uma promise rejeitada entre 3) — identifica corretamente qual item falhou.
 
 ---
 
-- [ ] **P3 — FIN-018 — Separar "Saldo Real" de saldo de contas de investimento no dashboard**
+- [x] **P3 — FIN-018 — Separar "Saldo Real" de saldo de contas de investimento no dashboard** ✅ Concluída
 
   **Objetivo**
   Diferenciar liquidez imediata (conta corrente/poupança/dinheiro) de saldo em investimentos no card "Saldo Real (Contas)".
@@ -636,14 +715,17 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Cadastrar uma conta do tipo Investimento com saldo e confirmar que ela não é mais somada ao "Saldo Real (Contas)", aparecendo separadamente.
 
   **Critérios de aceite**
-  - [ ] "Saldo Real" reflete apenas contas líquidas (corrente, poupança, dinheiro).
-  - [ ] Saldo de investimentos é exibido separadamente, sem ser removido da visão geral.
+  - [x] "Saldo Real" reflete apenas contas líquidas (corrente, poupança, dinheiro).
+  - [x] Saldo de investimentos é exibido separadamente, sem ser removido da visão geral.
+
+  **Nota de implementação/validação (08/09/2026)**
+  `realBalance` agora exclui `type === 'investment'` além de `credit`; novo `stats.investmentBalance` soma só contas de investimento. Novo card "Investimentos" no Dashboard, exibido (e grid expandido para 4 colunas) só quando o usuário tem ao menos uma conta desse tipo. Lógica de split testada isoladamente com dados simulados.
 
 ---
 
 ## 3. 🗄️ Banco de Dados
 
-- [ ] **P2 — FIN-019 — Adicionar índices compostos para consultas por usuário**
+- [x] **P2 — FIN-019 — Adicionar índices compostos para consultas por usuário** ✅ Concluída
 
   **Objetivo**
   Melhorar a performance das consultas mais frequentes, todas filtradas por `userId`.
@@ -670,13 +752,16 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que a aplicação inicia normalmente e as rotas de listagem continuam funcionando.
 
   **Critérios de aceite**
-  - [ ] Índices criados conforme especificado.
-  - [ ] Prisma Client atualizado sem erros.
-  - [ ] Nenhuma regressão nos endpoints de transações/contas/dívidas.
+  - [x] Índices criados conforme especificado.
+  - [x] Prisma Client atualizado sem erros.
+  - [x] Nenhuma regressão nos endpoints de transações/contas/dívidas.
+
+  **Nota de implementação/validação (08/09/2026)**
+  `@@index([userId])` em Account/Debt; `@@index([userId, date])` e `@@index([userId, importHash])` em Transaction (o índice `[userId, pluggyId]` foi substituído por `@@unique([userId, pluggyId])` no FIN-021, que já cobre o mesmo padrão de busca). Aplicado no `dev.db` real via `db push` (só índices, sem alteração de dados) — confirmado via `PRAGMA index_list`, contagem de linhas intacta antes/depois.
 
 ---
 
-- [ ] **P2 — FIN-020 — Adotar histórico de migrations do Prisma em vez de apenas `db push`**
+- [x] **P2 — FIN-020 — Adotar histórico de migrations do Prisma em vez de apenas `db push`** ✅ Concluída
 
   **Objetivo**
   Ter um histórico versionado e reproduzível das mudanças de schema, em vez de depender apenas de `prisma db push` (que não gera migrations).
@@ -701,13 +786,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Rodar `npx prisma migrate dev` em um banco limpo e confirmar que o schema resultante é idêntico ao gerado hoje por `db push`.
 
   **Critérios de aceite**
-  - [ ] Pasta `prisma/migrations` existe, versionada, com a migration inicial.
-  - [ ] README atualizado com o novo fluxo de setup.
-  - [ ] Banco criado do zero via migration funciona identicamente ao atual.
+  - [x] Pasta `prisma/migrations` existe, versionada, com a migration inicial.
+  - [x] README atualizado com o novo fluxo de setup.
+  - [x] Banco criado do zero via migration funciona identicamente ao atual.
+
+  **Nota de implementação (08/09/2026) — `migrate dev` exige TTY interativo**
+  `npx prisma migrate dev --name init` falha em ambiente não-interativo ("Prisma Migrate has detected that the environment is non-interactive"). Como o `dev.db` real já tinha dados (1 conta, 100 transações) e `migrate dev` pode propor reset do banco quando não há histórico de migrations, usei o procedimento oficial de **baseline** (não destrutivo): gerar o SQL do schema atual com `prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script`, salvar em `prisma/migrations/<timestamp>_init/migration.sql`, e marcar como já aplicado com `prisma migrate resolve --applied <nome>` — isso só grava um registro na tabela de controle `_prisma_migrations`, sem tocar nas tabelas de dados. Também precisei criar manualmente `prisma/migrations/migration_lock.toml` (`provider = "sqlite"`), que o `migrate dev` normalmente gera sozinho.
+
+  **Validação executada**
+  `npx prisma migrate status` → "Database schema is up to date!". Contagem/soma de `Account`/`Transaction` idêntica antes e depois do baseline. Migration reaplicada do zero num banco de teste isolado (`test_fin021.db`) via `prisma migrate deploy` — schema resultante idêntico ao gerado por `db push`. README atualizado (Passo 3) trocando `db push` por `migrate dev`.
 
 ---
 
-- [ ] **P2 — FIN-021 — Adicionar constraint de unicidade `(userId, pluggyId)` em `Account` e `Transaction`**
+- [x] **P2 — FIN-021 — Adicionar constraint de unicidade `(userId, pluggyId)` em `Account` e `Transaction`** ✅ Concluída
 
   **Objetivo**
   Reforçar a idempotência da sincronização Pluggy a nível de banco, não apenas de aplicação.
@@ -733,9 +824,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Disparar duas sincronizações do mesmo item em paralelo (ex. dois cliques rápidos) e confirmar que não há contas/transações duplicadas.
 
   **Critérios de aceite**
-  - [ ] Constraint única criada no schema.
-  - [ ] Sync usa `upsert` com a chave composta.
-  - [ ] Sincronizações concorrentes não geram duplicatas.
+  - [x] Constraint única criada no schema.
+  - [x] Sync usa `upsert` com a chave composta.
+  - [x] Sincronizações concorrentes não geram duplicatas.
+
+  **Nota de implementação (08/09/2026)**
+  `@@unique([userId, pluggyId])` em Account e Transaction (substituindo o índice simples criado em FIN-019). Antes de aplicar, conferido no `dev.db` real que não havia pares `(userId, pluggyId)` duplicados. Migration aplicada via `prisma migrate deploy` (não-interativo). `server.js`: as 3 rotas que faziam `findFirst` + `create`/`updateMany` (`connect-item`, sync de conta, sync de transação) agora usam `upsert` com `where: { userId_pluggyId: { userId, pluggyId } }`. Na transação, mantive um `findFirst` só para contabilizar `totalTxs` (quantas são novas) — a escrita em si é sempre via `upsert`.
+
+  **Validação executada**
+  Contra o mesmo sandbox real da Pluggy, banco isolado (`test_fin021.db`, migrado do zero via `prisma migrate deploy`): 1ª sincronização importa 8 transações; 2ª sincronização (idêntica) importa 0 — idempotente. Duas sincronizações disparadas **em paralelo** (`curl ... & curl ... & wait`) não geram nenhuma conta duplicada (3 contas únicas, confirmado por `pluggyId`).
 
 ---
 
@@ -1529,9 +1626,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 - FIN-086 — Extrair a lógica de cálculo financeiro (bloco `stats`, [App.tsx:202-266](src/App.tsx#L202-L266)) de dentro do componente `App.tsx` para um módulo/hook dedicado (ex. `src/hooks/useFinancialStats.ts`), separando regra de negócio da camada de UI. Facilita testes (depende de FIN-034) e reduz o tamanho do componente `App.tsx` (hoje com mais de 700 linhas, concentrando estado, chamadas HTTP, cálculo financeiro e renderização).
 - FIN-087 — Centralizar padrões de formulário (`FormField`, validação de campos numéricos) hoje duplicados entre `AccountsManager.tsx` e `DebtManager.tsx` em um módulo compartilhado `src/components/shared/FormField.tsx`.
-- FIN-088 — Após FIN-005, remover qualquer lógica remanescente de verificação de vencimento duplicada entre componentes, garantindo um único ponto de verdade.
+- [x] FIN-088 — ✅ Concluída junto com FIN-005: `App.tsx` e `DebtManager.tsx` agora usam `isDebtOverdue`/`isDebtPaid` de `src/utils/debts.ts`, sem lógica de vencimento duplicada remanescente.
 
 **Dependências:** FIN-086 depende de FIN-034 para ter cobertura de teste antes/depois da extração (evitar regressão silenciosa). FIN-087 não tem dependências. FIN-088 depende de FIN-005.
+
+- FIN-089 — `npx tsc -b --noEmit` falha com 2 erros de tipo em `App.tsx` (linhas ~506/526, tooltips do Recharts: `Formatter<ValueType, NameType>` incompatível com `(v: number) => [string, string]`). Pré-existente, confirmado via `git stash` antes de qualquer trabalho da Fase 0 — não bloqueia `npm run build` nem `npm run dev`, mas quebra checagem de tipo isolada. Corrigir tipando o formatter conforme os genéricos do Recharts (`ValueType`, `NameType`).
 
 ---
 
@@ -1571,11 +1670,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 🎯 Próxima tarefa
 
-**FIN-001 — Sincronização Pluggy não atualiza a fatura pendente de cartões de crédito**
+**FIN-022 — Criar endpoints `PUT`/`DELETE` para transação individual**
 
 ### Por quê?
 
-FIN-006 (JWT_SECRET inseguro) foi concluída em 04/09/2026 — servidor agora recusa subir sem um `JWT_SECRET` de pelo menos 32 caracteres, validado com e sem `.env`. Das tarefas P0 restantes (FIN-001 a FIN-005, todas bugs de integridade financeira sem dependências entre si), FIN-001 é a próxima na ordem do documento e corrige um dado financeiro incorreto exibido ao usuário (fatura de cartão sincronizada via Open Finance nunca reflete o valor real).
+Fase 2 do `TODO.md`, subseção "Banco de dados" (FIN-019, FIN-020, FIN-021), 100% concluída em 08/09/2026. Próxima subseção, na ordem do documento: "Backend / API" — FIN-022 é a primeira (P1), sem dependências pendentes (depende de FIN-008, já concluída).
 
 ### Bloqueios
 

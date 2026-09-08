@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
 import type { Debt, DebtCategory, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
+import { isDebtOverdue, isDebtPaid } from '../utils/debts';
 
 const CATEGORY_COLORS: Record<DebtCategory, string> = {
   'Empréstimo':        '#f59e0b',
@@ -149,8 +150,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
   const remaining = (d: Debt) => Math.max(0, d.totalAmount - d.paidAmount);
   const progress = (d: Debt) => d.totalInstallments > 0 ? (d.paidInstallments / d.totalInstallments) * 100 : 0;
-  const isPaid = (d: Debt) => d.paidInstallments >= d.totalInstallments;
-  const isOverdue = (d: Debt) => !isPaid(d) && new Date(d.nextDueDate) < new Date();
+  const isPaid = isDebtPaid;
+  const isOverdue = isDebtOverdue;
 
   const exportCSV = () => {
     if (debts.length === 0) return;
@@ -240,6 +241,9 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
     }
   };
 
+  // Processa cada dívida independentemente via Promise.allSettled — se uma falhar (ex.
+  // rede caiu no meio), as demais não ficam bloqueadas, e o usuário sabe exatamente quais
+  // itens precisam ser tentados de novo (ver FIN-017 em docs/BACKLOG_DETAIL.md).
   const handlePayAll = async () => {
     const unpaidDebts = debts.filter(d => !isPaid(d));
     if (unpaidDebts.length === 0) {
@@ -247,40 +251,43 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       return;
     }
 
-    if (confirm(`Deseja pagar uma parcela de todas as ${unpaidDebts.length} dívidas pendentes?`)) {
-      try {
-        for (const debt of unpaidDebts) {
-          const nextPaidInstallments = debt.paidInstallments + 1;
-          let nextPaidAmount = debt.paidAmount + debt.monthlyPayment;
-          if (nextPaidInstallments >= debt.totalInstallments) {
-            nextPaidAmount = debt.totalAmount;
-          } else {
-            nextPaidAmount = Math.min(nextPaidAmount, debt.totalAmount);
-          }
-          const nextDueDate = advanceMonth(debt.nextDueDate);
+    if (!confirm(`Deseja pagar uma parcela de todas as ${unpaidDebts.length} dívidas pendentes?`)) return;
 
-          await onUpdate(debt.id, {
-            paidInstallments: nextPaidInstallments,
-            paidAmount: nextPaidAmount,
-            nextDueDate,
-          });
-        }
-      } catch (err) {
-        alert("Erro ao processar pagamentos: " + (err instanceof Error ? err.message : String(err)));
+    const results = await Promise.allSettled(unpaidDebts.map(debt => {
+      const nextPaidInstallments = debt.paidInstallments + 1;
+      let nextPaidAmount = debt.paidAmount + debt.monthlyPayment;
+      if (nextPaidInstallments >= debt.totalInstallments) {
+        nextPaidAmount = debt.totalAmount;
+      } else {
+        nextPaidAmount = Math.min(nextPaidAmount, debt.totalAmount);
       }
+      const nextDueDate = advanceMonth(debt.nextDueDate);
+      return onUpdate(debt.id, { paidInstallments: nextPaidInstallments, paidAmount: nextPaidAmount, nextDueDate });
+    }));
+
+    const failedNames = results
+      .map((r, i) => ({ r, debt: unpaidDebts[i] }))
+      .filter(({ r }) => r.status === 'rejected')
+      .map(({ debt }) => debt.name);
+
+    if (failedNames.length > 0) {
+      alert(`${results.length - failedNames.length} de ${results.length} parcela(s) paga(s) com sucesso.\nFalha em: ${failedNames.join(', ')}. Tente novamente para essas.`);
     }
   };
 
   const handleDeleteAll = async () => {
     if (debts.length === 0) return;
-    if (confirm('TEM CERTEZA? Isso excluirá todas as dívidas permanentemente.')) {
-      try {
-        for (const d of debts) {
-          await onDelete(d.id);
-        }
-      } catch (err) {
-        alert("Erro ao excluir dívidas: " + (err instanceof Error ? err.message : String(err)));
-      }
+    if (!confirm('TEM CERTEZA? Isso excluirá todas as dívidas permanentemente.')) return;
+
+    const results = await Promise.allSettled(debts.map(d => onDelete(d.id)));
+
+    const failedNames = results
+      .map((r, i) => ({ r, debt: debts[i] }))
+      .filter(({ r }) => r.status === 'rejected')
+      .map(({ debt }) => debt.name);
+
+    if (failedNames.length > 0) {
+      alert(`${results.length - failedNames.length} de ${results.length} dívida(s) excluída(s) com sucesso.\nFalha em: ${failedNames.join(', ')}. Tente novamente para essas.`);
     }
   };
 

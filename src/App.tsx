@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
-  Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown,
+  Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
   LogOut
 } from 'lucide-react';
 import {
@@ -13,7 +13,9 @@ import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
-import type { Account, Debt, Transaction, PaymentType } from './types';
+import { isDebtOverdue, todayISO } from './utils/debts';
+import { toCents, toReais } from './utils/money';
+import type { Account, Debt, DebtCategory, Transaction, PaymentType } from './types';
 
 const CATEGORY_COLORS: Record<string, string> = {
   'Alimentação': '#f59e0b', 'Transporte': '#3b82f6', 'Lazer': '#a855f7',
@@ -25,6 +27,51 @@ type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts';
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+}
+
+/* --- Conversão centavos (API/banco) ↔ reais (UI) — ver FIN-015 em docs/BACKLOG_DETAIL.md ---
+ * A API troca valores monetários em centavos (inteiro). Todo o resto do app (formulários,
+ * cálculos de `stats`, exibição) continua trabalhando em reais — a conversão acontece só
+ * nesta borda, logo após receber dados da API e logo antes de enviar. */
+function accountFromApi(a: Account): Account {
+  return {
+    ...a,
+    balance: toReais(a.balance),
+    limit: a.limit != null ? toReais(a.limit) : a.limit,
+    pendingBill: a.pendingBill != null ? toReais(a.pendingBill) : a.pendingBill,
+  };
+}
+function accountToApi<T extends Partial<Account>>(a: T): T {
+  const out: T = { ...a };
+  if (out.balance != null) out.balance = toCents(out.balance);
+  if (out.limit != null) out.limit = toCents(out.limit);
+  if (out.pendingBill != null) out.pendingBill = toCents(out.pendingBill);
+  return out;
+}
+function txFromApi(t: Transaction): Transaction {
+  return { ...t, amount: toReais(t.amount) };
+}
+function txToApi<T extends Partial<Transaction>>(t: T): T {
+  const out: T = { ...t };
+  if (out.amount != null) out.amount = toCents(out.amount);
+  return out;
+}
+function debtFromApi(d: Debt): Debt {
+  return {
+    ...d,
+    totalAmount: toReais(d.totalAmount),
+    paidAmount: toReais(d.paidAmount),
+    monthlyPayment: toReais(d.monthlyPayment),
+    subItems: d.subItems?.map(si => ({ ...si, amount: toReais(si.amount) })),
+  };
+}
+function debtToApi<T extends Partial<Debt>>(d: T): T {
+  const out: T = { ...d };
+  if (out.totalAmount != null) out.totalAmount = toCents(out.totalAmount);
+  if (out.paidAmount != null) out.paidAmount = toCents(out.paidAmount);
+  if (out.monthlyPayment != null) out.monthlyPayment = toCents(out.monthlyPayment);
+  if (out.subItems != null) out.subItems = out.subItems.map(si => ({ ...si, amount: toCents(si.amount) }));
+  return out;
 }
 
 export default function App() {
@@ -78,9 +125,9 @@ export default function App() {
         fetchAPI('/api/debts')
       ]).then(([meData, accsData, txsData, debtsData]) => {
         setUser(meData.user);
-        setAccounts(accsData);
-        setTxs(txsData);
-        setDebts(debtsData);
+        setAccounts((accsData as Account[]).map(accountFromApi));
+        setTxs((txsData as Transaction[]).map(txFromApi));
+        setDebts((debtsData as Debt[]).map(debtFromApi));
       }).catch(err => {
         console.error('Sessão expirada ou erro:', err);
         handleLogout();
@@ -100,22 +147,27 @@ export default function App() {
   /* --- API Mappers --- */
   const handleImport = async (newTxs: Transaction[], paymentType: PaymentType) => {
     try {
-      // Attach paymentType to all transactions
+      // Attach paymentType to all transactions (ainda em reais — parsers.ts trabalha em reais)
       const txsWithType = newTxs.map(t => ({ ...t, paymentType }));
-      const res = await fetchAPI('/api/transactions', 'POST', { transactions: txsWithType });
+      const res = await fetchAPI('/api/transactions', 'POST', { transactions: txsWithType.map(txToApi) });
       if (res.success) {
+        if (res.skipped > 0) {
+          alert(`${res.count} transação(ões) importada(s). ${res.skipped} ignorada(s) por já existir (duplicata).`);
+        }
         const txsData = await fetchAPI('/api/transactions');
-        setTxs(txsData);
+        setTxs((txsData as Transaction[]).map(txFromApi));
 
         // Auto-create debt for credit or pix_installment payments
-        if (paymentType === 'credit' || paymentType === 'pix_installment') {
+        // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
+        // já existia (res.count === 0), reimportar o mesmo extrato não deve gerar dívida.
+        if ((paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0) {
           const expenseTxs = txsWithType.filter(t => t.amount < 0);
           if (expenseTxs.length > 0) {
             const totalExpense = expenseTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
             const now = new Date();
             const monthName = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
             const label = paymentType === 'credit' ? 'Crédito' : 'PIX Parcelado';
-            const category = paymentType === 'credit' ? 'Cartão de Crédito' : 'Pessoal';
+            const category: DebtCategory = paymentType === 'credit' ? 'Cartão de Crédito' : 'Pessoal';
             // Due date: last day of current month
             const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
             const nextDueDate = lastDay.toISOString().slice(0, 10);
@@ -126,6 +178,14 @@ export default function App() {
             const debtName = accountName
               ? `Fatura ${accountName.bank} – ${monthName}`
               : `Fatura ${label} – ${monthName}`;
+
+            // Evita dívida duplicada: se já existe uma dívida com o mesmo nome/conta
+            // (ex.: reimportação parcial do mesmo extrato), não cria outra (ver FIN-004).
+            const alreadyExists = debts.some(d => d.name === debtName && (d.accountId || undefined) === accountId);
+            if (alreadyExists) {
+              alert(`Já existe uma dívida "${debtName}" para esta conta/mês. Nenhuma dívida nova foi criada — edite a existente se necessário.`);
+              return;
+            }
 
             const newDebt = {
               name: debtName,
@@ -146,8 +206,8 @@ export default function App() {
                 date: t.date,
               }))
             };
-            const createdDebt = await fetchAPI('/api/debts', 'POST', newDebt);
-            setDebts(prev => [...prev, createdDebt]);
+            const createdDebt = await fetchAPI('/api/debts', 'POST', debtToApi(newDebt));
+            setDebts(prev => [...prev, debtFromApi(createdDebt)]);
           }
         }
       }
@@ -159,13 +219,13 @@ export default function App() {
   // CRUD ACCOUNTS
   const addAccount = async (acc: Omit<Account, 'id' | 'createdAt'>) => {
     try {
-      const newAcc = await fetchAPI('/api/accounts', 'POST', acc);
-      setAccounts(prev => [...prev, newAcc]);
+      const newAcc = await fetchAPI('/api/accounts', 'POST', accountToApi(acc));
+      setAccounts(prev => [...prev, accountFromApi(newAcc)]);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const updateAccount = async (id: string, acc: Omit<Account, 'id' | 'createdAt'>) => {
     try {
-      await fetchAPI(`/api/accounts/${id}`, 'PUT', acc);
+      await fetchAPI(`/api/accounts/${id}`, 'PUT', accountToApi(acc));
       setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...acc } : a));
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
@@ -179,8 +239,8 @@ export default function App() {
   // CRUD DEBTS
   const addDebt = async (debt: Omit<Debt, 'id' | 'createdAt'>) => {
     try {
-      const newDebt = await fetchAPI('/api/debts', 'POST', debt);
-      setDebts(prev => [...prev, newDebt]);
+      const newDebt = await fetchAPI('/api/debts', 'POST', debtToApi(debt));
+      setDebts(prev => [...prev, debtFromApi(newDebt)]);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const deleteDebt = async (id: string) => {
@@ -192,8 +252,8 @@ export default function App() {
 
   const updateDebt = async (id: string, debtData: Partial<Debt>) => {
     try {
-      const updated = await fetchAPI(`/api/debts/${id}`, 'PUT', debtData);
-      setDebts(prev => prev.map(d => d.id === id ? updated : d));
+      const updated = await fetchAPI(`/api/debts/${id}`, 'PUT', debtToApi(debtData));
+      setDebts(prev => prev.map(d => d.id === id ? debtFromApi(updated) : d));
     } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
   };
 
@@ -236,15 +296,19 @@ export default function App() {
       .sort(([, a], [, b]) => b - a).slice(0, 6)
       .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
     const mPrefix = today.slice(0, 7);
     const monthExpense = activeTxs.filter(t => t.amount < 0 && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
 
-    const realBalance = activeAccs.filter(a => a.type !== 'credit').reduce((s, a) => s + a.balance, 0);
+    // "Saldo Real" reflete apenas dinheiro líquido disponível (corrente/poupança/dinheiro).
+    // Investimentos são somados separadamente — misturá-los ao saldo líquido pode enganar
+    // o usuário sobre quanto ele realmente tem disponível para gastar (ver FIN-018).
+    const realBalance = activeAccs.filter(a => a.type !== 'credit' && a.type !== 'investment').reduce((s, a) => s + a.balance, 0);
+    const investmentBalance = activeAccs.filter(a => a.type === 'investment').reduce((s, a) => s + a.balance, 0);
     const pendingBills = activeAccs.filter(a => a.type === 'credit').reduce((s, a) => s + (a.pendingBill ?? 0), 0);
     const totalActiveDebts = activeDebts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
-    
-    const overdueDebts = activeDebts.filter(d => d.nextDueDate < today && d.paidInstallments < d.totalInstallments);
+
+    const overdueDebts = activeDebts.filter(isDebtOverdue);
 
     const dailyMap: Record<string, number> = {};
     const thirtyDaysAgo = new Date();
@@ -258,9 +322,9 @@ export default function App() {
        return { name: k.substring(5).replace('-','/'), balance: v };
     });
 
-    return { 
-      income, expense, importedBalance, balanceByMonth, dailyEvolution, 
-      expenseByCategory, monthExpense, realBalance, pendingBills, activeDebts: totalActiveDebts, overdueDebts,
+    return {
+      income, expense, importedBalance, balanceByMonth, dailyEvolution,
+      expenseByCategory, monthExpense, realBalance, investmentBalance, pendingBills, activeDebts: totalActiveDebts, overdueDebts,
       filteredTxsCount: activeTxs.length
     };
   }, [transactions, accounts, debts, dashboardAccountId]);
@@ -344,8 +408,8 @@ export default function App() {
                   fetchAPI('/api/accounts'),
                   fetchAPI('/api/transactions'),
                 ]);
-                setAccounts(accsData);
-                setTxs(txsData);
+                setAccounts((accsData as Account[]).map(accountFromApi));
+                setTxs((txsData as Transaction[]).map(txFromApi));
               }}
             />
           )}
@@ -415,9 +479,16 @@ export default function App() {
               )}
 
               {/* Summary Cards Row 1 — Real Accounts */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
+              {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem
+                  contas de investimento, mostramos o total delas separadamente ao lado. */}
+              <div className={`grid grid-cols-1 md:grid-cols-3 ${accounts.some(a => a.type === 'investment') ? 'lg:grid-cols-4' : ''} gap-5 mb-5`}>
                 <SummaryCard title="Saldo Real (Contas)" amount={fmt(stats.realBalance)} isPositive={stats.realBalance >= 0}
                   icon={<Wallet size={22} style={{ color:'var(--color-primary)' }}/>} badge="Saldo atual" />
+                {accounts.some(a => a.type === 'investment') && (
+                  <SummaryCard title="Investimentos" amount={fmt(stats.investmentBalance)} isPositive={stats.investmentBalance >= 0}
+                    icon={<TrendingUp size={22} className="text-teal-400"/>}
+                    badge={`${accounts.filter(a=>a.type==='investment').length} conta(s)`} />
+                )}
                 <SummaryCard title="Fatura Pendente" amount={fmt(stats.pendingBills)} isPositive={false}
                   icon={<CreditCard size={22} className="text-pink-400"/>} badge={`${accounts.filter(a=>a.type==='credit').length} cartão(ões)`} />
                 <SummaryCard title="Dívidas Ativas" amount={fmt(stats.activeDebts)} isPositive={false}

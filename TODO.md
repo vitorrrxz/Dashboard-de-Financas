@@ -15,44 +15,65 @@
 ## Fase 0 - Bugs Criticos (P0)
 
 - [x] Corrigir `JWT_SECRET` com fallback inseguro hardcoded (FIN-006)
-- [ ] Corrigir sync Pluggy que nao atualiza fatura pendente de cartao de credito (FIN-001)
-- [ ] Corrigir mapeamento de tipo de conta importada via Pluggy (FIN-002)
-- [ ] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
-- [ ] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
+- [x] Corrigir sync Pluggy que nao atualiza fatura pendente de cartao de credito (FIN-001)
+- [x] Corrigir mapeamento de tipo de conta importada via Pluggy (FIN-002)
+- [x] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
+- [x] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
+- [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
 
-Status validado em 2026-09-04:
-- FIN-006 concluida: `server.js` agora recusa subir sem `JWT_SECRET` valido (>=32 caracteres); testado com e sem `.env`, login continua funcionando normalmente.
-- Proxima tarefa: FIN-001.
+Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- **Fase 0 100% concluida**: FIN-006, FIN-001, FIN-002, FIN-003, FIN-004, FIN-005 fechadas e validadas.
+- FIN-005: criado `src/utils/debts.ts` (`isDebtOverdue`/`isDebtPaid`/`todayISO`); App.tsx e DebtManager.tsx unificados. De brinde, ja resolve FIN-016 e FIN-088 (marcadas concluidas no detalhe).
+- Novo achado registrado: FIN-089 (2 erros de `tsc` pre-existentes em `App.tsx`, nao relacionados as tarefas concluidas).
+- Proxima tarefa: FIN-007 (primeira da Fase 1 - Seguranca).
 
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
 ### Seguranca
-- [ ] Rate limiting nas rotas de login/registro (FIN-007)
-- [ ] Validacao de payload no backend para accounts/transactions/debts (FIN-008)
-- [ ] Restringir CORS a origem conhecida do frontend (FIN-009)
-- [ ] Adicionar cabecalhos de seguranca HTTP via helmet (FIN-010)
-- [ ] Parar de expor mensagens de erro internas do Prisma ao cliente (FIN-011)
-- [ ] Revisar expiracao/revogacao de token JWT (FIN-012)
-- [ ] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
-- [ ] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
+- [x] Rate limiting nas rotas de login/registro (FIN-007)
+- [x] Validacao de payload no backend para accounts/transactions/debts (FIN-008)
+- [x] Restringir CORS a origem conhecida do frontend (FIN-009)
+- [x] Adicionar cabecalhos de seguranca HTTP via helmet (FIN-010)
+- [x] Parar de expor mensagens de erro internas do Prisma ao cliente (FIN-011)
+- [x] Revisar expiracao/revogacao de token JWT (FIN-012)
+- [x] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
+- [x] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
+
+Status validado em 2026-09-05 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- Secao Seguranca da Fase 1 100% concluida: rate limit, validacao Zod (accounts/transactions/debts), CORS restrito, helmet, erros internos nao vazam mais, JWT 24h, email normalizado, decisao de enumeracao documentada.
+- Achado durante a validacao (corrigido): em Zod v4, `z.string().min(1,'msg')` sozinho nao usa a mensagem customizada quando o campo esta totalmente ausente — precisa de `z.string({ error: 'msg' })`.
+- Proxima: subsecao "Integridade financeira" da Fase 1 (FIN-015, FIN-017, FIN-018 — FIN-005/016 ja feitas).
 
 ### Integridade financeira
-- [ ] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
-- [ ] Migrar valores monetarios de `Float` para inteiro em centavos (FIN-015)
-  - [ ] Criar utilitario `centavos <-> reais` com testes (FIN-015a)
-  - [ ] Migrar schema Prisma e dados existentes para centavos (FIN-015b)
-  - [ ] Atualizar `server.js` para centavos (FIN-015c)
-  - [ ] Atualizar frontend para converter centavos/reais em todos os pontos de entrada e exibicao (FIN-015d)
-- [ ] Referencia cruzada: centralizar logica de divida vencida (FIN-016, coberta por FIN-005)
-- [ ] Tornar "pagar todas as parcelas" / "excluir todas as dividas" resiliente a falha parcial (FIN-017)
-- [ ] Separar "Saldo Real" de saldo de contas de investimento no dashboard (FIN-018)
+- [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
+- [x] Migrar valores monetarios de `Float` para inteiro em centavos (FIN-015)
+  - [x] Criar utilitario `centavos <-> reais` com testes (FIN-015a)
+  - [x] Migrar schema Prisma e dados existentes para centavos (FIN-015b)
+  - [x] Atualizar `server.js` para centavos (FIN-015c)
+  - [x] Atualizar frontend para converter centavos/reais em todos os pontos de entrada e exibicao (FIN-015d)
+- [x] Referencia cruzada: centralizar logica de divida vencida (FIN-016, coberta por FIN-005)
+- [x] Tornar "pagar todas as parcelas" / "excluir todas as dividas" resiliente a falha parcial (FIN-017)
+- [x] Separar "Saldo Real" de saldo de contas de investimento no dashboard (FIN-018)
+
+Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- **Fase 1 100% concluida** (Seguranca + Integridade financeira).
+- FIN-015 (maior mudanca ate agora): schema migrado para centavos (Int), incluindo migracao real do `dev.db` (com backup previo e confirmacao explicita do usuario antes de escrever). Conversao fica isolada na borda com a API — so `App.tsx` e `server.js` mudaram; AccountsManager/DebtManager/ImportModal/parsers continuam em reais, sem alteracao. Validado ponta a ponta: backend rejeita valores nao-inteiros, sync Pluggy convertido e re-testado contra sandbox real, round-trip de conversao sem drift.
+- FIN-017: `handlePayAll`/`handleDeleteAll` agora usam `Promise.allSettled`, informando quais dividas falharam.
+- FIN-018: novo card "Investimentos" no Dashboard, separado do "Saldo Real".
+- Proxima: Fase 2, subsecao "Banco de dados" (FIN-019, FIN-020, FIN-021).
 
 ## Fase 2 - Qualidade (Banco, Backend, Frontend, Mobile, Testes)
 
 ### Banco de dados
-- [ ] Adicionar indices compostos por `userId` em Account/Transaction/Debt (FIN-019)
-- [ ] Adotar historico de migrations do Prisma em vez de `db push` (FIN-020, depende de FIN-015b)
-- [ ] Adicionar constraint de unicidade `(userId, pluggyId)` em Account e Transaction (FIN-021, depende de FIN-020)
+- [x] Adicionar indices compostos por `userId` em Account/Transaction/Debt (FIN-019)
+- [x] Adotar historico de migrations do Prisma em vez de `db push` (FIN-020, depende de FIN-015b)
+- [x] Adicionar constraint de unicidade `(userId, pluggyId)` em Account e Transaction (FIN-021, depende de FIN-020)
+
+Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
+- Secao "Banco de dados" completa. Indices aplicados no `dev.db` real sem perda de dados.
+- FIN-020: `migrate dev` nao funciona sem TTY interativo neste ambiente — usado o procedimento oficial de "baseline" (nao-destrutivo: so registra o schema atual como ja aplicado, sem tocar dados). `prisma/migrations/` agora versionado; README atualizado.
+- FIN-021: constraint unica `(userId, pluggyId)` + `server.js` trocado para `upsert`. Validado com o sandbox real da Pluggy: sync repetido e ate 2 syncs em paralelo nao geram duplicata.
+- Proxima: secao "Backend / API" (FIN-022, FIN-023, FIN-024).
 
 ### Backend / API
 - [ ] Criar endpoints `PUT`/`DELETE` para transacao individual (FIN-022, depende de FIN-008)
@@ -94,7 +115,8 @@ Status validado em 2026-09-04:
 ### Debitos tecnicos
 - [ ] Extrair calculo financeiro (`stats`) de `App.tsx` para modulo/hook dedicado (FIN-086, depende de FIN-034)
 - [ ] Centralizar padrao de formulario (`FormField`) entre AccountsManager e DebtManager (FIN-087)
-- [ ] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
+- [x] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
+- [ ] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
 
 ## Fase 3 - Planejamento Financeiro (Orcamento)
 

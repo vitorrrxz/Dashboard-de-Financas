@@ -6,11 +6,18 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PluggyClient } from 'pluggy-sdk';
+import crypto from 'crypto';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(helmet()); // cabeçalhos de segurança HTTP padrão (ver FIN-010)
+// CORS restrito à origem conhecida do frontend — evita que qualquer site de terceiros
+// consiga ler respostas desta API (ver FIN-009 em docs/BACKLOG_DETAIL.md).
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
 app.use(express.json());
 
 const PORT = 3001;
@@ -38,6 +45,129 @@ const pluggyClient = new PluggyClient({
   clientSecret: process.env.PLUGGY_CLIENT_SECRET || '',
 });
 
+// Mapeia o `type`/`subtype` retornado pela Pluggy para o enum AccountType do frontend
+// (checking | savings | credit | investment | cash). A Pluggy só retorna `type` como
+// "BANK" ou "CREDIT" (ver node_modules/pluggy-sdk/dist/types/account.d.ts) — a distinção
+// entre conta corrente e poupança vem do `subtype` ("CHECKING_ACCOUNT"/"SAVINGS_ACCOUNT").
+// Sem esse mapeamento, `pluggyAcc.type.toLowerCase()` gerava "bank", que não é nenhum
+// AccountType válido e quebrava ícone/rótulo no frontend (ver FIN-002 em docs/BACKLOG_DETAIL.md).
+function mapPluggyAccountType(pluggyAcc) {
+  if (pluggyAcc.type === 'CREDIT') return 'credit';
+  if (pluggyAcc.type === 'BANK') {
+    return pluggyAcc.subtype === 'SAVINGS_ACCOUNT' ? 'savings' : 'checking';
+  }
+  return 'checking';
+}
+
+// Chave determinística de deduplicação para importação manual (CSV/OFX) — ver FIN-003.
+// Baseada em conta + data + valor + nome (não em `id`, que é gerado aleatoriamente no
+// cliente a cada parse e por isso não serve para detectar reimportação do mesmo extrato).
+function computeImportHash(userId, tx) {
+  const key = [
+    userId,
+    tx.accountId || '',
+    tx.date || '',
+    Number(tx.amount).toFixed(2),
+    String(tx.name || '').trim().toLowerCase(),
+  ].join('|');
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+// Converte reais (decimal) para centavos (inteiro) — ver FIN-015. A API da Pluggy retorna
+// valores em reais; o schema local agora armazena tudo em centavos. Duplicado de
+// `src/utils/money.ts` porque backend (Node puro) e frontend (bundle Vite) não
+// compartilham módulos TS neste projeto.
+function toCents(reais) {
+  return Math.round(reais * 100);
+}
+
+// Loga o erro completo no servidor e retorna uma mensagem genérica ao cliente — nunca
+// `error.message`/detalhes internos do Prisma/Node, que podem vazar schema, nomes de
+// coluna etc. (ver FIN-011 em docs/BACKLOG_DETAIL.md).
+function sendInternalError(res, error, publicMessage = 'Erro interno do servidor.') {
+  console.error(publicMessage, error);
+  res.status(500).json({ error: publicMessage });
+}
+
+// Rate limit nas rotas de autenticação — mitiga força bruta e enumeração de credenciais
+// (ver FIN-007 em docs/BACKLOG_DETAIL.md). Não afeta as demais rotas da API.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' },
+});
+
+/* -------------------------------------------------------------------------- */
+/*                        VALIDAÇÃO DE PAYLOAD (FIN-008)                      */
+/* -------------------------------------------------------------------------- */
+// Antes desta tarefa, as rotas de CRUD (accounts/transactions/debts) gravavam
+// `req.body` quase sem checagem, permitindo dados financeiros inconsistentes
+// (ex.: `totalInstallments: 0`, causando divisão por zero no frontend). Cada rota
+// agora valida o payload com um schema Zod antes de tocar o banco.
+
+function validateBody(schema, body) {
+  const result = schema.safeParse(body);
+  if (!result.success) {
+    const message = result.error.issues.map(i => i.message).join(' ') || 'Dados inválidos.';
+    return { ok: false, message };
+  }
+  return { ok: true, data: result.data };
+}
+
+// Campos monetários trafegam em CENTAVOS (inteiro) entre API e frontend — ver FIN-015
+// em docs/BACKLOG_DETAIL.md. `interestRate` é a única exceção: é uma taxa percentual
+// (% ao mês), não um valor monetário, e permanece decimal.
+const ACCOUNT_TYPES = ['checking', 'savings', 'credit', 'investment', 'cash'];
+const accountSchema = z.object({
+  name: z.string({ error: 'Nome da conta é obrigatório.' }).trim().min(1, 'Nome da conta é obrigatório.'),
+  bank: z.string({ error: 'Banco/operadora é obrigatório.' }).trim().min(1, 'Banco/operadora é obrigatório.'),
+  type: z.enum(ACCOUNT_TYPES, { message: `Tipo de conta deve ser um de: ${ACCOUNT_TYPES.join(', ')}.` }),
+  balance: z.coerce.number().int('Saldo deve ser um valor inteiro em centavos.'),
+  limit: z.coerce.number().int('Limite deve ser um valor inteiro em centavos.').nullable().optional(),
+  dueDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
+  closingDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
+  pendingBill: z.coerce.number().int('Fatura deve ser um valor inteiro em centavos.').nullable().optional(),
+  color: z.string({ error: 'Cor é obrigatória.' }).trim().min(1, 'Cor é obrigatória.'),
+});
+const accountUpdateSchema = accountSchema.partial();
+
+const PAYMENT_TYPES = ['debit', 'credit', 'pix', 'pix_installment'];
+const transactionSchema = z.object({
+  name: z.string({ error: 'Nome da transação é obrigatório.' }).trim().min(1, 'Nome da transação é obrigatório.'),
+  category: z.string({ error: 'Categoria é obrigatória.' }).trim().min(1, 'Categoria é obrigatória.'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data deve estar no formato YYYY-MM-DD.'),
+  amount: z.coerce.number().int('Valor deve ser um inteiro em centavos.'),
+  accountId: z.string().trim().min(1).nullable().optional(),
+  paymentType: z.enum(PAYMENT_TYPES).optional(),
+});
+const transactionBatchSchema = z.object({
+  transactions: z.array(transactionSchema).min(1, 'Nenhuma transação enviada.'),
+});
+
+const DEBT_CATEGORIES = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
+const debtItemSchema = z.object({
+  name: z.string().trim().min(1),
+  amount: z.coerce.number().int(),
+  date: z.string().trim().min(1),
+});
+const debtSchema = z.object({
+  name: z.string({ error: 'Nome da dívida é obrigatório.' }).trim().min(1, 'Nome da dívida é obrigatório.'),
+  description: z.string().trim().nullable().optional(),
+  category: z.enum(DEBT_CATEGORIES, { message: `Categoria deve ser uma de: ${DEBT_CATEGORIES.join(', ')}.` }),
+  totalAmount: z.coerce.number().int('Valor total deve ser um inteiro em centavos.').min(0, 'Valor total não pode ser negativo.'),
+  paidAmount: z.coerce.number().int('Valor pago deve ser um inteiro em centavos.').min(0, 'Valor pago não pode ser negativo.').optional(),
+  monthlyPayment: z.coerce.number().int('Parcela mensal deve ser um inteiro em centavos.').min(0, 'Parcela mensal não pode ser negativa.'),
+  totalInstallments: z.coerce.number().int().min(1, 'Deve haver ao menos 1 parcela.'),
+  paidInstallments: z.coerce.number().int().min(0, 'Parcelas pagas não pode ser negativo.').optional(),
+  nextDueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data de vencimento deve estar no formato YYYY-MM-DD.'),
+  interestRate: z.coerce.number().finite().nullable().optional(), // % ao mês, não é dinheiro
+  accountId: z.string().trim().min(1).nullable().optional(),
+  subItems: z.array(debtItemSchema).optional(),
+});
+const debtUpdateSchema = debtSchema.partial();
+
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -55,9 +185,19 @@ const authenticateToken = (req, res, next) => {
 /*                               AUTH ROUTES                                  */
 /* -------------------------------------------------------------------------- */
 
-app.post('/api/auth/register', async (req, res) => {
-  const { name, email, password } = req.body;
-  
+// Prazo de expiração do token JWT. Reduzido de 7d para 24h (ver FIN-012 em
+// docs/BACKLOG_DETAIL.md) — não existe blocklist/refresh token nesta versão; um token
+// vazado continua válido até expirar. Mitigação completa (revogação server-side) fica
+// registrada como item de roadmap futuro, não implementada agora.
+const JWT_EXPIRES_IN = '24h';
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  const { name, password } = req.body;
+  // Normaliza o e-mail (trim + lowercase) antes de checar unicidade e salvar — sem isso,
+  // "Usuario@Gmail.com" e "usuario@gmail.com" eram tratados como contas diferentes
+  // (ver FIN-013 em docs/BACKLOG_DETAIL.md).
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : req.body.email;
+
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'Nome completo é obrigatório.' });
   }
@@ -70,6 +210,10 @@ app.post('/api/auth/register', async (req, res) => {
 
   try {
     const existingUser = await prisma.user.findUnique({ where: { email } });
+    // Decisão registrada (ver FIN-014 em docs/BACKLOG_DETAIL.md): mantemos a mensagem
+    // específica "Email já cadastrado" — é necessária para o UX de registro e o risco de
+    // enumeração é baixo (não vaza dado sensível além de "existe conta"), já mitigado
+    // pelo rate limit de FIN-007 acima.
     if (existingUser) return res.status(400).json({ error: 'Email já cadastrado.' });
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -77,15 +221,16 @@ app.post('/api/auth/register', async (req, res) => {
       data: { name, email, passwordHash },
     });
 
-    const token = jwt.sign({ userId: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
   } catch (error) {
-    res.status(500).json({ error: 'Erro ao criar usuário', details: error.message });
+    sendInternalError(res, error, 'Erro ao criar usuário.');
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body;
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  const { password } = req.body;
+  const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : req.body.email;
 
   if (!email || typeof email !== 'string' || !email.trim()) {
     return res.status(400).json({ error: 'E-mail é obrigatório.' });
@@ -101,10 +246,10 @@ app.post('/api/auth/login', async (req, res) => {
     const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) return res.status(400).json({ error: 'Credenciais inválidas' });
 
-    const token = jwt.sign({ userId: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ userId: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
   } catch (error) {
-    res.status(500).json({ error: 'Erro ao realizar login', details: error.message });
+    sendInternalError(res, error, 'Erro ao realizar login.');
   }
 });
 
@@ -122,36 +267,34 @@ app.get('/api/accounts', authenticateToken, async (req, res) => {
     const accounts = await prisma.account.findMany({ where: { userId: req.user.userId } });
     res.json(accounts);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao buscar contas.');
   }
 });
 
 app.post('/api/accounts', authenticateToken, async (req, res) => {
+  const validation = validateBody(accountSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
-    const data = { ...req.body, userId: req.user.userId };
-    if (data.id) delete data.id; // ensure new real id is generated or use the given one if valid
+    const data = { ...validation.data, userId: req.user.userId };
     const acc = await prisma.account.create({ data });
     res.json(acc);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao criar conta.');
   }
 });
 
 app.put('/api/accounts/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(accountUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
     const { id } = req.params;
-    const data = { ...req.body };
-    delete data.id;
-    delete data.userId;
-    delete data.createdAt;
-
     const acc = await prisma.account.updateMany({
       where: { id, userId: req.user.userId },
-      data,
+      data: validation.data,
     });
     res.json({ success: true, changes: acc.count });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao atualizar conta.');
   }
 });
 
@@ -160,43 +303,72 @@ app.delete('/api/accounts/:id', authenticateToken, async (req, res) => {
     await prisma.account.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao excluir conta.');
   }
 });
 
 // --- TRANSACTIONS ---
 app.get('/api/transactions', authenticateToken, async (req, res) => {
   try {
-    const txs = await prisma.transaction.findMany({ 
+    const txs = await prisma.transaction.findMany({
       where: { userId: req.user.userId },
       orderBy: { date: 'desc' },
       take: 2000
     });
     res.json(txs);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao buscar transações.');
   }
 });
 
 app.post('/api/transactions', authenticateToken, async (req, res) => {
-  try {
-    const { transactions } = req.body; 
-    // Supports batch insert
-    if (Array.isArray(transactions)) {
-      const mapped = transactions.map(t => {
-        const { id, ...rest } = t;
-        return { ...rest, userId: req.user.userId };
+  const userId = req.user.userId;
+  // Supports batch insert
+  if (Array.isArray(req.body.transactions)) {
+    const validation = validateBody(transactionBatchSchema, req.body);
+    if (!validation.ok) return res.status(400).json({ error: validation.message });
+    try {
+      const mapped = validation.data.transactions.map(t => {
+        const data = { ...t, userId };
+        data.importHash = computeImportHash(userId, data);
+        return data;
       });
-      await prisma.transaction.createMany({ data: mapped });
-      res.json({ success: true, count: mapped.length });
-    } else {
-      const data = { ...req.body, userId: req.user.userId };
-      if (data.id) delete data.id;
+
+      // Filtra transações cuja chave de deduplicação já existe para este usuário —
+      // evita duplicar dados ao reimportar o mesmo extrato (ver FIN-003).
+      const hashes = mapped.map(t => t.importHash);
+      const existing = await prisma.transaction.findMany({
+        where: { userId, importHash: { in: hashes } },
+        select: { importHash: true },
+      });
+      // Também descarta duplicatas dentro do próprio arquivo importado (ex.: mesma
+      // linha repetida no CSV), não só as que já existem no banco.
+      const seenHashes = new Set(existing.map(e => e.importHash));
+      const newTxs = [];
+      for (const t of mapped) {
+        if (seenHashes.has(t.importHash)) continue;
+        seenHashes.add(t.importHash);
+        newTxs.push(t);
+      }
+      const skipped = mapped.length - newTxs.length;
+
+      if (newTxs.length > 0) {
+        await prisma.transaction.createMany({ data: newTxs });
+      }
+      res.json({ success: true, count: newTxs.length, skipped });
+    } catch (err) {
+      sendInternalError(res, err, 'Erro ao importar transações.');
+    }
+  } else {
+    const validation = validateBody(transactionSchema, req.body);
+    if (!validation.ok) return res.status(400).json({ error: validation.message });
+    try {
+      const data = { ...validation.data, userId };
       const tx = await prisma.transaction.create({ data });
       res.json(tx);
+    } catch (err) {
+      sendInternalError(res, err, 'Erro ao criar transação.');
     }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 
@@ -205,29 +377,32 @@ app.delete('/api/transactions/bulk', authenticateToken, async (req, res) => {
     await prisma.transaction.deleteMany({ where: { userId: req.user.userId } });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao excluir transações.');
   }
 });
 
 // --- DEBTS ---
 app.get('/api/debts', authenticateToken, async (req, res) => {
   try {
-    const debts = await prisma.debt.findMany({ 
+    const debts = await prisma.debt.findMany({
       where: { userId: req.user.userId },
       include: { subItems: true }
     });
     res.json(debts);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao buscar dívidas.');
   }
 });
 
 app.post('/api/debts', authenticateToken, async (req, res) => {
+  const validation = validateBody(debtSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
-    const data = { ...req.body, userId: req.user.userId };
-    if (data.id) delete data.id;
-    const subItems = data.subItems;
-    delete data.subItems;
+    const { subItems, ...rest } = validation.data;
+    // paidAmount/paidInstallments são opcionais no schema (para não forçar reset a 0 em
+    // updates parciais via debtUpdateSchema, que reaproveita o mesmo schema base) — mas
+    // no create, se ausentes, uma dívida nova sempre começa em 0.
+    const data = { paidAmount: 0, paidInstallments: 0, ...rest, userId: req.user.userId };
 
     const debt = await prisma.debt.create({
       data: {
@@ -238,26 +413,16 @@ app.post('/api/debts', authenticateToken, async (req, res) => {
     });
     res.json(debt);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao criar dívida.');
   }
 });
 
 app.put('/api/debts/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(debtUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
     const { id } = req.params;
-    const data = { ...req.body };
-    delete data.id;
-    delete data.userId;
-    delete data.createdAt;
-    delete data.subItems;
-
-    // Converte tipos se forem passados como strings
-    if (data.totalAmount !== undefined) data.totalAmount = parseFloat(data.totalAmount) || 0;
-    if (data.paidAmount !== undefined) data.paidAmount = parseFloat(data.paidAmount) || 0;
-    if (data.monthlyPayment !== undefined) data.monthlyPayment = parseFloat(data.monthlyPayment) || 0;
-    if (data.totalInstallments !== undefined) data.totalInstallments = parseInt(data.totalInstallments) || 1;
-    if (data.paidInstallments !== undefined) data.paidInstallments = parseInt(data.paidInstallments) || 0;
-    if (data.interestRate !== undefined) data.interestRate = parseFloat(data.interestRate) || 0;
+    const { subItems: _subItems, ...data } = validation.data;
     if (data.accountId === '') data.accountId = null;
 
     const debt = await prisma.debt.update({
@@ -267,7 +432,7 @@ app.put('/api/debts/:id', authenticateToken, async (req, res) => {
     });
     res.json(debt);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao atualizar dívida.');
   }
 });
 
@@ -278,7 +443,7 @@ app.delete('/api/debts/:id', authenticateToken, async (req, res) => {
     await prisma.debt.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendInternalError(res, err, 'Erro ao excluir dívida.');
   }
 });
 
@@ -294,8 +459,7 @@ app.post('/api/pluggy/connect-token', authenticateToken, async (req, res) => {
     });
     res.json({ accessToken: response.accessToken });
   } catch (error) {
-    console.error('Erro ao gerar Connect Token:', error);
-    res.status(500).json({ error: 'Erro ao conectar à API da Pluggy', details: error.message });
+    sendInternalError(res, error, 'Erro ao conectar à API da Pluggy.');
   }
 });
 
@@ -308,29 +472,25 @@ app.post('/api/pluggy/connect-item', authenticateToken, async (req, res) => {
     const pluggyItem = await pluggyClient.fetchItem(itemId);
     const userId = req.user.userId;
 
-    // Cria ou atualiza a conta representando o banco conectado
-    const existing = await prisma.account.findFirst({
-      where: { userId, pluggyId: itemId }
+    // Upsert usando a constraint (userId, pluggyId) — atômico a nível de banco, evita
+    // duplicar a conta se duas requisições chegarem em paralelo (ver FIN-021).
+    await prisma.account.upsert({
+      where: { userId_pluggyId: { userId, pluggyId: itemId } },
+      update: {}, // já existe — nada a atualizar aqui, o sync cuida dos dados reais da conta
+      create: {
+        userId,
+        pluggyId: itemId,
+        name: pluggyItem.connector.name,
+        bank: pluggyItem.connector.name,
+        type: 'checking',
+        balance: 0,
+        color: '#6366f1',
+      },
     });
-
-    if (!existing) {
-      await prisma.account.create({
-        data: {
-          userId,
-          pluggyId: itemId,
-          name: pluggyItem.connector.name,
-          bank: pluggyItem.connector.name,
-          type: 'checking',
-          balance: 0,
-          color: '#6366f1',
-        }
-      });
-    }
 
     res.json({ success: true, providerName: pluggyItem.connector.name });
   } catch (error) {
-    console.error('Erro ao registrar item Pluggy:', error);
-    res.status(500).json({ error: 'Erro ao registrar conexão bancária', details: error.message });
+    sendInternalError(res, error, 'Erro ao registrar conexão bancária.');
   }
 });
 
@@ -348,28 +508,44 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
     let totalTxs = 0;
 
     for (const pluggyAcc of accountsRes.results) {
-      // Upsert da conta usando pluggyId
-      let localAccount = await prisma.account.findFirst({
-        where: { userId, pluggyId: pluggyAcc.id }
+      // Upsert atômico via constraint (userId, pluggyId) — ver FIN-021.
+      const localAccount = await prisma.account.upsert({
+        where: { userId_pluggyId: { userId, pluggyId: pluggyAcc.id } },
+        create: {
+          userId,
+          pluggyId: pluggyAcc.id,
+          name: pluggyAcc.name,
+          bank: pluggyAcc.marketingName || 'Banco Conectado',
+          type: mapPluggyAccountType(pluggyAcc),
+          balance: toCents(pluggyAcc.balance),
+          color: '#6366f1',
+        },
+        update: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name },
       });
 
-      if (!localAccount) {
-        localAccount = await prisma.account.create({
-          data: {
-            userId,
-            pluggyId: pluggyAcc.id,
-            name: pluggyAcc.name,
-            bank: pluggyAcc.marketingName || 'Banco Conectado',
-            type: pluggyAcc.type.toLowerCase(),
-            balance: pluggyAcc.balance,
-            color: '#6366f1',
+      // Para cartões de crédito, busca a fatura real via endpoint dedicado da Pluggy
+      // e atualiza `pendingBill` — não é possível inferir a fatura a partir de `balance`
+      // para contas do tipo CREDIT (ver FIN-001 em docs/BACKLOG_DETAIL.md).
+      if (pluggyAcc.type === 'CREDIT') {
+        try {
+          const billsRes = await pluggyClient.fetchCreditCardBills(pluggyAcc.id);
+          const bills = billsRes?.results ?? [];
+          if (bills.length > 0) {
+            // A fatura pendente é a mais recentemente fechada (maior billClosingDate/dueDate) —
+            // não a de menor data, que representaria uma fatura antiga já superada.
+            const currentBill = [...bills].sort((a, b) => {
+              const dateA = new Date(a.billClosingDate ?? a.dueDate).getTime();
+              const dateB = new Date(b.billClosingDate ?? b.dueDate).getTime();
+              return dateB - dateA;
+            })[0];
+            await prisma.account.updateMany({
+              where: { id: localAccount.id, userId },
+              data: { pendingBill: toCents(currentBill.totalAmount) },
+            });
           }
-        });
-      } else {
-        await prisma.account.updateMany({
-          where: { id: localAccount.id, userId },
-          data: { balance: pluggyAcc.balance, name: pluggyAcc.name }
-        });
+        } catch (billError) {
+          console.error(`Erro ao buscar fatura do cartão (accountId=${pluggyAcc.id}):`, billError);
+        }
       }
 
       // Busca transações do último mês
@@ -383,42 +559,38 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
         const txDate = tx.date.toISOString().split('T')[0];
         const pluggyTxId = tx.id;
 
-        // Upsert usando pluggyId como chave de idempotência
+        // Checagem só para contabilizar `totalTxs` (quantas são novas) — a escrita em si
+        // usa upsert com a constraint (userId, pluggyId), atômica a nível de banco e
+        // segura contra duas sincronizações concorrentes (ver FIN-021).
         const existingTx = await prisma.transaction.findFirst({
           where: { userId, pluggyId: pluggyTxId }
         });
+        if (!existingTx) totalTxs++;
 
-        if (!existingTx) {
-          await prisma.transaction.create({
-            data: {
-              userId,
-              accountId: localAccount.id,
-              pluggyId: pluggyTxId,
-              name: tx.description,
-              category: tx.category || 'Outros',
-              date: txDate,
-              amount: tx.amount,
-            }
-          });
-          totalTxs++;
-        } else {
-          await prisma.transaction.updateMany({
-            where: { id: existingTx.id, userId },
-            data: {
-              name: tx.description,
-              category: tx.category || 'Outros',
-              date: txDate,
-              amount: tx.amount,
-            }
-          });
-        }
+        await prisma.transaction.upsert({
+          where: { userId_pluggyId: { userId, pluggyId: pluggyTxId } },
+          create: {
+            userId,
+            accountId: localAccount.id,
+            pluggyId: pluggyTxId,
+            name: tx.description,
+            category: tx.category || 'Outros',
+            date: txDate,
+            amount: toCents(tx.amount),
+          },
+          update: {
+            name: tx.description,
+            category: tx.category || 'Outros',
+            date: txDate,
+            amount: toCents(tx.amount),
+          },
+        });
       }
     }
 
     res.json({ success: true, message: `Sincronizacao concluida! ${totalTxs} novas transacoes importadas.` });
   } catch (error) {
-    console.error('Erro na sincronizacao Pluggy:', error);
-    res.status(500).json({ error: 'Erro na sincronizacao de dados', details: error.message });
+    sendInternalError(res, error, 'Erro na sincronização de dados.');
   }
 });
 
