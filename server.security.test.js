@@ -32,6 +32,11 @@ describe('Isolamento de dados entre usuários', () => {
     beforeAll(async () => {
       const res = await request(app).post('/api/accounts').set('Authorization', `Bearer ${tokenA}`)
         .send({ name: 'Conta A', bank: 'Banco A', type: 'checking', balance: 1000, color: '#fff' });
+      // Sem esta asserção, uma falha silenciosa na criação (ex.: schema mudou, 500) deixaria
+      // `accountId` undefined e os testes abaixo passariam trivialmente (comparando com
+      // `undefined` em vez de testar isolamento de verdade) — ver nitpick do CodeRabbit.
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBeDefined();
       accountId = res.body.id;
     });
 
@@ -63,6 +68,8 @@ describe('Isolamento de dados entre usuários', () => {
     beforeAll(async () => {
       const res = await request(app).post('/api/transactions').set('Authorization', `Bearer ${tokenA}`)
         .send({ name: 'Compra A', category: 'Outros', date: '2026-01-01', amount: -500 });
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBeDefined();
       txId = res.body.id;
     });
 
@@ -91,6 +98,8 @@ describe('Isolamento de dados entre usuários', () => {
     beforeAll(async () => {
       const res = await request(app).post('/api/debts').set('Authorization', `Bearer ${tokenA}`)
         .send({ name: 'Divida A', category: 'Pessoal', totalAmount: 1000, monthlyPayment: 100, totalInstallments: 10, nextDueDate: '2026-02-01' });
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBeDefined();
       debtId = res.body.id;
     });
 
@@ -102,7 +111,7 @@ describe('Isolamento de dados entre usuários', () => {
     it('usuário B não consegue editar a dívida de A (404, isolado por userId no where)', async () => {
       const res = await request(app).put(`/api/debts/${debtId}`).set('Authorization', `Bearer ${tokenB}`)
         .send({ name: 'Hackeado' });
-      expect(res.status).not.toBe(200);
+      expect(res.status).toBe(404);
 
       const check = await request(app).get('/api/debts').set('Authorization', `Bearer ${tokenA}`);
       expect(check.body.find(d => d.id === debtId).name).toBe('Divida A');

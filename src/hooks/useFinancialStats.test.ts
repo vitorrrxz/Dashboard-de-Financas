@@ -84,10 +84,14 @@ describe('computeFinancialStats', () => {
   });
 
   it('dívida vencida (usando a função unificada de FIN-005) aparece em overdueDebts', () => {
+    // totalAmount/paidAmount explícitos e não-zero: com o default totalAmount:0 da fixture,
+    // `paidAmount (0) >= totalAmount (0)` seria trivialmente verdadeiro (uma dívida de R$0 já
+    // está "paga" por definição) e as duas primeiras dívidas cairiam incorretamente em
+    // isDebtPaid — não reflete um caso real de uso (dívida sempre tem valor total > 0).
     const debts = [
-      debt({ nextDueDate: '2020-01-01', paidInstallments: 0, totalInstallments: 5 }), // vencida
-      debt({ nextDueDate: '2099-01-01', paidInstallments: 0, totalInstallments: 5 }), // em dia
-      debt({ nextDueDate: '2020-01-01', paidInstallments: 5, totalInstallments: 5 }), // quitada, não conta
+      debt({ nextDueDate: '2020-01-01', paidInstallments: 0, totalInstallments: 5, totalAmount: 1000, paidAmount: 0 }), // vencida
+      debt({ nextDueDate: '2099-01-01', paidInstallments: 0, totalInstallments: 5, totalAmount: 1000, paidAmount: 0 }), // em dia
+      debt({ nextDueDate: '2020-01-01', paidInstallments: 5, totalInstallments: 5, totalAmount: 1000, paidAmount: 1000 }), // quitada, não conta
     ];
     const s = computeFinancialStats([], [], debts, null);
     expect(s.overdueDebts).toHaveLength(1);

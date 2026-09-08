@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
-import { createTestApp } from './test/backend-test-utils.js';
+import { createTestApp, TEST_JWT_SECRET } from './test/backend-test-utils.js';
 
 describe('Autenticação', () => {
   let app;
@@ -106,8 +106,7 @@ describe('Autenticação', () => {
     });
 
     it('acesso com token expirado retorna 403', async () => {
-      // Mesmo segredo usado pelo server.js no ambiente de teste (ver test/backend-test-utils.js)
-      const expired = jwt.sign({ userId: 'qualquer-id' }, 'test_jwt_secret_' + 'x'.repeat(40), { expiresIn: -1 });
+      const expired = jwt.sign({ userId: 'qualquer-id' }, TEST_JWT_SECRET, { expiresIn: -1 });
       const res = await request(app).get('/api/accounts').set('Authorization', `Bearer ${expired}`);
       expect(res.status).toBe(403);
     });
