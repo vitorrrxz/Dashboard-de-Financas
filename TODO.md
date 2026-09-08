@@ -1,6 +1,6 @@
 # TODO.md - FinFlow (Backend + Frontend)
 
-> Checklist de execução. Detalhamento completo de cada item (Objetivo, Problema, Arquivos, Critérios de aceite) em [`docs/BACKLOG_DETAIL.md`](docs/BACKLOG_DETAIL.md), sob o mesmo ID `FIN-XXX`.
+> Checklist de execução. Detalhamento completo de cada item (Objetivo, Problema, Arquivos, Critérios de aceite, notas de implementação e validação) em [`docs/BACKLOG_DETAIL.md`](docs/BACKLOG_DETAIL.md), sob o mesmo ID `FIN-XXX`.
 > Gerado a partir de auditoria do código real em 2026-09-04. Fases 0-2 corrigem o estado atual do app; Fases 3-9 são o roadmap de novas funcionalidades.
 
 ## Protocolo
@@ -22,12 +22,6 @@
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
 - [x] Corrigir servidor crashando no boot sem credenciais Pluggy configuradas (FIN-090, achado em revisao de codigo)
 
-Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
-- **Fase 0 100% concluida**: FIN-006, FIN-001, FIN-002, FIN-003, FIN-004, FIN-005 fechadas e validadas.
-- FIN-005: criado `src/utils/debts.ts` (`isDebtOverdue`/`isDebtPaid`/`todayISO`); App.tsx e DebtManager.tsx unificados. De brinde, ja resolve FIN-016 e FIN-088 (marcadas concluidas no detalhe).
-- Novo achado registrado: FIN-089 (2 erros de `tsc` pre-existentes em `App.tsx`, nao relacionados as tarefas concluidas).
-- Proxima tarefa: FIN-007 (primeira da Fase 1 - Seguranca).
-
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
 ### Seguranca
@@ -40,11 +34,6 @@ Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DE
 - [x] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
 - [x] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
 
-Status validado em 2026-09-05 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
-- Secao Seguranca da Fase 1 100% concluida: rate limit, validacao Zod (accounts/transactions/debts), CORS restrito, helmet, erros internos nao vazam mais, JWT 24h, email normalizado, decisao de enumeracao documentada.
-- Achado durante a validacao (corrigido): em Zod v4, `z.string().min(1,'msg')` sozinho nao usa a mensagem customizada quando o campo esta totalmente ausente — precisa de `z.string({ error: 'msg' })`.
-- Proxima: subsecao "Integridade financeira" da Fase 1 (FIN-015, FIN-017, FIN-018 — FIN-005/016 ja feitas).
-
 ### Integridade financeira
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
 - [x] Migrar valores monetarios de `Float` para inteiro em centavos (FIN-015)
@@ -56,34 +45,12 @@ Status validado em 2026-09-05 (resumo — detalhes completos em `docs/BACKLOG_DE
 - [x] Tornar "pagar todas as parcelas" / "excluir todas as dividas" resiliente a falha parcial (FIN-017)
 - [x] Separar "Saldo Real" de saldo de contas de investimento no dashboard (FIN-018)
 
-Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
-- **Fase 1 100% concluida** (Seguranca + Integridade financeira).
-- FIN-015 (maior mudanca ate agora): schema migrado para centavos (Int), incluindo migracao real do `dev.db` (com backup previo e confirmacao explicita do usuario antes de escrever). Conversao fica isolada na borda com a API — so `App.tsx` e `server.js` mudaram; AccountsManager/DebtManager/ImportModal/parsers continuam em reais, sem alteracao. Validado ponta a ponta: backend rejeita valores nao-inteiros, sync Pluggy convertido e re-testado contra sandbox real, round-trip de conversao sem drift.
-- FIN-017: `handlePayAll`/`handleDeleteAll` agora usam `Promise.allSettled`, informando quais dividas falharam.
-- FIN-018: novo card "Investimentos" no Dashboard, separado do "Saldo Real".
-- Proxima: Fase 2, subsecao "Banco de dados" (FIN-019, FIN-020, FIN-021).
-
 ## Fase 2 - Qualidade (Banco, Backend, Frontend, Mobile, Testes)
 
 ### Banco de dados
 - [x] Adicionar indices compostos por `userId` em Account/Transaction/Debt (FIN-019)
 - [x] Adotar historico de migrations do Prisma em vez de `db push` (FIN-020, depende de FIN-015b)
 - [x] Adicionar constraint de unicidade `(userId, pluggyId)` em Account e Transaction (FIN-021, depende de FIN-020)
-
-Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
-- Secao "Banco de dados" completa. Indices aplicados no `dev.db` real sem perda de dados.
-- FIN-020: `migrate dev` nao funciona sem TTY interativo neste ambiente — usado o procedimento oficial de "baseline" (nao-destrutivo: so registra o schema atual como ja aplicado, sem tocar dados). `prisma/migrations/` agora versionado; README atualizado.
-- FIN-021: constraint unica `(userId, pluggyId)` + `server.js` trocado para `upsert`. Validado com o sandbox real da Pluggy: sync repetido e ate 2 syncs em paralelo nao geram duplicata.
-
-Correcoes de revisao de codigo em 2026-09-08 (achados fora do escopo do audit original, resumo — detalhes em `docs/BACKLOG_DETAIL.md`):
-- **FIN-090 (novo, P0)**: `PluggyClient` era instanciado no boot do servidor mesmo sem credenciais configuradas, e o construtor lanca excecao sincrona nesse caso — o app inteiro crashava ao subir sem Pluggy configurado. Corrigido com inicializacao preguicosa (`getPluggyClient()`).
-- **FIN-003 (correcao)**: dedupe de importacao ganhou 2 reforcos — usa o `FITID` do OFX (quando disponivel) em vez do heuristico nome+data+valor, evitando falso positivo entre transacoes distintas identicas; e passou a usar constraint unica no banco (`create` + captura de erro `P2002`) em vez de checagem em memoria, corrigindo uma corrida em importacoes paralelas do mesmo arquivo.
-- **FIN-004 (correcao)**: em reimportacao parcial, a divida automatica agora usa so as transacoes de fato aceitas (`res.acceptedIndices`), nao todas as do arquivo — antes podia contar de novo valores ja pertencentes a uma divida anterior.
-- **FIN-008 (correcao)**: `accountId: ''` era rejeitado com 400 pelo Zod antes do handler normalizar para `null` (codigo morto). Corrigido com `z.preprocess`.
-- **FIN-021 (validacao adicional)**: teste de corrida isolado confirmou que a protecao via `upsert` + constraint unica vale tambem para transacoes, nao so contas (10 upserts concorrentes → 1 linha).
-- **FIN-014**: reavaliada, decisao mantida sem mudanca de codigo.
-- Migration `prisma/migrations/20260908155657_add_import_hash_unique_constraint` aplicada ao `dev.db` real (sem duplicatas pre-existentes, confirmado antes de aplicar).
-- Proxima: secao "Backend / API" (FIN-022, FIN-023, FIN-024).
 
 ### Backend / API
 - [ ] Criar endpoints `PUT`/`DELETE` para transacao individual (FIN-022, depende de FIN-008)
@@ -217,4 +184,4 @@ Correcoes de revisao de codigo em 2026-09-08 (achados fora do escopo do audit or
 
 ---
 
-Ver `docs/BACKLOG_DETAIL.md` para o detalhamento tecnico completo de cada `FIN-XXX` (Objetivo, Problema, Arquivos reais, Alteracoes necessarias, Validacao e Criterios de aceite), a tabela de classificacao do README vs. codigo real, e o roadmap de releases (v0.1 a v2.0).
+Ver `docs/BACKLOG_DETAIL.md` para o detalhamento tecnico completo de cada `FIN-XXX` (Objetivo, Problema, Arquivos reais, Alteracoes necessarias, Validacao e Criterios de aceite, notas de implementação), a tabela de classificacao do README vs. codigo real, e o roadmap de releases (v0.1 a v2.0).
