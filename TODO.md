@@ -20,6 +20,7 @@
 - [x] Adicionar verificacao de duplicidade na importacao manual de extrato CSV/OFX (FIN-003)
 - [x] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
+- [x] Corrigir servidor crashando no boot sem credenciais Pluggy configuradas (FIN-090, achado em revisao de codigo)
 
 Status validado em 2026-09-04 (resumo — detalhes completos em `docs/BACKLOG_DETAIL.md`):
 - **Fase 0 100% concluida**: FIN-006, FIN-001, FIN-002, FIN-003, FIN-004, FIN-005 fechadas e validadas.
@@ -73,6 +74,15 @@ Status validado em 2026-09-08 (resumo — detalhes completos em `docs/BACKLOG_DE
 - Secao "Banco de dados" completa. Indices aplicados no `dev.db` real sem perda de dados.
 - FIN-020: `migrate dev` nao funciona sem TTY interativo neste ambiente — usado o procedimento oficial de "baseline" (nao-destrutivo: so registra o schema atual como ja aplicado, sem tocar dados). `prisma/migrations/` agora versionado; README atualizado.
 - FIN-021: constraint unica `(userId, pluggyId)` + `server.js` trocado para `upsert`. Validado com o sandbox real da Pluggy: sync repetido e ate 2 syncs em paralelo nao geram duplicata.
+
+Correcoes de revisao de codigo em 2026-09-08 (achados fora do escopo do audit original, resumo — detalhes em `docs/BACKLOG_DETAIL.md`):
+- **FIN-090 (novo, P0)**: `PluggyClient` era instanciado no boot do servidor mesmo sem credenciais configuradas, e o construtor lanca excecao sincrona nesse caso — o app inteiro crashava ao subir sem Pluggy configurado. Corrigido com inicializacao preguicosa (`getPluggyClient()`).
+- **FIN-003 (correcao)**: dedupe de importacao ganhou 2 reforcos — usa o `FITID` do OFX (quando disponivel) em vez do heuristico nome+data+valor, evitando falso positivo entre transacoes distintas identicas; e passou a usar constraint unica no banco (`create` + captura de erro `P2002`) em vez de checagem em memoria, corrigindo uma corrida em importacoes paralelas do mesmo arquivo.
+- **FIN-004 (correcao)**: em reimportacao parcial, a divida automatica agora usa so as transacoes de fato aceitas (`res.acceptedIndices`), nao todas as do arquivo — antes podia contar de novo valores ja pertencentes a uma divida anterior.
+- **FIN-008 (correcao)**: `accountId: ''` era rejeitado com 400 pelo Zod antes do handler normalizar para `null` (codigo morto). Corrigido com `z.preprocess`.
+- **FIN-021 (validacao adicional)**: teste de corrida isolado confirmou que a protecao via `upsert` + constraint unica vale tambem para transacoes, nao so contas (10 upserts concorrentes → 1 linha).
+- **FIN-014**: reavaliada, decisao mantida sem mudanca de codigo.
+- Migration `prisma/migrations/20260908155657_add_import_hash_unique_constraint` aplicada ao `dev.db` real (sem duplicatas pre-existentes, confirmado antes de aplicar).
 - Proxima: secao "Backend / API" (FIN-022, FIN-023, FIN-024).
 
 ### Backend / API
