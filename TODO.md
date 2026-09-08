@@ -53,9 +53,9 @@
 - [x] Adicionar constraint de unicidade `(userId, pluggyId)` em Account e Transaction (FIN-021, depende de FIN-020)
 
 ### Backend / API
-- [ ] Criar endpoints `PUT`/`DELETE` para transacao individual (FIN-022, depende de FIN-008)
-- [ ] Implementar paginacao real em `GET /api/transactions` (FIN-023)
-- [ ] Adicionar script `typecheck` no `package.json` (FIN-024)
+- [x] Criar endpoints `PUT`/`DELETE` para transacao individual (FIN-022, depende de FIN-008)
+- [x] Implementar paginacao real em `GET /api/transactions` (FIN-023)
+- [x] Adicionar script `typecheck` no `package.json` (FIN-024)
 
 ### Frontend
 - [ ] Centralizar base URL da API (hoje hardcoded em 3 arquivos) (FIN-025)

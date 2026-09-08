@@ -173,6 +173,7 @@ const transactionSchema = z.object({
 const transactionBatchSchema = z.object({
   transactions: z.array(transactionSchema).min(1, 'Nenhuma transação enviada.'),
 });
+const transactionUpdateSchema = transactionSchema.partial();
 
 const DEBT_CATEGORIES = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
 const debtItemSchema = z.object({
@@ -336,14 +337,36 @@ app.delete('/api/accounts/:id', authenticateToken, async (req, res) => {
 });
 
 // --- TRANSACTIONS ---
+// Paginação real via `?page=`/`?pageSize=` (ver FIN-023) — opcional e aditiva: sem esses
+// parâmetros, mantém o comportamento original (array simples, limitado a 2000) para não
+// quebrar os callers existentes (carga inicial do dashboard, que soma todas as transações
+// para `stats`, e o reload após import/sync). Com os parâmetros, retorna um objeto
+// `{ transactions, total, page, pageSize }`, usado pelo frontend para "carregar mais"
+// além do limite de 2000.
 app.get('/api/transactions', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
   try {
-    const txs = await prisma.transaction.findMany({
-      where: { userId: req.user.userId },
-      orderBy: { date: 'desc' },
-      take: 2000
-    });
-    res.json(txs);
+    if (req.query.page === undefined && req.query.pageSize === undefined) {
+      const txs = await prisma.transaction.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        take: 2000
+      });
+      return res.json(txs);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(2000, Math.max(1, parseInt(req.query.pageSize, 10) || 200));
+    const [transactions, total] = await Promise.all([
+      prisma.transaction.findMany({
+        where: { userId },
+        orderBy: { date: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.transaction.count({ where: { userId } }),
+    ]);
+    res.json({ transactions, total, page, pageSize });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao buscar transações.');
   }
@@ -405,6 +428,32 @@ app.delete('/api/transactions/bulk', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao excluir transações.');
+  }
+});
+
+// Registradas depois de `/bulk` — Express casa rotas na ordem de registro, e `/:id`
+// capturaria "bulk" como id se viesse antes (ver FIN-022).
+app.put('/api/transactions/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(transactionUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const { externalId: _externalId, ...data } = validation.data;
+    const result = await prisma.transaction.updateMany({
+      where: { id: req.params.id, userId: req.user.userId },
+      data,
+    });
+    res.json({ success: true, changes: result.count });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao atualizar transação.');
+  }
+});
+
+app.delete('/api/transactions/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.transaction.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir transação.');
   }
 });
 

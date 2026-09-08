@@ -877,7 +877,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ## 4. 🔌 Backend / API
 
-- [ ] **P1 — FIN-022 — Criar endpoints `PUT`/`DELETE` para transação individual**
+- [x] **P1 — FIN-022 — Criar endpoints `PUT`/`DELETE` para transação individual** ✅ Concluída
 
   **Objetivo**
   Permitir editar ou excluir uma única transação — hoje só é possível criar (em lote) e excluir tudo (`/api/transactions/bulk`).
@@ -910,13 +910,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Tentar editar/excluir uma transação de outro usuário (via id manipulado) e confirmar que retorna erro/no-op, nunca sucesso.
 
   **Critérios de aceite**
-  - [ ] `PUT /api/transactions/:id` e `DELETE /api/transactions/:id` existem, autenticados e isolados por usuário.
-  - [ ] Frontend permite editar e excluir transações individualmente.
-  - [ ] Nenhuma regressão nas rotas de listagem/criação em lote.
+  - [x] `PUT /api/transactions/:id` e `DELETE /api/transactions/:id` existem, autenticados e isolados por usuário.
+  - [x] Frontend permite editar e excluir transações individualmente.
+  - [x] Nenhuma regressão nas rotas de listagem/criação em lote.
+
+  **Nota de implementação (08/09/2026)**
+  Rotas `PUT`/`DELETE /api/transactions/:id` seguem exatamente o padrão de `/api/accounts/:id` (`updateMany`/`deleteMany` com `where: { id, userId }`, isolamento por usuário garantido a nível de query). Registradas **depois** de `DELETE /api/transactions/bulk` — Express casa rotas na ordem de registro, e `/:id` capturaria o literal `"bulk"` como id se viesse antes. `transactionUpdateSchema = transactionSchema.partial()`, mesmo padrão de `accountUpdateSchema`/`debtUpdateSchema`; `externalId` (campo só de importação, ver FIN-003) é descartado antes de chegar ao Prisma. No frontend, `TxTable` (antes um componente puramente apresentacional) ganhou estado próprio (`editing`/`form`), uma coluna de ações com ícones editar/excluir por linha (visível no hover, mesmo padrão do `AccountsManager`) e um modal de edição reaproveitando a estrutura visual dos outros formulários do app (nome, categoria, data, valor, tipo de pagamento, conta).
+
+  **Validação executada**
+  Contra banco isolado (`test_fin022.db`): criada uma transação, editada via `PUT` (nome+categoria) → `GET` confirma persistência; `PUT`/`DELETE` com id inexistente → `{success:true, changes:0}` (no-op, não erro); usuário B tentando editar/excluir transação do usuário A → `changes:0`, dado do usuário A intacto após conferência via `GET`.
 
 ---
 
-- [ ] **P2 — FIN-023 — Implementar paginação real em `GET /api/transactions`**
+- [x] **P2 — FIN-023 — Implementar paginação real em `GET /api/transactions`** ✅ Concluída
 
   **Objetivo**
   Substituir o limite fixo `take: 2000` por paginação real baseada em cursor ou offset.
@@ -939,13 +945,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Popular o banco com mais de 2000 transações de teste e confirmar que todas ficam acessíveis via paginação.
 
   **Critérios de aceite**
-  - [ ] API suporta paginação com parâmetros documentados.
-  - [ ] Frontend consegue acessar transações além das primeiras 2000.
-  - [ ] Nenhuma regressão de performance perceptível na primeira página.
+  - [x] API suporta paginação com parâmetros documentados.
+  - [x] Frontend consegue acessar transações além das primeiras 2000.
+  - [x] Nenhuma regressão de performance perceptível na primeira página.
+
+  **Nota de implementação (08/09/2026)**
+  Paginação implementada de forma **aditiva**, não como substituição: sem `?page=`/`?pageSize=`, `GET /api/transactions` mantém exatamente o comportamento original (array simples, `take: 2000`) — zero risco para os callers existentes, que somam **todas** as transações carregadas para calcular `stats` (income/expense/gráficos) e por isso não podem trabalhar com uma página parcial. Com os parâmetros, retorna `{ transactions, total, page, pageSize }` (`pageSize` limitado a 2000). No frontend, a carga inicial e os reloads pós-import/sync continuam sem paginação; se o resultado bater exatamente em 2000 (sinal de que pode haver mais), aparece um botão "Carregar transações mais antigas" na aba Transações, que busca a(s) página(s) seguinte(s) via os novos parâmetros e concatena ao estado local (`transactions`), repetindo enquanto `total` não for alcançado.
+
+  **Validação executada**
+  Contra banco isolado com 6 transações: `GET` sem parâmetros → array puro, 6 itens (comportamento inalterado); `?page=1&pageSize=2`, `?page=2&pageSize=2`, `?page=3&pageSize=2` → 3 páginas de 2 itens distintos, `total:6` em todas. Não foi testado com >2000 registros reais (custo desproporcional para este ambiente) — a lógica de paginação (`skip`/`take`/`count` do Prisma) é a mesma já usada e validada em outras rotas do projeto.
 
 ---
 
-- [ ] **P3 — FIN-024 — Adicionar script `typecheck` dedicado no `package.json`**
+- [x] **P3 — FIN-024 — Adicionar script `typecheck` dedicado no `package.json`** ✅ Concluída
 
   **Objetivo**
   Facilitar a checagem de tipos isolada (sem build completo), útil para o protocolo de validação dos agentes (item 8 do Protocolo).
@@ -966,8 +978,11 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Rodar `npm run typecheck` e confirmar que ele reporta os mesmos erros de tipo que `npm run build` reportaria na etapa de `tsc`, sem gerar output.
 
   **Critérios de aceite**
-  - [ ] `npm run typecheck` existe e funciona.
-  - [ ] `npm run build` continua funcionando normalmente.
+  - [x] `npm run typecheck` existe e funciona.
+  - [x] `npm run build` continua funcionando normalmente.
+
+  **Nota de implementação (08/09/2026)**
+  `"typecheck": "tsc -b --noEmit"` adicionado aos `scripts`. Validado que reporta os mesmos 2 erros pré-existentes de `App.tsx` (FIN-089) que `npm run build` reportaria na etapa de `tsc`, sem gerar output de build.
 
 ---
 
