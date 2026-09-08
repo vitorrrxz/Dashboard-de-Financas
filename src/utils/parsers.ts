@@ -26,7 +26,7 @@ const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
   { keywords: ['shopping', 'roupa', 'calçado', 'loja', 'magazine', 'americanas', 'amazon', 'mercado livre', 'ali express', 'zara', 'renner', 'c&a'], category: 'Compras' },
 ];
 
-function autoCategory(description: string): string {
+export function autoCategory(description: string): string {
   const lower = description.toLowerCase();
   for (const rule of CATEGORY_RULES) {
     if (rule.keywords.some(k => lower.includes(k))) {
@@ -41,7 +41,7 @@ function autoCategory(description: string): string {
  * - BR: 1.500,00  or  150,00  (comma = decimal)
  * - US: 1500.00   or  150.00  (dot = decimal)
  */
-function parseAmount(raw: string): number {
+export function parseAmount(raw: string): number {
   const s = raw.trim().replace(/["'\s]/g, '').replace(/^R\$\s*/, '');
   if (!s || s === '-' || s === '+') return NaN;
 
@@ -68,7 +68,7 @@ function parseAmount(raw: string): number {
   return parseFloat(s);
 }
 
-function normalizeDate(rawDate: string): string {
+export function normalizeDate(rawDate: string): string {
   const clean = rawDate.trim().split(' ')[0]; // ignore time part if present
 
   // DD/MM/YYYY

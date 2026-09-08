@@ -153,3 +153,9 @@ O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos se
 * `.env` (contém a assinatura JWT e conexões confidenciais)
 * `dev.db` e `dev.db-journal` (banco de dados SQLite local contendo suas transações e dados reais)
 * Arquivos temporários de banco de dados (`*.db`, `*.db-journal`)
+
+---
+
+## 📁 `sandbox-pluggy/`
+
+A pasta `sandbox-pluggy/` **não é parte do aplicativo principal** — é um protótipo isolado, sem autenticação real, usado para testar a integração com a Pluggy separadamente. Não confundir com o backend (`server.js` na raiz). Detalhes em [`sandbox-pluggy/README.md`](sandbox-pluggy/README.md).

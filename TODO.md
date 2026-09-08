@@ -58,42 +58,43 @@
 - [x] Adicionar script `typecheck` no `package.json` (FIN-024)
 
 ### Frontend
-- [ ] Centralizar base URL da API (hoje hardcoded em 3 arquivos) (FIN-025)
-- [ ] Habilitar TypeScript `strict` mode (FIN-026)
-- [ ] Criar servico `apiFetch` unico, eliminando duplicacao (FIN-027, depende de FIN-025)
+- [x] Centralizar base URL da API (hoje hardcoded em 3 arquivos) (FIN-025)
+- [x] Habilitar TypeScript `strict` mode (FIN-026)
+- [x] Criar servico `apiFetch` unico, eliminando duplicacao (FIN-027, depende de FIN-025)
 
 ### Mobile / Responsividade
-- [ ] Criar navegacao mobile — sidebar hoje fica 100% inacessivel abaixo de `md` (FIN-028)
-- [ ] Adaptar grids fixos de 2 colunas em telas muito pequenas (FIN-029)
+- [x] Criar navegacao mobile — sidebar hoje fica 100% inacessivel abaixo de `md` (FIN-028)
+- [x] Adaptar grids fixos de 2 colunas em telas muito pequenas (FIN-029)
 
 ### Testes automatizados
-- [ ] Configurar Vitest + Testing Library no frontend (FIN-030)
-- [ ] Configurar testes de integracao do backend com Supertest (FIN-031)
-- [ ] Testes de isolamento de dados entre usuarios (FIN-032, depende de FIN-031)
-- [ ] Testes de autenticacao — registro, login, token invalido/expirado (FIN-033, depende de FIN-031)
-- [ ] Testes das regras financeiras — parcela paga, divida vencida, saldo negativo etc. (FIN-034, depende de FIN-030, FIN-005)
-- [ ] Testes dos parsers de CSV/OFX (FIN-035, depende de FIN-030)
-- [ ] Pipeline de CI no GitHub Actions — lint + typecheck + testes + build (FIN-036, depende de FIN-024, FIN-030, FIN-031; FIN-084 é referência cruzada da mesma tarefa)
+- [x] Configurar Vitest + Testing Library no frontend (FIN-030)
+- [x] Configurar testes de integracao do backend com Supertest (FIN-031)
+- [x] Testes de isolamento de dados entre usuarios (FIN-032, depende de FIN-031)
+- [x] Testes de autenticacao — registro, login, token invalido/expirado (FIN-033, depende de FIN-031)
+- [x] Testes das regras financeiras — parcela paga, divida vencida, saldo negativo etc. (FIN-034, depende de FIN-030, FIN-005)
+- [x] Testes dos parsers de CSV/OFX (FIN-035, depende de FIN-030)
+- [x] Pipeline de CI no GitHub Actions — lint + typecheck + testes + build (FIN-036, depende de FIN-024, FIN-030, FIN-031; FIN-084 é referência cruzada da mesma tarefa)
 
 ### Performance
-- [ ] Sync Pluggy processa transacoes sequencialmente (N+1) — otimizar (FIN-037, depende de FIN-021)
-- [ ] Verificar paginacao da API da Pluggy em `fetchTransactions` (FIN-038)
+- [x] Sync Pluggy processa transacoes sequencialmente (N+1) — otimizar (FIN-037, depende de FIN-021)
+- [x] Verificar paginacao da API da Pluggy em `fetchTransactions` (FIN-038)
 
 ### UX/UI
-- [ ] Conectar sino de notificacoes do header a algum conteudo real (FIN-039)
-- [ ] Parar de forcar troca para aba "Transacoes" a cada tecla digitada na busca (FIN-040)
+- [x] Conectar sino de notificacoes do header a algum conteudo real (FIN-039)
+- [x] Parar de forcar troca para aba "Transacoes" a cada tecla digitada na busca (FIN-040)
 
 ### Open Finance / Pluggy
-- [ ] Tratar status de item Pluggy expirado / erro de login (FIN-041)
+- [x] Tratar status de item Pluggy expirado / erro de login (FIN-041)
 
 ### Infraestrutura / DX
-- [ ] Documentar `sandbox-pluggy/` como prototipo isolado, nao integrado ao app principal (FIN-085)
+- [x] Documentar `sandbox-pluggy/` como prototipo isolado, nao integrado ao app principal (FIN-085)
 
 ### Debitos tecnicos
-- [ ] Extrair calculo financeiro (`stats`) de `App.tsx` para modulo/hook dedicado (FIN-086, depende de FIN-034)
-- [ ] Centralizar padrao de formulario (`FormField`) entre AccountsManager e DebtManager (FIN-087)
+- [x] Extrair calculo financeiro (`stats`) de `App.tsx` para modulo/hook dedicado (FIN-086, depende de FIN-034)
+- [x] Centralizar padrao de formulario (`FormField`) entre AccountsManager e DebtManager (FIN-087)
 - [x] Remover verificacao de vencimento duplicada remanescente apos FIN-005 (FIN-088, depende de FIN-005)
-- [ ] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
+- [x] Corrigir 2 erros de `tsc` pre-existentes em `App.tsx` (tooltip Recharts) (FIN-089)
+- [ ] Corrigir perda silenciosa de transacoes em OFX SGML com campos sem fechamento (FIN-091, achado ao escrever testes)
 
 ## Fase 3 - Planejamento Financeiro (Orcamento)
 

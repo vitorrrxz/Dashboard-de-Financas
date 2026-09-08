@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Mail, Lock, User, ArrowRight } from 'lucide-react';
+import { apiFetch } from '../services/api';
 
 interface AuthFormProps {
   onLogin: (token: string, user: { id: string; name: string; email: string }) => void;
@@ -22,14 +23,7 @@ export function AuthForm({ onLogin }: AuthFormProps) {
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
       const body = isLogin ? { email, password } : { name, email, password };
 
-      const res = await fetch(`http://localhost:3001${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro na autenticação');
+      const data = await apiFetch<{ token: string; user: { id: string; name: string; email: string } }>(endpoint, { method: 'POST', body });
 
       onLogin(data.token, data.user);
     } catch (err) {

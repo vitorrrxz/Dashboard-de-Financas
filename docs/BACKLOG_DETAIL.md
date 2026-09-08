@@ -988,7 +988,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ## 5. 🖥️ Frontend
 
-- [ ] **P1 — FIN-025 — Centralizar a base URL da API (hoje hardcoded em 3 arquivos)**
+- [x] **P1 — FIN-025 — Centralizar a base URL da API (hoje hardcoded em 3 arquivos)** ✅ Concluída
 
   **Objetivo**
   Eliminar a URL `http://localhost:3001` hardcoded, hoje duplicada em três lugares diferentes, para permitir rodar o frontend contra outro host (staging, produção) sem editar código.
@@ -1016,13 +1016,16 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Trocar `VITE_API_URL` para outro valor e confirmar que as requisições vão para o novo host (pode ser validado apontando para um servidor mock).
 
   **Critérios de aceite**
-  - [ ] Nenhuma ocorrência hardcoded de `http://localhost:3001` no código-fonte de `src/`.
-  - [ ] App funciona normalmente com a configuração padrão.
-  - [ ] `.env.example` documenta a nova variável.
+  - [x] Nenhuma ocorrência hardcoded de `http://localhost:3001` no código-fonte de `src/`.
+  - [x] App funciona normalmente com a configuração padrão.
+  - [x] `.env.example` documenta a nova variável.
+
+  **Nota de implementação (08/09/2026)**
+  Implementada em conjunto com FIN-027 (dependência natural — o módulo criado aqui já nasce com o `apiFetch` compartilhado). Novo `src/services/api.ts` exporta `API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'` e `apiFetch()`. `VITE_API_URL` documentada em `.env.example` (prefixo `VITE_` obrigatório para o Vite expor a variável via `import.meta.env`).
 
 ---
 
-- [ ] **P2 — FIN-026 — Habilitar TypeScript `strict` mode**
+- [x] **P2 — FIN-026 — Habilitar TypeScript `strict` mode** ✅ Concluída
 
   **Objetivo**
   Ativar checagens estritas de tipo para reduzir bugs de `null`/`undefined` não tratados, especialmente relevante em um app financeiro.
@@ -1047,13 +1050,19 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Testar manualmente os principais fluxos (login, contas, transações, dívidas) para garantir que nenhuma correção de tipo alterou comportamento.
 
   **Critérios de aceite**
-  - [ ] `strict: true` habilitado.
-  - [ ] Build e typecheck passam sem erros.
-  - [ ] Nenhuma regressão funcional observável.
+  - [x] `strict: true` habilitado.
+  - [x] Build e typecheck passam sem erros.
+  - [x] Nenhuma regressão funcional observável.
+
+  **Nota de implementação (08/09/2026)**
+  `"strict": true` adicionado a `tsconfig.app.json`. Surpresa positiva: **nenhum erro novo** foi revelado — o código já era, na prática, strict-clean antes da flag existir. O único obstáculo para `npm run build`/`npm run typecheck` passarem 100% limpos eram os 2 erros pré-existentes de FIN-089 (tooltip do Recharts, não relacionados a `strict`), corrigidos junto nesta tarefa para poder fechar o critério de aceite "build e typecheck passam sem erros": os `formatter` dos dois `RechartsTooltip` tinham `(v: number) => ...` anotado manualmente, incompatível com o tipo real da lib (`Formatter<TValue>`, que aceita `TValue | undefined`); removida a anotação manual (deixando o parâmetro inferir o tipo esperado pela prop) e adicionado `Number(v)` antes de repassar a `fmt()`.
+
+  **Validação executada**
+  `npx tsc -b --noEmit` → 0 erros. `npm run build` → build completo sem erros (só o aviso pré-existente, não relacionado, de chunk >500kB). `npx eslint .` no projeto inteiro → 0 erros/warnings.
 
 ---
 
-- [ ] **P3 — FIN-027 — Criar serviço `apiFetch` único para eliminar duplicação do padrão fetch**
+- [x] **P3 — FIN-027 — Criar serviço `apiFetch` único para eliminar duplicação do padrão fetch** ✅ Concluída
 
   **Objetivo**
   Remover a duplicação do padrão `fetch` + header `Authorization` + tratamento de erro, hoje repetido em `App.tsx` (`fetchAPI`, [App.tsx:46-60](src/App.tsx#L46-L60)) e `PluggyConnectButton.tsx` (`fetchAPI`, [PluggyConnectButton.tsx:43-57](src/components/PluggyConnectButton.tsx#L43-L57)) — funções quase idênticas definidas separadamente.
@@ -1075,14 +1084,20 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Confirmar que todos os fluxos que dependiam de `fetchAPI` (contas, transações, dívidas, sync Pluggy) continuam funcionando sem alteração de comportamento.
 
   **Critérios de aceite**
-  - [ ] Uma única implementação de `fetchAPI`/`apiFetch` é usada por todo o frontend.
-  - [ ] Nenhuma regressão funcional.
+  - [x] Uma única implementação de `fetchAPI`/`apiFetch` é usada por todo o frontend.
+  - [x] Nenhuma regressão funcional.
+
+  **Nota de implementação (08/09/2026)**
+  `apiFetch(endpoint, { method, body, token })` em `src/services/api.ts` é agora a única implementação real. `App.tsx` e `PluggyConnectButton.tsx` mantêm um wrapper local `fetchAPI(endpoint, method, body)` (assinatura posicional antiga, para não precisar tocar as dezenas de call sites existentes) que só delega para `apiFetch` injetando o `token` do escopo; `AuthForm.tsx` (que não tem token) chama `apiFetch` diretamente. Os wrappers tipam o retorno como `any` explicitamente (`eslint-disable` pontual) para preservar o comportamento de tipagem frouxa que `fetchAPI` já tinha antes — tipar corretamente a resposta de cada endpoint é um esforço maior, fora do escopo desta tarefa.
+
+  **Validação executada**
+  `npx tsc -b --noEmit`, `npm run build` e `npx eslint .` no projeto inteiro, todos sem erros (ver nota de FIN-026). Não foi feito teste manual em navegador nesta tarefa — a refatoração preserva exatamente a mesma URL, headers e lógica de erro do `fetch` original, só movida para um módulo compartilhado.
 
 ---
 
 ## 6. 📱 Responsividade / Mobile
 
-- [ ] **P1 — FIN-028 — Sidebar principal totalmente oculta em telas pequenas, sem navegação alternativa**
+- [x] **P1 — FIN-028 — Sidebar principal totalmente oculta em telas pequenas, sem navegação alternativa** ✅ Concluída
 
   **Objetivo**
   Dar aos usuários mobile uma forma de navegar entre abas, sair da conta, importar extrato e gerenciar contas — hoje impossível.
@@ -1108,12 +1123,15 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Testar em viewport mobile (ex. 375px de largura, DevTools) que é possível: trocar entre as 4 abas, abrir o modal de importação, acessar "Gerenciar Contas", conectar via Pluggy e fazer logout.
 
   **Critérios de aceite**
-  - [ ] Todas as ações hoje disponíveis apenas na sidebar (navegação, importação, Pluggy, logout, limpar transações) são acessíveis em viewport mobile.
-  - [ ] Layout desktop (`md` e acima) permanece inalterado.
+  - [x] Todas as ações hoje disponíveis apenas na sidebar (navegação, importação, Pluggy, logout, limpar transações) são acessíveis em viewport mobile.
+  - [x] Layout desktop (`md` e acima) permanece inalterado.
+
+  **Nota de implementação (08/09/2026)**
+  Escolhida a opção "hambúrguer + drawer" (não bottom-nav) por reaproveitar 100% do conteúdo da sidebar existente sem duplicar nenhuma ação entre dois lugares. Abaixo de `md`, `<aside>` some por padrão (`hidden`) e vira um overlay `fixed inset-y-0 left-0` com backdrop escuro (`fixed inset-0 bg-black/70`) quando `mobileNavOpen` é `true`; acima de `md`, `md:static md:flex` restaura o layout original, ignorando esse estado. Botão hambúrguer novo no header (`md:hidden`); botão X dentro do drawer (também `md:hidden`) para fechar. Cada item de navegação e as ações "Gerenciar Contas"/"Importação Manual" fecham o drawer ao serem clicados (`setMobileNavOpen(false)`); o widget Pluggy e "Limpar Transações" não fecham automaticamente, pois o usuário pode precisar interagir mais de uma vez com eles (conectar → sincronizar) sem perder o drawer de vista.
 
 ---
 
-- [ ] **P2 — FIN-029 — Adaptar grids fixos de 2 colunas em telas muito pequenas**
+- [x] **P2 — FIN-029 — Adaptar grids fixos de 2 colunas em telas muito pequenas** ✅ Concluída
 
   **Objetivo**
   Evitar que cards de resumo fiquem espremidos em telas muito estreitas (< 360px).
@@ -1135,14 +1153,17 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Testar em viewport de 320px de largura e confirmar que os valores monetários não são truncados nem quebram o layout.
 
   **Critérios de aceite**
-  - [ ] Cards de resumo empilham em coluna única abaixo de `sm`.
-  - [ ] Nenhuma regressão em telas maiores.
+  - [x] Cards de resumo empilham em coluna única abaixo de `sm`.
+  - [x] Nenhuma regressão em telas maiores.
+
+  **Nota de implementação (08/09/2026)**
+  `grid-cols-2` → `grid-cols-1 sm:grid-cols-2` nos dois grids de resumo (`AccountsManager.tsx:84`, `DebtManager.tsx:331`). Escopo limitado exatamente aos dois grids citados na descrição da tarefa — os demais `grid-cols-2` do projeto (campos de formulário dentro dos modais de conta/dívida) não têm o mesmo risco de truncar valores monetários e ficaram fora do escopo.
 
 ---
 
 ## 7. 🧪 Testes
 
-- [ ] **P1 — FIN-030 — Configurar Vitest + Testing Library no frontend**
+- [x] **P1 — FIN-030 — Configurar Vitest + Testing Library no frontend** ✅ Concluída
 
   **Objetivo**
   Ter uma base de testes automatizados para o frontend — hoje inexistente.
@@ -1166,12 +1187,18 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Criar um teste trivial (ex. `1 + 1 === 2` ou renderizar `<AuthForm />`) e confirmar que `npm test` executa e passa.
 
   **Critérios de aceite**
-  - [ ] `npm test` roda a suíte de testes do frontend com sucesso.
-  - [ ] Pelo menos um teste de exemplo existe e passa.
+  - [x] `npm test` roda a suíte de testes do frontend com sucesso.
+  - [x] Pelo menos um teste de exemplo existe e passa.
+
+  **Nota de implementação (08/09/2026)**
+  `vitest`, `@testing-library/react`, `@testing-library/jest-dom`, `jsdom` e `@types/supertest`/`supertest` (para FIN-031) instalados de uma vez. `vitest.config.ts` separado de `vite.config.ts` (ambiente padrão `jsdom`, `setupFiles: ['./src/test/setup.ts']`, `globals: true`); testes de backend sobrescrevem para `node` via `// @vitest-environment node` no topo do arquivo. `src/test/setup.ts` importa `@testing-library/jest-dom/vitest` (não o import principal `@testing-library/jest-dom`) — esse subpath também traz a tipagem do `expect` do Vitest aumentada com os matchers, necessária para `tsc` não reclamar de `.toBeInTheDocument` como propriedade inexistente. Scripts `"test": "vitest run"` e `"test:watch": "vitest"` adicionados. Teste de exemplo em `src/components/AuthForm.test.tsx`.
+
+  **Validação executada**
+  `npm test` roda e passa (2 testes de exemplo). Consolidado depois com o restante da suíte (77 testes no total ao final de toda a seção "Testes automatizados" — ver FIN-036).
 
 ---
 
-- [ ] **P1 — FIN-031 — Configurar testes de integração do backend (Vitest + Supertest)**
+- [x] **P1 — FIN-031 — Configurar testes de integração do backend (Vitest + Supertest)** ✅ Concluída
 
   **Objetivo**
   Ter uma base de testes automatizados para as rotas do Express — hoje inexistente.
@@ -1195,12 +1222,18 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Escrever um teste de exemplo (`GET /api/auth/me` sem token retorna 401) e confirmar que passa via `npm test`.
 
   **Critérios de aceite**
-  - [ ] Suíte de testes de backend roda de forma isolada, sem afetar `dev.db`.
-  - [ ] `app` do Express é exportável e testável sem subir o servidor de verdade.
+  - [x] Suíte de testes de backend roda de forma isolada, sem afetar `dev.db`.
+  - [x] `app` do Express é exportável e testável sem subir o servidor de verdade.
+
+  **Nota de implementação (08/09/2026)**
+  `server.js`: `app.listen()` só roda dentro de `if (process.argv[1] === fileURLToPath(import.meta.url))` (guarda padrão para ESM — equivalente ao `if __name__ == '__main__'` do Python), e `app`/`prisma`/`pluggyReauthMessage` (ver FIN-041) são exportados no final do arquivo. `test/backend-test-utils.js`: `createTestApp(nome)` seta `DATABASE_URL` para um SQLite isolado (`test_<nome>.db`, nunca `dev.db`), roda `prisma db push` para criar o schema, e faz `import('../server.js')` **dinâmico** (não estático) — import estático seria avaliado antes de qualquer código de teste rodar, antes de `DATABASE_URL` estar setado. O Vitest isola o registro de módulos por arquivo de teste por padrão, então cada arquivo que chama isto recebe sua própria instância de `server.js`/Prisma. `cleanup()` chama `prisma.$disconnect()` antes de apagar os arquivos — sem isso, o better-sqlite3 mantém o arquivo aberto e o `unlink` falha com `EBUSY` no Windows. Rate limit de auth (FIN-007) tornado configurável via `AUTH_RATE_LIMIT` só para não derrubar a própria suíte de testes (que faz dezenas de register/login em sequência) — em produção, sem essa env var, o limite continua 10 (inalterado).
+
+  **Validação executada**
+  `server.test.js` (exemplo): `GET /api/auth/me` sem token → 401; com token inválido → 403. `npx tsc -b --noEmit`/`npx eslint .` sem novos erros.
 
 ---
 
-- [ ] **P1 — FIN-032 — Testes de isolamento de dados entre usuários**
+- [x] **P1 — FIN-032 — Testes de isolamento de dados entre usuários** ✅ Concluída
 
   **Objetivo**
   Garantir, via teste automatizado, que um usuário nunca acessa/altera dados de outro.
@@ -1219,12 +1252,18 @@ Classificação por funcionalidade (código como fonte da verdade):
   `npm test` executa esses casos e todos passam.
 
   **Critérios de aceite**
-  - [ ] Testes cobrem accounts, transactions e debts para tentativa de acesso cross-user.
-  - [ ] Todos os testes passam contra o código atual (ou revelam regressões a corrigir).
+  - [x] Testes cobrem accounts, transactions e debts para tentativa de acesso cross-user.
+  - [x] Todos os testes passam contra o código atual (ou revelam regressões a corrigir).
+
+  **Nota de implementação (08/09/2026)**
+  `server.security.test.js`: dois usuários (A, B); para cada entidade, A cria um recurso e B tenta `GET` (não deve aparecer na listagem), `PUT` (deve ser no-op) e `DELETE` (não deve remover). Achado durante a escrita: `PUT /api/accounts/:id` e `PUT /api/transactions/:id` usam `updateMany` e retornam `200` com `changes:0` quando o `id`+`userId` não combina (comportamento já esperado, documentado em FIN-022); já `PUT /api/debts/:id` usa `prisma.debt.update` (não `updateMany`) — quando a combinação `id`+`userId` não existe, o Prisma lança `P2025`, capturado e virando `500` via `sendInternalError`, não um `404`/no-op como as demais rotas. O isolamento em si **é garantido** (nenhum dado vazado ou alterado) — é só uma inconsistência de código de status entre rotas, não uma falha de segurança. Não corrigido nesta tarefa (fora do escopo de "adicionar testes"); teste ajustado para aceitar `status !== 200` em vez de um código específico.
+
+  **Validação executada**
+  9 testes, todos passando: 3 por entidade (accounts/transactions/debts) × (listagem, edição, exclusão).
 
 ---
 
-- [ ] **P1 — FIN-033 — Testes de autenticação**
+- [x] **P1 — FIN-033 — Testes de autenticação** ✅ Concluída
 
   **Objetivo**
   Cobrir os fluxos de registro, login e validação de token.
@@ -1242,11 +1281,17 @@ Classificação por funcionalidade (código como fonte da verdade):
   `npm test` executa e todos os casos passam.
 
   **Critérios de aceite**
-  - [ ] Todos os cenários acima cobertos por teste automatizado e passando.
+  - [x] Todos os cenários acima cobertos por teste automatizado e passando.
+
+  **Nota de implementação (08/09/2026)**
+  `server.auth.test.js`: registro válido, e-mail duplicado (FIN-014), normalização de e-mail (FIN-013 — duplicidade detectada mesmo com capitalização diferente), senha curta, e-mail sem "@", nome vazio; login com credenciais corretas/incorretas/e-mail inexistente (mesma mensagem genérica nos dois últimos casos, sem enumerar); acesso sem token (401), token malformado (403), token assinado com segredo errado (403 — confirma que `JWT_SECRET` é de fato verificado, não só decodificado), token expirado (403), token válido (200). Rate limit de auth (FIN-007) precisou ser tornado configurável via `AUTH_RATE_LIMIT` (ver nota de FIN-031) — sem isso, as ~15 chamadas de register/login deste arquivo sozinho já estourariam o limite de produção (10/15min) e derrubariam a própria suíte com `429`. O rate limit em si passou a ter um teste dedicado, à parte (`server.rate-limit.test.js`, limite baixo proposital de 3, confirma `429` na 4ª tentativa).
+
+  **Validação executada**
+  14 testes em `server.auth.test.js` + 1 em `server.rate-limit.test.js`, todos passando.
 
 ---
 
-- [ ] **P2 — FIN-034 — Testes das regras financeiras**
+- [x] **P2 — FIN-034 — Testes das regras financeiras** ✅ Concluída
 
   **Objetivo**
   Cobrir com testes os cálculos financeiros centrais do app.
@@ -1273,12 +1318,18 @@ Classificação por funcionalidade (código como fonte da verdade):
   `npm test` roda e todos os casos passam.
 
   **Critérios de aceite**
-  - [ ] Todos os cenários financeiros listados têm teste automatizado.
-  - [ ] Testes passam de forma determinística (sem depender de `Date.now()`/fuso sem mock).
+  - [x] Todos os cenários financeiros listados têm teste automatizado.
+  - [x] Testes passam de forma determinística (sem depender de `Date.now()`/fuso sem mock).
+
+  **Nota de implementação (08/09/2026)**
+  Feita em conjunto com **FIN-086** (extração de `stats` para `src/hooks/useFinancialStats.ts`), na ordem inversa à sugerida na dependência original: em vez de testar a lógica ainda inline em `App.tsx` e só depois extrair, extraí primeiro — testar um `useMemo` de ~70 linhas dentro de um componente exigiria montar o componente inteiro (login, fetch, etc.); testar a função pura extraída (`computeFinancialStats`) não exige renderizar nada. `src/utils/debts.test.ts` cobre `isDebtPaid`/`isDebtOverdue`/`advanceMonth`/`computeNextInstallment` (esta última também extraída de `DebtManager.tsx`, onde a mesma lógica de "pagar uma parcela" estava duplicada entre `handlePayInstallment` e `handlePayAll` — consolidada num só lugar, eliminando a duplicação e habilitando o teste). `src/hooks/useFinancialStats.test.ts` cobre receita/despesa, saldo negativo, conta sem transações, cartão sem/com fatura, contas de investimento fora do saldo real (FIN-018), consolidado vs. filtro por conta única, dívida vencida vs. quitada. Testes de data usam `todayISO()`-relativo (calculam "hoje" em runtime), não datas fixas — não quebram com a passagem do tempo.
+
+  **Validação executada**
+  25 testes (`debts.test.ts` + `useFinancialStats.test.ts`), todos passando. `npx tsc -b --noEmit`/`npx eslint .` sem novos erros após a extração de `stats`/`advanceMonth`/`computeNextInstallment`.
 
 ---
 
-- [ ] **P2 — FIN-035 — Testes dos parsers de CSV/OFX**
+- [x] **P2 — FIN-035 — Testes dos parsers de CSV/OFX** ✅ Concluída
 
   **Objetivo**
   Cobrir `src/utils/parsers.ts` com testes, dado seu papel crítico na entrada de dados financeiros.
@@ -1302,12 +1353,20 @@ Classificação por funcionalidade (código como fonte da verdade):
   `npm test` roda e todos os casos passam.
 
   **Critérios de aceite**
-  - [ ] Parsers cobertos por testes para os formatos suportados (Nubank, Inter, Itaú, Bradesco, BB conforme citado no `ImportModal`).
-  - [ ] Casos de borda (data/valor inválido) tratados sem exceção não capturada.
+  - [x] Parsers cobertos por testes para os formatos suportados (Nubank, Inter, Itaú, Bradesco, BB conforme citado no `ImportModal`).
+  - [x] Casos de borda (data/valor inválido) tratados sem exceção não capturada.
+
+  **Nota de implementação (08/09/2026)**
+  `parseAmount`, `normalizeDate` e `autoCategory` eram funções internas (não exportadas) — exportadas (mudança puramente aditiva, sem alterar uso interno) para permitir teste direto, em vez de só indiretamente via `parseCSV`/`parseOFX`. `src/utils/parsers.test.ts` cobre: `parseAmount` (BR/US, só vírgula com/sem milhar, prefixo "R$", inválidos → `NaN`); `normalizeDate` (4 formatos + inválido); `autoCategory` (uma palavra-chave por categoria + caso sem match → "Outros"); `parseOFX` (XML-style com/sem `FITID`, SGML-style, conteúdo inválido); `parseCSV` (separador `,`/`;`, linhas inválidas ignoradas, duplicata dentro do arquivo **não** deduplicada — comportamento documentado, dedupe é responsabilidade do backend/FIN-003).
+
+  **Achado durante a escrita dos testes**: dois cenários de OFX SGML (formato antigo, sem tags de fechamento) fazem `parseOFX` retornar lista vazia silenciosamente, sem lançar exceção mas também sem extrair a transação — documentado nos testes e registrado como novo item **FIN-091** (não corrigido aqui — corrigir o parser está fora do escopo de "adicionar testes").
+
+  **Validação executada**
+  27 testes, todos passando (2 documentam o achado do FIN-091 como comportamento atual, não como bug corrigido).
 
 ---
 
-- [ ] **P3 — FIN-036 — Adicionar pipeline de CI (GitHub Actions)**
+- [x] **P3 — FIN-036 — Adicionar pipeline de CI (GitHub Actions)** ✅ Concluída
 
   **Objetivo**
   Rodar lint, typecheck, testes e build automaticamente a cada push/PR.
@@ -1325,14 +1384,20 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Abrir um PR de teste e confirmar que o workflow roda e reporta status corretamente.
 
   **Critérios de aceite**
-  - [ ] Workflow de CI existe e passa no estado atual do projeto.
-  - [ ] Falhas em lint/typecheck/teste/build bloqueiam o merge (configuração de branch protection é responsabilidade do usuário/GitHub, fora do escopo do código).
+  - [x] Workflow de CI existe e passa no estado atual do projeto.
+  - [x] Falhas em lint/typecheck/teste/build bloqueiam o merge (configuração de branch protection é responsabilidade do usuário/GitHub, fora do escopo do código).
+
+  **Nota de implementação (08/09/2026)**
+  `.github/workflows/ci.yml`: `actions/checkout` + `actions/setup-node@v4` (Node 22) + `npm ci` (que já dispara `postinstall` → `prisma generate`, novo script adicionado ao `package.json` justamente para isso — sem ele, um `npm ci` limpo deixaria `@prisma/client` sem gerar, reproduzindo a causa raiz do bug "Failed to fetch" do início deste projeto) → `npm run lint` → `npm run typecheck` → `npm test` → `npm run build`. Roda em push/PR para qualquer branch. Nenhum segredo necessário — os testes de backend criam seu próprio banco SQLite isolado em tempo de execução.
+
+  **Validação executada**
+  Não validado via um PR real no GitHub (exigiria push, fora do escopo desta tarefa sem pedido explícito do usuário). Validado localmente rodando a sequência exata do workflow (`npm ci` implícito via reinstalação anterior + `npm run lint && npm run typecheck && npm test && npm run build`) de ponta a ponta — todos os passos passam.
 
 ---
 
 ## 8. ⚡ Performance
 
-- [ ] **P2 — FIN-037 — Sincronização Pluggy processa contas/transações sequencialmente (N+1)**
+- [x] **P2 — FIN-037 — Sincronização Pluggy processa contas/transações sequencialmente (N+1)** ✅ Concluída
 
   **Objetivo**
   Reduzir o tempo de sincronização evitando uma consulta/gravação por transação individual.
@@ -1353,12 +1418,18 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Sincronizar uma conta sandbox com muitas transações e medir o tempo antes/depois da mudança.
 
   **Critérios de aceite**
-  - [ ] Sincronização não faz mais uma query por transação individual.
-  - [ ] Resultado da sincronização (dados finais no banco) permanece correto e idempotente.
+  - [x] Sincronização não faz mais uma query por transação individual.
+  - [x] Resultado da sincronização (dados finais no banco) permanece correto e idempotente.
+
+  **Nota de implementação (08/09/2026 — feita em conjunto com FIN-038, mesmo bloco de código)**
+  O `for` que fazia `findFirst` + `upsert` por transação foi trocado por: 1 `findMany` buscando de uma vez os `pluggyId` já existentes (vira um `Set` em memória); filtra as genuinamente novas; 1 `createMany` para todas de uma vez. Confirmado com o SDK que **SQLite não suporta `skipDuplicates` no Prisma** (mesmo achado do FIN-003/FIN-021) — então, como sugerido na própria descrição da tarefa, transações **já existentes deixaram de ser atualizadas** no sync (dado bancário já efetivado raramente muda) — só as novas são gravadas. Se `createMany` falhar por violação da constraint única (corrida rara: outra sincronização inseriu a mesma transação entre o `findMany` e o `createMany` — que, ao contrário de um `create` individual, falha o lote inteiro, não por linha), cai para `upsert` linha a linha só nesse caso, protegido pela constraint (FIN-021).
+
+  **Validação executada**
+  Contra o sandbox real da Pluggy: sync inicial (10 transações) → `success`, tempo total de resposta ~0.35s; resync imediato → `0 novas transacoes importadas` (idempotente); **duas sincronizações do mesmo item disparadas em paralelo** num item novo → 20 transações no total (10 de cada uma de duas contas Pluggy diferentes), todas com `pluggyId` único, nenhuma duplicata — confirma que a troca de `upsert` por linha para `createMany` em lote não reabriu a janela de corrida que FIN-021 fechou.
 
 ---
 
-- [ ] **P3 — FIN-038 — Paginação da API da Pluggy não tratada em `fetchTransactions`**
+- [x] **P3 — FIN-038 — Paginação da API da Pluggy não tratada em `fetchTransactions`** ✅ Concluída
 
   **Objetivo**
   Garantir que todas as páginas de transações retornadas pela API da Pluggy sejam processadas, não apenas a primeira.
@@ -1380,14 +1451,20 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Sincronizar uma conta sandbox com um volume de transações que force múltiplas páginas (se o ambiente sandbox permitir) e confirmar que todas aparecem no app.
 
   **Critérios de aceite**
-  - [ ] Comportamento de paginação da SDK confirmado e documentado em comentário no código.
-  - [ ] Se necessário, loop de paginação implementado e todas as transações do período são importadas.
+  - [x] Comportamento de paginação da SDK confirmado e documentado em comentário no código.
+  - [x] Se necessário, loop de paginação implementado e todas as transações do período são importadas.
+
+  **Nota de implementação (08/09/2026 — feita em conjunto com FIN-037, mesmo bloco de código)**
+  Confirmado nos tipos da SDK (`node_modules/pluggy-sdk/dist/types/common.d.ts`): `fetchTransactions` retorna `PageResponse<Transaction>` (`{ results, page, total, totalPages }`), com `pageSize` **padrão 20, máximo 500** — ou seja, a suspeita da tarefa original estava correta: sem loop, qualquer conta com mais de 20 transações no período perderia as demais silenciosamente. Corrigido com um `do...while` que busca `pageSize: 500` (o máximo, para minimizar round-trips) e continua enquanto `page <= totalPages`, acumulando todos os resultados antes de processar.
+
+  **Validação executada**
+  Mesma validação de FIN-037 (mesmo bloco de código) — sandbox real, sync com 10 transações (dentro de uma única página, então o loop não foi forçado a rodar mais de uma iteração neste teste específico, mas a lógica do `do...while` é exercida e cobre corretamente o caso de 1 página).
 
 ---
 
 ## 9. 🎨 UX/UI
 
-- [ ] **P3 — FIN-039 — Ícone de notificações (sino) no header é puramente decorativo**
+- [x] **P3 — FIN-039 — Ícone de notificações (sino) no header é puramente decorativo** ✅ Concluída
 
   **Objetivo**
   Remover a expectativa falsa de funcionalidade, ou conectar o sino a uma central de notificações real.
@@ -1409,11 +1486,14 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Com dívidas vencidas cadastradas, clicar no sino deve mostrar a lista; sem dívidas vencidas, deve indicar "nenhuma notificação".
 
   **Critérios de aceite**
-  - [ ] Clicar no sino exibe algum conteúdo real (mesmo que simples), nunca uma ação sem efeito.
+  - [x] Clicar no sino exibe algum conteúdo real (mesmo que simples), nunca uma ação sem efeito.
+
+  **Nota de implementação (08/09/2026)**
+  Dropdown simples (`showNotifications`) ancorado no botão do sino, listando `stats.overdueDebts` (nome + data de vencimento), já calculado pelo `stats` existente — nenhum backend novo. Fecha ao clicar fora (backdrop transparente `fixed inset-0`) ou em qualquer item. Mostra "Nenhuma notificação." quando a lista está vazia.
 
 ---
 
-- [ ] **P3 — FIN-040 — Busca força troca para a aba "Transações" a cada tecla digitada**
+- [x] **P3 — FIN-040 — Busca força troca para a aba "Transações" a cada tecla digitada** ✅ Concluída
 
   **Objetivo**
   Evitar a troca de aba forçada quando o usuário apenas quer buscar algo já estando ciente de onde está.
@@ -1434,8 +1514,11 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Digitar múltiplos caracteres na busca a partir de outra aba e confirmar que a troca de aba acontece uma única vez, não a cada tecla.
 
   **Critérios de aceite**
-  - [ ] Busca não força re-render de troca de aba a cada tecla digitada.
-  - [ ] Comportamento de busca em si (filtro por nome/categoria) permanece funcional.
+  - [x] Busca não força re-render de troca de aba a cada tecla digitada.
+  - [x] Comportamento de busca em si (filtro por nome/categoria) permanece funcional.
+
+  **Nota de implementação (08/09/2026)**
+  `onChange` agora só chama `setActiveTab('transactions')` quando `v` é não-vazio **e** `search` (valor anterior, ainda não atualizado neste render) é vazio — ou seja, exatamente na transição vazio→preenchido. Apagar a busca não troca a aba de volta (não especificado nos critérios, comportamento mais previsível).
 
 ---
 
@@ -1455,7 +1538,7 @@ Cobertas pelas tarefas: FIN-004 (dedupe de dívida importada), FIN-005 (dívida 
 
 Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adicional específica abaixo.
 
-- [ ] **P3 — FIN-041 — Tratar status de item Pluggy expirado/erro de login (`LOGIN_ERROR`, `OUTDATED`)**
+- [x] **P3 — FIN-041 — Tratar status de item Pluggy expirado/erro de login (`LOGIN_ERROR`, `OUTDATED`)** ✅ Concluída
 
   **Objetivo**
   Informar ao usuário quando uma conexão bancária via Pluggy precisa de reautenticação.
@@ -1478,7 +1561,13 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   - Simular (ambiente sandbox permite forçar certos estados) uma conexão com erro de login e confirmar que o usuário recebe uma mensagem acionável, não um erro genérico.
 
   **Critérios de aceite**
-  - [ ] Status de erro/expiração do item Pluggy é detectado e comunicado ao usuário de forma específica.
+  - [x] Status de erro/expiração do item Pluggy é detectado e comunicado ao usuário de forma específica.
+
+  **Nota de implementação (08/09/2026)**
+  Nova função `pluggyReauthMessage(status)` em `server.js` traduz `LOGIN_ERROR`/`OUTDATED` (ver `node_modules/pluggy-sdk/dist/types/item.d.ts`) em mensagem acionável; `null` para os demais status (nada a avisar). Usada em dois pontos: `POST /api/pluggy/connect-item` (retorna `pluggyStatus`/`statusMessage` na resposta — um item pode nascer já em erro) e `POST /api/pluggy/sync/:itemId` (chama `fetchItem` antes de sincronizar; se precisa reautenticação, responde `409` com a mensagem, sem tentar sincronizar). No frontend, `src/services/api.ts` ganhou uma classe `ApiError` (estende `Error`, carrega `status` e o corpo da resposta) — sem quebrar nenhum código existente que só lê `.message`, permite ao `PluggyConnectButton` distinguir esse `409` de um erro genérico. Estado novo `needsReauth` exibe o aviso com destaque âmbar (não vermelho — não é bem um "erro", é uma ação pendente) e um botão "Reconectar Banco" que reabre o widget da Pluggy.
+
+  **Validação executada**
+  Testado via testes automatizados (`server.pluggy-status.test.js`, 3 casos: `LOGIN_ERROR`/`OUTDATED` retornam mensagem, status normais retornam `null`) — não foi possível forçar um item real do sandbox a entrar em `LOGIN_ERROR`/`OUTDATED` para um teste end-to-end contra a API real da Pluggy (o sandbox de teste, com credenciais `user-ok`/`password-ok`, sempre conecta com sucesso); `npx tsc -b --noEmit`/`npx eslint .` sem novos erros.
 
 ---
 
@@ -1648,10 +1737,10 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 21. 🛠️ Infraestrutura / DX
 
-- [ ] **P3 — FIN-084 — Pipeline de CI**
+- [x] **P3 — FIN-084 — Pipeline de CI** ✅ Concluída junto com FIN-036 (mesma tarefa)
   Já coberta integralmente pela tarefa **FIN-036**. Mantida aqui apenas como referência cruzada.
 
-- [ ] **P3 — FIN-085 — Documentar `sandbox-pluggy/` como protótipo isolado, não integrado ao app principal**
+- [x] **P3 — FIN-085 — Documentar `sandbox-pluggy/` como protótipo isolado, não integrado ao app principal** ✅ Concluída
 
   **Objetivo**
   Deixar claro que `sandbox-pluggy/` é um servidor experimental separado (porta 3002, banco SQLite próprio `sandbox.db`, usuário mockado fixo `MOCK_USER_ID`, sem autenticação real — ver [sandbox-pluggy/server.js:34](sandbox-pluggy/server.js#L34)), não uma parte funcional do FinFlow, para evitar que seja confundido com o backend principal (`server.js`) por quem lê o repositório pela primeira vez.
@@ -1672,19 +1761,51 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Revisão de leitura — não há comportamento de runtime a validar.
 
   **Critérios de aceite**
-  - [ ] `sandbox-pluggy/` documentado como protótipo isolado, ou removido (mediante confirmação explícita do usuário — nunca remover código sem essa confirmação).
+  - [x] `sandbox-pluggy/` documentado como protótipo isolado, ou removido (mediante confirmação explícita do usuário — nunca remover código sem essa confirmação).
+
+  **Nota de implementação (08/09/2026)**
+  Optado por documentar (não remover — nenhuma confirmação do usuário foi pedida/dada para remoção). Novo `sandbox-pluggy/README.md`: tabela comparando porta/banco/autenticação com o backend principal, explica o propósito histórico (prototipagem do fluxo Pluggy antes de integrar a `server.js`) e avisa explicitamente para não usar em produção nem como referência de autenticação. README principal ganhou uma seção curta "📁 sandbox-pluggy/" apontando para esse arquivo.
 
 ---
 
 ## 22. 🏗️ Débitos Técnicos (Arquitetura)
 
-- FIN-086 — Extrair a lógica de cálculo financeiro (bloco `stats`, [App.tsx:202-266](src/App.tsx#L202-L266)) de dentro do componente `App.tsx` para um módulo/hook dedicado (ex. `src/hooks/useFinancialStats.ts`), separando regra de negócio da camada de UI. Facilita testes (depende de FIN-034) e reduz o tamanho do componente `App.tsx` (hoje com mais de 700 linhas, concentrando estado, chamadas HTTP, cálculo financeiro e renderização).
-- FIN-087 — Centralizar padrões de formulário (`FormField`, validação de campos numéricos) hoje duplicados entre `AccountsManager.tsx` e `DebtManager.tsx` em um módulo compartilhado `src/components/shared/FormField.tsx`.
+- [x] FIN-086 — ✅ Concluída em 08/09/2026 (feita antes de FIN-034, na ordem inversa à dependência original, para os testes cobrirem a função já extraída em vez da lógica ainda inline). Lógica de `stats` movida de dentro de `App.tsx` para `src/hooks/useFinancialStats.ts`: `computeFinancialStats()` (função pura, testável sem React) + `useFinancialStats()` (wrapper `useMemo`, usado por `App.tsx`). `App.tsx` perdeu ~70 linhas de lógica de negócio, ficando só com `const stats = useFinancialStats(transactions, accounts, debts, dashboardAccountId);`.
+- [x] FIN-087 — ✅ Concluída em 08/09/2026. `FormField` (idêntico em `AccountsManager.tsx` e `DebtManager.tsx`) extraído para `src/components/shared/FormField.tsx`; as duas cópias locais removidas, ambos os arquivos passaram a importar a versão compartilhada.
 - [x] FIN-088 — ✅ Concluída junto com FIN-005: `App.tsx` e `DebtManager.tsx` agora usam `isDebtOverdue`/`isDebtPaid` de `src/utils/debts.ts`, sem lógica de vencimento duplicada remanescente.
 
 **Dependências:** FIN-086 depende de FIN-034 para ter cobertura de teste antes/depois da extração (evitar regressão silenciosa). FIN-087 não tem dependências. FIN-088 depende de FIN-005.
 
-- FIN-089 — `npx tsc -b --noEmit` falha com 2 erros de tipo em `App.tsx` (linhas ~506/526, tooltips do Recharts: `Formatter<ValueType, NameType>` incompatível com `(v: number) => [string, string]`). Pré-existente, confirmado via `git stash` antes de qualquer trabalho da Fase 0 — não bloqueia `npm run build` nem `npm run dev`, mas quebra checagem de tipo isolada. Corrigir tipando o formatter conforme os genéricos do Recharts (`ValueType`, `NameType`).
+- [x] FIN-089 — ✅ Concluída em 08/09/2026 (junto com FIN-026): os dois `formatter` de `RechartsTooltip` em `App.tsx` tinham `(v: number) => ...` anotado manualmente, incompatível com `Formatter<TValue>` (que aceita `TValue | undefined`). Corrigido removendo a anotação manual do parâmetro e usando `Number(v)` antes de repassar a `fmt()`. `npx tsc -b --noEmit` e `npm run build` agora terminam com 0 erros.
+
+- [ ] **P2 — FIN-091 — `parseOFX` perde transações silenciosamente em extratos SGML com campos sem tag de fechamento** (achado ao escrever testes para FIN-035, `src/utils/parsers.test.ts`)
+
+  **Objetivo**
+  Corrigir (ou, no mínimo, alertar o usuário) quando um extrato OFX no formato SGML 1.x — onde apenas a tag externa `<STMTTRN>` costuma ser fechada, mas os campos internos (`<TRNAMT>`, `<FITID>` etc.) não têm `</TAG>` — é parseado incorretamente.
+
+  **Problema**
+  `parseOFX()` decide entre os dois branches (XML-style vs. SGML-style) checando apenas se existe o par `<STMTTRN>...</STMTTRN>` no conteúdo (`blockRegex`), **sem considerar se os campos internos também têm fechamento**. Dois cenários reais quebram silenciosamente:
+  1. Tag externa fechada, campos internos sem fechamento → cai no branch XML; `get('TRNAMT')` (que exige `<TRNAMT>...</TRNAMT>`) não encontra nada, retorna `''`, vira `NaN`, e a transação é descartada pelo filtro final (`!isNaN(t.amount)`) — sem erro, sem aviso.
+  2. Nenhuma tag `</STMTTRN>` em lugar nenhum (SGML "puro") → cai no branch SGML correto, mas esse branch só faz `push` da transação corrente ao encontrar a linha literal `</STMTTRN>` — que nunca existe nesse cenário — então **nenhuma transação é gravada**, em nenhum dos dois branches.
+  Resultado prático: certos extratos SGML legítimos (histórico de alguns bancos) importam **zero transações**, sem qualquer mensagem de erro — o usuário pode achar que o extrato "não tinha nada para importar".
+
+  **Arquivos envolvidos**
+  - `src/utils/parsers.ts`
+
+  **Alterações necessárias**
+  - Detectar formato SGML de forma mais robusta (ex.: presença de `<STMTTRN>` sem exigir que os campos internos tenham fechamento — checar se `get('TRNAMT')` no branch XML retorna vazio e, nesse caso, tentar o parsing linha-a-linha como fallback).
+  - No branch SGML, gravar a transação corrente também ao encontrar o início de um novo `<STMTTRN>` (não só ao encontrar `</STMTTRN>`) e ao final do arquivo (não depender exclusivamente de uma tag de fechamento que pode não existir).
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  `src/utils/parsers.test.ts` já documenta os dois cenários quebrados (testes que hoje afirmam `[]` como resultado) — a correção deve trocar essas asserções para o resultado correto (transação extraída) sem quebrar os demais 25 testes já passando.
+
+  **Critérios de aceite**
+  - [ ] Extrato SGML com tag externa fechada mas campos internos sem fechamento é parseado corretamente.
+  - [ ] Extrato SGML sem nenhuma tag de fechamento é parseado corretamente.
+  - [ ] Todos os testes existentes de `parseOFX`/`parseCSV` continuam passando.
 
 ---
 

@@ -1,0 +1,36 @@
+name: CI
+
+# FIN-036 — roda lint, typecheck, testes e build a cada push/PR. `npm ci` já dispara
+# `postinstall` (prisma generate, ver package.json) — os testes de backend criam seu
+# próprio banco SQLite isolado em tempo de execução (ver test/backend-test-utils.js),
+# nenhum banco externo/segredo é necessário.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

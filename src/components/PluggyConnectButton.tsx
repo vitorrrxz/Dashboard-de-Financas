@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
-import { Link2, RefreshCw, CheckCircle2, Loader2, Building2 } from 'lucide-react';
+import { Link2, RefreshCw, CheckCircle2, Loader2, Building2, AlertTriangle } from 'lucide-react';
+import { apiFetch, ApiError } from '../services/api';
 
 interface PluggyConnectData {
   item: {
@@ -39,26 +40,20 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
   const [status, setStatus] = useState<'idle' | 'loading' | 'connected' | 'syncing' | 'done'>('idle');
   const [connectedItem, setConnectedItem] = useState<ConnectedItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // FIN-041: distingue "precisa reconectar o banco" (LOGIN_ERROR/OUTDATED reportado pelo
+  // backend) de um erro genérico — exibido com destaque próprio, orientando a ação.
+  const [needsReauth, setNeedsReauth] = useState(false);
 
-  const fetchAPI = useCallback(async (endpoint: string, method = 'POST', body?: unknown) => {
-    const res = await fetch(`http://localhost:3001${endpoint}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Erro na API');
-    }
-    return res.json();
-  }, [token]);
+  const fetchAPI = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (endpoint: string, method = 'POST', body?: unknown): Promise<any> => apiFetch(endpoint, { method, body, token }),
+    [token]
+  );
 
   const handleConnect = async () => {
     setStatus('loading');
     setError(null);
+    setNeedsReauth(false);
 
     try {
       const { accessToken } = await fetchAPI('/api/pluggy/connect-token');
@@ -78,6 +73,12 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
             const result = await fetchAPI('/api/pluggy/connect-item', 'POST', { itemId });
             setConnectedItem({ itemId, providerName: result.providerName });
             setStatus('connected');
+            // FIN-041: um item pode nascer já em LOGIN_ERROR/OUTDATED (ex. credenciais
+            // rejeitadas pelo banco na primeira tentativa) — avisa mesmo tendo "conectado".
+            if (result.statusMessage) {
+              setNeedsReauth(true);
+              setError(result.statusMessage);
+            }
           } catch (err) {
             setError('Banco conectado, mas falha ao registrar: ' + (err instanceof Error ? err.message : String(err)));
             setStatus('idle');
@@ -104,13 +105,22 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
     if (!connectedItem) return;
     setStatus('syncing');
     setError(null);
+    setNeedsReauth(false);
 
     try {
       await fetchAPI(`/api/pluggy/sync/${connectedItem.itemId}`, 'POST');
       setStatus('done');
       onSyncComplete();
     } catch (err) {
-      setError('Falha na sincronização: ' + (err instanceof Error ? err.message : String(err)));
+      // FIN-041: status 409 = backend detectou que o item precisa de reautenticação
+      // (LOGIN_ERROR/OUTDATED) — mensagem já vem pronta e acionável, sem o prefixo
+      // genérico "Falha na sincronização".
+      if (err instanceof ApiError && err.status === 409) {
+        setNeedsReauth(true);
+        setError(err.message);
+      } else {
+        setError('Falha na sincronização: ' + (err instanceof Error ? err.message : String(err)));
+      }
       setStatus('connected');
     }
   };
@@ -134,7 +144,12 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
         {status === 'done' && <CheckCircle2 size={18} className="text-teal-400 ml-auto" />}
       </div>
 
-      {error && (
+      {error && needsReauth && (
+        <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 mb-3 flex items-center gap-2">
+          <AlertTriangle size={14} className="shrink-0" /> {error}
+        </p>
+      )}
+      {error && !needsReauth && (
         <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2 mb-3">
           {error}
         </p>
@@ -178,6 +193,16 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
               ? <><Loader2 size={14} className="animate-spin" /> Sincronizando...</>
               : <><RefreshCw size={14} /> Sincronizar Transacoes</>
             }
+          </button>
+        )}
+
+        {needsReauth && (status === 'connected' || status === 'done') && (
+          <button
+            onClick={handleConnect}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all"
+            style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)' }}
+          >
+            <Link2 size={14} /> Reconectar Banco
           </button>
         )}
       </div>
