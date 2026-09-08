@@ -21,15 +21,15 @@ model User {
 model Account {
   id          String   @id @default(uuid())
   userId      String
-  pluggyId    String?  
+  pluggyId    String?
   name        String
   bank        String
-  type        String   
-  balance     Float
-  limit       Float?
+  type        String
+  balance     Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
+  limit       Int?     // centavos
   dueDay      Int?
   closingDay  Int?
-  pendingBill Float?
+  pendingBill Int?     // centavos
   color       String
   createdAt   DateTime @default(now())
 
@@ -47,7 +47,7 @@ model Transaction {
   name        String
   category    String
   date        String
-  amount      Float
+  amount      Int      // centavos — ver FIN-015
   paymentType String   @default("debit")
   createdAt   DateTime @default(now())
 
@@ -64,13 +64,13 @@ model Debt {
   name              String
   description       String?
   category          String
-  totalAmount       Float
-  paidAmount        Float
-  monthlyPayment    Float
+  totalAmount       Int      // centavos — ver FIN-015
+  paidAmount        Int      // centavos
+  monthlyPayment    Int      // centavos
   totalInstallments Int
   paidInstallments  Int
   nextDueDate       String
-  interestRate      Float?
+  interestRate      Float?   // % ao mês — NÃO é valor monetário, permanece Float
   createdAt         DateTime   @default(now())
 
   user              User       @relation(fields: [userId], references: [id])
@@ -82,7 +82,7 @@ model DebtItem {
   id          String   @id @default(uuid())
   debtId      String
   name        String
-  amount      Float
+  amount      Int      // centavos — ver FIN-015
   date        String
 
   debt        Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
