@@ -16,6 +16,7 @@ model User {
   accounts     Account[]
   transactions Transaction[]
   debts        Debt[]
+  budgets      Budget[]
 }
 
 model Account {
@@ -95,6 +96,22 @@ model Debt {
   subItems          DebtItem[]
 
   @@index([userId]) // ver FIN-019
+}
+
+// FIN-042 — orçamento mensal por categoria (Fase 3). Um limite por (usuário, categoria) —
+// a constraint única evita dois orçamentos concorrentes para a mesma categoria, o que
+// tornaria ambíguo qual limite vale no cálculo de progresso (ver FIN-044).
+model Budget {
+  id           String   @id @default(uuid())
+  userId       String
+  category     String
+  monthlyLimit Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@index([userId]) // ver FIN-019
+  @@unique([userId, category])
 }
 
 model DebtItem {

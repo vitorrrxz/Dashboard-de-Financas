@@ -216,6 +216,19 @@ const debtSchema = z.object({
 });
 const debtUpdateSchema = debtSchema.partial();
 
+// FIN-042/FIN-043 — orçamento mensal por categoria (Fase 3). `category` é texto livre
+// (não um enum fechado, ao contrário de `debtSchema.category`) porque precisa casar com a
+// categoria de qualquer transação — inclusive categorias digitadas manualmente pelo
+// usuário na importação, que não pertencem a uma lista fixa (ver `CATEGORY_COLORS` em
+// App.tsx e `CATEGORY_RULES` em parsers.ts). `monthlyLimit` exige > 0: um orçamento de
+// R$0 não tem sentido de negócio e, sem essa validação, `computeBudgetProgress`
+// (src/utils/budget.ts) precisaria tratar divisão por zero.
+const budgetSchema = z.object({
+  category: z.string({ error: 'Categoria é obrigatória.' }).trim().min(1, 'Categoria é obrigatória.'),
+  monthlyLimit: z.coerce.number().int('Limite mensal deve ser um inteiro em centavos.').min(1, 'Limite mensal deve ser maior que zero.'),
+});
+const budgetUpdateSchema = budgetSchema.partial();
+
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -543,6 +556,57 @@ app.delete('/api/debts/:id', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao excluir dívida.');
+  }
+});
+
+// --- BUDGETS (FIN-043) ---
+app.get('/api/budgets', authenticateToken, async (req, res) => {
+  try {
+    const budgets = await prisma.budget.findMany({ where: { userId: req.user.userId } });
+    res.json(budgets);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar orçamentos.');
+  }
+});
+
+app.post('/api/budgets', authenticateToken, async (req, res) => {
+  const validation = validateBody(budgetSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const data = { ...validation.data, userId: req.user.userId };
+    const budget = await prisma.budget.create({ data });
+    res.json(budget);
+  } catch (err) {
+    // P2002 = violação da constraint única (userId, category) — ver FIN-042. Mensagem
+    // específica em vez de 500 genérico, já que é um erro de uso esperado (o usuário já
+    // tem um orçamento para esta categoria e deveria editá-lo em vez de criar outro).
+    if (err.code === 'P2002') return res.status(400).json({ error: 'Já existe um orçamento para esta categoria. Edite o orçamento existente.' });
+    sendInternalError(res, err, 'Erro ao criar orçamento.');
+  }
+});
+
+app.put('/api/budgets/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(budgetUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const { id } = req.params;
+    const budget = await prisma.budget.updateMany({
+      where: { id, userId: req.user.userId },
+      data: validation.data,
+    });
+    res.json({ success: true, changes: budget.count });
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(400).json({ error: 'Já existe um orçamento para esta categoria.' });
+    sendInternalError(res, err, 'Erro ao atualizar orçamento.');
+  }
+});
+
+app.delete('/api/budgets/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.budget.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir orçamento.');
   }
 });
 

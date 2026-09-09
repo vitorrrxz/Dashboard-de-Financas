@@ -98,13 +98,13 @@
 
 ## Fase 3 - Planejamento Financeiro (Orcamento)
 
-- [ ] Criar model `Budget` no schema Prisma (FIN-042, depende de FIN-015, FIN-020)
-- [ ] Criar rotas CRUD `/api/budgets` (FIN-043, depende de FIN-042, FIN-008)
-- [ ] Criar calculo de progresso do orcamento — gasto vs. limite por categoria/mes (FIN-044, depende de FIN-043)
-- [ ] Criar aba "Orcamento" no frontend (FIN-045, depende de FIN-044)
-- [ ] Integrar indicador de orcamento ao Dashboard (FIN-046, depende de FIN-045)
-- [ ] Criar alerta visual ao ultrapassar limite do orcamento (FIN-047, depende de FIN-046)
-- [ ] Testes do sistema de orcamento (FIN-048, depende de FIN-030, FIN-031, FIN-045)
+- [x] Criar model `Budget` no schema Prisma (FIN-042, depende de FIN-015, FIN-020)
+- [x] Criar rotas CRUD `/api/budgets` (FIN-043, depende de FIN-042, FIN-008)
+- [x] Criar calculo de progresso do orcamento — gasto vs. limite por categoria/mes (FIN-044, depende de FIN-043)
+- [x] Criar aba "Orcamento" no frontend (FIN-045, depende de FIN-044)
+- [x] Integrar indicador de orcamento ao Dashboard (FIN-046, depende de FIN-045)
+- [x] Criar alerta visual ao ultrapassar limite do orcamento (FIN-047, depende de FIN-046)
+- [x] Testes do sistema de orcamento (FIN-048, depende de FIN-030, FIN-031, FIN-045)
 
 ## Fase 4 - Planejamento Financeiro (Metas e Recorrencias)
 
