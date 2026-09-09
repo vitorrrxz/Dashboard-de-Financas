@@ -72,15 +72,22 @@ function debtToApi<T extends Partial<Debt>>(d: T): T {
   if (out.subItems != null) out.subItems = out.subItems.map(si => ({ ...si, amount: toCents(si.amount) }));
   return out;
 }
+/** Converte `monthlyLimit` de centavos (API) para reais (UI) — ver conversão no topo deste bloco. */
 function budgetFromApi(b: Budget): Budget {
   return { ...b, monthlyLimit: toReais(b.monthlyLimit) };
 }
+/** Converte `monthlyLimit` de reais (UI) para centavos (API) — ver conversão no topo deste bloco. */
 function budgetToApi<T extends Partial<Budget>>(b: T): T {
   const out: T = { ...b };
   if (out.monthlyLimit != null) out.monthlyLimit = toCents(out.monthlyLimit);
   return out;
 }
 
+/**
+ * Componente raiz do FinFlow — gerencia sessão (login/token), carrega contas, transações,
+ * dívidas e orçamentos do usuário autenticado, deriva as estatísticas do Dashboard e
+ * renderiza a navegação e as abas (Dashboard, Transações, Contas, Dívidas, Orçamento).
+ */
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
   const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
@@ -308,18 +315,21 @@ export default function App() {
   };
 
   // CRUD BUDGETS (FIN-045)
+  /** Cria um orçamento via `POST /api/budgets` e adiciona o resultado (já em reais) ao estado local. */
   const addBudget = async (budget: Omit<Budget, 'id' | 'createdAt'>) => {
     try {
       const newBudget = await fetchAPI('/api/budgets', 'POST', budgetToApi(budget));
       setBudgets(prev => [...prev, budgetFromApi(newBudget)]);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
+  /** Atualiza um orçamento via `PUT /api/budgets/:id` e reflete a mudança (em reais) no estado local. */
   const updateBudget = async (id: string, budget: Omit<Budget, 'id' | 'createdAt'>) => {
     try {
       await fetchAPI(`/api/budgets/${id}`, 'PUT', budgetToApi(budget));
       setBudgets(prev => prev.map(b => b.id === id ? { ...b, ...budget } : b));
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
+  /** Exclui um orçamento via `DELETE /api/budgets/:id` e remove do estado local. */
   const deleteBudget = async (id: string) => {
     try {
       await fetchAPI(`/api/budgets/${id}`, 'DELETE');
@@ -342,6 +352,15 @@ export default function App() {
     [transactions, budgets, currentMonth]
   );
   const overBudget = budgetProgress.filter(b => b.isOverLimit); // FIN-047
+
+  // Categorias que já aparecem nas transações do usuário, além das curadas em
+  // EXPENSE_CATEGORIES — a importação manual aceita categoria livre, então o
+  // BudgetManager precisa poder oferecer essas categorias no formulário (achado do
+  // CodeRabbit: sem isto, seria impossível orçar uma categoria "customizada").
+  const transactionCategories = useMemo(
+    () => Array.from(new Set(transactions.map(t => t.category))).filter(c => c !== 'Receita'),
+    [transactions]
+  );
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -817,6 +836,7 @@ export default function App() {
                 onUpdate={updateBudget}
                 onDelete={deleteBudget}
                 existingCategories={budgets.map(b => b.category)}
+                transactionCategories={transactionCategories}
               />
             </>
           )}
