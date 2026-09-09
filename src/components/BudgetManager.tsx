@@ -17,19 +17,34 @@ interface BudgetManagerProps {
    * categoria duas vezes ao criar (o backend rejeita com 400, mas bloquear na UI evita
    * a viagem de rede desnecessária e a mensagem de erro genérica). */
   existingCategories: string[];
+  /** Categorias presentes nas transações reais do usuário, além das 8 fixas em
+   * `EXPENSE_CATEGORIES` — a importação manual (CSV/OFX) aceita categoria livre
+   * (`transactionSchema.category` no backend não é um enum), então o usuário pode ter
+   * gastos numa categoria que não está na lista curada. Sem isto, seria impossível criar
+   * um orçamento para essa categoria pelo formulário. */
+  transactionCategories: string[];
 }
 
-// FIN-045 — aba "Orçamento", seguindo o mesmo padrão visual/estrutural de
-// AccountsManager.tsx/DebtManager.tsx (cards + modal de formulário).
-export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, existingCategories }: BudgetManagerProps) {
+/**
+ * Aba "Orçamento" (FIN-045) — lista de orçamentos com barra de progresso (via
+ * `budgetProgress`, já calculado por `computeBudgetProgress`) e modal de criação/edição.
+ * Segue o mesmo padrão visual/estrutural de `AccountsManager.tsx`/`DebtManager.tsx`
+ * (cards + modal de formulário).
+ */
+export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, existingCategories, transactionCategories }: BudgetManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<BudgetFormData>(EMPTY_BUDGET);
 
+  // União das categorias curadas com as que já aparecem nas transações do usuário — ver
+  // o campo `transactionCategories` acima.
+  const allCategories = Array.from(new Set([...EXPENSE_CATEGORIES, ...transactionCategories]));
+
   // Categorias sem orçamento cadastrado ainda — usada tanto para popular o select ao
   // criar quanto para escolher um valor padrão válido (ver `openAdd` abaixo).
-  const categoriesWithoutBudget = EXPENSE_CATEGORIES.filter(c => !existingCategories.includes(c));
+  const categoriesWithoutBudget = allCategories.filter(c => !existingCategories.includes(c));
 
+  /** Abre o modal em modo "criar", pré-selecionando a primeira categoria ainda sem orçamento. */
   const openAdd = () => {
     setEditingId(null);
     // Preenche com a primeira categoria realmente disponível, não com
@@ -39,12 +54,14 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
     setShowForm(true);
   };
 
+  /** Abre o modal em modo "editar", pré-preenchido com os dados do orçamento `b`. */
   const openEdit = (b: BudgetProgress) => {
     setEditingId(b.id);
     setForm({ category: b.category, monthlyLimit: b.limit });
     setShowForm(true);
   };
 
+  /** Envia o formulário — cria (`onAdd`) ou atualiza (`onUpdate`) conforme `editingId`. */
   const handleSave = async () => {
     if (!form.category.trim() || form.monthlyLimit <= 0) return;
     try {
@@ -59,6 +76,7 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
     }
   };
 
+  /** Exclui o orçamento `id`, após confirmação do usuário. */
   const handleDelete = async (id: string) => {
     if (confirm('Remover este orçamento?')) await onDelete(id);
   };
@@ -68,7 +86,7 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
   // aplica em modo de edição: em modo de criação, `form.category` nunca deve escapar do
   // filtro de "já existe", nem mesmo o valor default escolhido em `openAdd`.
   const availableCategories = editingId
-    ? EXPENSE_CATEGORIES.filter(c => c === form.category || !existingCategories.includes(c))
+    ? allCategories.filter(c => c === form.category || !existingCategories.includes(c))
     : categoriesWithoutBudget;
 
   return (
