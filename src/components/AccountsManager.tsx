@@ -174,16 +174,16 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete }: Account
 
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <FormField label="Nome da Conta">
-                  <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Ex: Conta Nubank" className="input-field" />
+                <FormField label="Nome da Conta" htmlFor="account-name">
+                  <input id="account-name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="Ex: Conta Nubank" className="input-field" />
                 </FormField>
-                <FormField label="Banco / Operadora">
-                  <input value={form.bank} onChange={e => set('bank', e.target.value)} placeholder="Ex: Nubank" className="input-field" />
+                <FormField label="Banco / Operadora" htmlFor="account-bank">
+                  <input id="account-bank" value={form.bank} onChange={e => set('bank', e.target.value)} placeholder="Ex: Nubank" className="input-field" />
                 </FormField>
               </div>
 
-              <FormField label="Tipo">
-                <select value={form.type} onChange={e => {
+              <FormField label="Tipo" htmlFor="account-type">
+                <select id="account-type" value={form.type} onChange={e => {
                   const newType = e.target.value as AccountType;
                   setForm(f => {
                     const next = { ...f, type: newType };
@@ -207,25 +207,25 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete }: Account
               {form.type === 'credit' ? (
                 <>
                   <div className="grid grid-cols-2 gap-3">
-                    <FormField label="Limite do Cartão (R$)">
-                      <input type="number" value={form.limit ?? ''} onChange={e => set('limit', parseFloat(e.target.value) || 0)} placeholder="5000.00" className="input-field" />
+                    <FormField label="Limite do Cartão (R$)" htmlFor="account-limit">
+                      <input id="account-limit" type="number" value={form.limit ?? ''} onChange={e => set('limit', parseFloat(e.target.value) || 0)} placeholder="5000.00" className="input-field" />
                     </FormField>
-                    <FormField label="Fatura Pendente (R$)">
-                      <input type="number" value={form.pendingBill ?? ''} onChange={e => set('pendingBill', parseFloat(e.target.value) || 0)} placeholder="0.00" className="input-field" />
+                    <FormField label="Fatura Pendente (R$)" htmlFor="account-pending-bill">
+                      <input id="account-pending-bill" type="number" value={form.pendingBill ?? ''} onChange={e => set('pendingBill', parseFloat(e.target.value) || 0)} placeholder="0.00" className="input-field" />
                     </FormField>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <FormField label="Dia de Fechamento">
-                      <input type="number" min={1} max={31} value={form.closingDay ?? ''} onChange={e => set('closingDay', parseInt(e.target.value) || undefined)} placeholder="15" className="input-field" />
+                    <FormField label="Dia de Fechamento" htmlFor="account-closing-day">
+                      <input id="account-closing-day" type="number" min={1} max={31} value={form.closingDay ?? ''} onChange={e => set('closingDay', parseInt(e.target.value) || undefined)} placeholder="15" className="input-field" />
                     </FormField>
-                    <FormField label="Dia de Vencimento">
-                      <input type="number" min={1} max={31} value={form.dueDay ?? ''} onChange={e => set('dueDay', parseInt(e.target.value) || undefined)} placeholder="25" className="input-field" />
+                    <FormField label="Dia de Vencimento" htmlFor="account-due-day">
+                      <input id="account-due-day" type="number" min={1} max={31} value={form.dueDay ?? ''} onChange={e => set('dueDay', parseInt(e.target.value) || undefined)} placeholder="25" className="input-field" />
                     </FormField>
                   </div>
                 </>
               ) : (
-                <FormField label="Saldo Atual (R$)">
-                  <input type="number" step="0.01" value={form.balance} onChange={e => set('balance', parseFloat(e.target.value) || 0)} placeholder="0.00" className="input-field" />
+                <FormField label="Saldo Atual (R$)" htmlFor="account-balance">
+                  <input id="account-balance" type="number" step="0.01" value={form.balance} onChange={e => set('balance', parseFloat(e.target.value) || 0)} placeholder="0.00" className="input-field" />
                 </FormField>
               )}
 

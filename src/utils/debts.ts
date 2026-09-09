@@ -14,8 +14,15 @@ export function todayISO(): string {
   return `${year}-${month}-${day}`;
 }
 
-export function isDebtPaid(debt: Pick<Debt, 'paidInstallments' | 'totalInstallments'>): boolean {
-  return debt.paidInstallments >= debt.totalInstallments;
+/**
+ * Uma dívida é considerada quitada quando o valor pago já atinge o total OU quando o
+ * número de parcelas pagas atinge o total de parcelas — checa as duas condições porque
+ * arredondamentos em `monthlyPayment` acumulado podem fazer `paidAmount` alcançar
+ * `totalAmount` antes da última parcela nominal ser contada (ver `computeNextInstallment`,
+ * que já capa `paidAmount` em `totalAmount` mas não força `paidInstallments` a acompanhar).
+ */
+export function isDebtPaid(debt: Pick<Debt, 'paidInstallments' | 'totalInstallments' | 'paidAmount' | 'totalAmount'>): boolean {
+  return debt.paidAmount >= debt.totalAmount || debt.paidInstallments >= debt.totalInstallments;
 }
 
 /**
@@ -29,17 +36,31 @@ export function isDebtPaid(debt: Pick<Debt, 'paidInstallments' | 'totalInstallme
  * gerenciador de dívidas, que antes tinham implementações divergentes (ver FIN-005
  * em docs/BACKLOG_DETAIL.md).
  */
-export function isDebtOverdue(debt: Pick<Debt, 'nextDueDate' | 'paidInstallments' | 'totalInstallments'>): boolean {
+export function isDebtOverdue(debt: Pick<Debt, 'nextDueDate' | 'paidInstallments' | 'totalInstallments' | 'paidAmount' | 'totalAmount'>): boolean {
   return !isDebtPaid(debt) && debt.nextDueDate < todayISO();
 }
 
-/** Avança uma data ISO (YYYY-MM-DD) em exatamente um mês, ajustando o ano quando cruza dezembro→janeiro. */
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(year: number, month: number): number {
+  const days = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return days[month - 1];
+}
+
+/**
+ * Avança uma data ISO (YYYY-MM-DD) em exatamente um mês, ajustando o ano quando cruza
+ * dezembro→janeiro. O dia é "clampado" para o último dia válido do mês de destino quando
+ * necessário (ex.: 31/jan → 28 ou 29/fev, nunca "31/fev", que não é uma data válida) —
+ * sem isso, uma dívida com vencimento no dia 31 quebraria ao avançar para um mês mais curto.
+ */
 export function advanceMonth(dateString: string): string {
   const parts = dateString.split('-');
   if (parts.length !== 3) return dateString;
   let year = parseInt(parts[0]);
   let month = parseInt(parts[1]);
-  const day = parts[2];
+  const day = parseInt(parts[2]);
 
   month += 1;
   if (month > 12) {
@@ -47,7 +68,8 @@ export function advanceMonth(dateString: string): string {
     year += 1;
   }
 
-  return `${year}-${String(month).padStart(2, '0')}-${day.padStart(2, '0')}`;
+  const clampedDay = Math.min(day, daysInMonth(year, month));
+  return `${year}-${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
 }
 
 /**

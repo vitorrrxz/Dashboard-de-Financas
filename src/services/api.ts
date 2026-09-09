@@ -38,8 +38,15 @@ export async function apiFetch<T = unknown>(endpoint: string, options: ApiFetchO
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new ApiError(err.error || 'Erro na API', res.status, err);
+    const raw: unknown = await res.json().catch(() => ({}));
+    // O corpo de erro pode não ser um objeto (`null`, string, array, número) se o servidor
+    // responder algo inesperado (proxy, erro 5xx fora do nosso controle) — sem normalizar,
+    // `err.error` explodiria com "Cannot read properties of null/undefined" antes mesmo de
+    // chegar ao catch do chamador (ex.: PluggyConnectButton checando `err.status === 409`).
+    const err: Record<string, unknown> = (raw && typeof raw === 'object' && !Array.isArray(raw))
+      ? raw as Record<string, unknown>
+      : {};
+    throw new ApiError((typeof err.error === 'string' && err.error) || 'Erro na API', res.status, err);
   }
   return res.json();
 }

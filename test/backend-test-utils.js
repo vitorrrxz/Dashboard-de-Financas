@@ -11,6 +11,11 @@
 import { execSync } from 'child_process';
 import { unlinkSync, existsSync } from 'fs';
 
+// Exportado para que testes que precisam assinar seus próprios tokens (ex.: token
+// expirado/forjado em server.auth.test.js) usem o MESMO segredo que `server.js` valida em
+// tempo de teste, sem duplicar o literal — evita os dois valores divergirem silenciosamente.
+export const TEST_JWT_SECRET = 'test_jwt_secret_' + 'x'.repeat(40); // >= 32 chars, exigido por server.js
+
 export async function createTestApp(dbName, { authRateLimit } = {}) {
   const dbFile = `./test_${dbName}.db`;
   for (const suffix of ['', '-journal', '-wal', '-shm']) {
@@ -18,7 +23,7 @@ export async function createTestApp(dbName, { authRateLimit } = {}) {
   }
 
   process.env.DATABASE_URL = `file:${dbFile}`;
-  process.env.JWT_SECRET = 'test_jwt_secret_' + 'x'.repeat(40); // >= 32 chars, exigido por server.js
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
   process.env.PLUGGY_CLIENT_ID = '';
   process.env.PLUGGY_CLIENT_SECRET = '';
   process.env.FRONTEND_URL = 'http://localhost:5173';

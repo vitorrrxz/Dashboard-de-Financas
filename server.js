@@ -526,6 +526,11 @@ app.put('/api/debts/:id', authenticateToken, async (req, res) => {
     });
     res.json(debt);
   } catch (err) {
+    // P2025 = nenhum registro encontrado com esse `where` (id + userId) — ou a dívida não
+    // existe, ou pertence a outro usuário. Mesmo comportamento de "não encontrado" que
+    // accounts/transactions dão via updateMany (changes:0), só que aqui `update` lança em
+    // vez de simplesmente não afetar linhas — sem este catch, cairia em 500 (ver FIN-032).
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Dívida não encontrada.' });
     sendInternalError(res, err, 'Erro ao atualizar dívida.');
   }
 });
@@ -678,19 +683,34 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
       } while (page <= totalPages);
 
       // FIN-037: busca de uma vez os `pluggyId` já existentes desta sincronização (1
-      // consulta), em vez de um `findFirst` por transação (N consultas). Transações já
-      // existentes não são mais atualizadas — dados bancários já efetivados raramente
-      // mudam — só as novas são gravadas, via `createMany` (1 round-trip em vez de N
-      // upserts), reduzindo o custo de N+1 consultas/gravações para O(1) por conta.
-      const existingIds = new Set(
-        (await prisma.transaction.findMany({
-          where: { userId, pluggyId: { in: allPluggyTxs.map(t => t.id) } },
-          select: { pluggyId: true },
-        })).map(t => t.pluggyId)
-      );
+      // consulta), em vez de um `findFirst` por transação (N consultas).
+      const existingTxs = await prisma.transaction.findMany({
+        where: { userId, pluggyId: { in: allPluggyTxs.map(t => t.id) } },
+        select: { pluggyId: true, name: true, date: true, amount: true },
+      });
+      const existingByPluggyId = new Map(existingTxs.map(t => [t.pluggyId, t]));
 
-      const newPluggyTxs = allPluggyTxs.filter(tx => !existingIds.has(tx.id));
+      const newPluggyTxs = allPluggyTxs.filter(tx => !existingByPluggyId.has(tx.id));
       totalTxs += newPluggyTxs.length;
+
+      // Transações já existentes: a Pluggy pode reportar valor/descrição/data diferentes
+      // numa sincronização posterior (ex.: transação que estava pendente e "assentou" com
+      // valor final diferente do provisório) — sem isto o app ficaria com dados
+      // desatualizados indefinidamente após a primeira sincronização. Só grava (1 UPDATE)
+      // quando algo realmente mudou, então o custo extra é próximo de zero na maioria das
+      // sincronizações (poucas transações do último mês mudam de um sync para o outro).
+      for (const tx of allPluggyTxs) {
+        const existing = existingByPluggyId.get(tx.id);
+        if (!existing) continue;
+        const freshDate = tx.date.toISOString().split('T')[0];
+        const freshAmount = toCents(tx.amount);
+        if (existing.name !== tx.description || existing.date !== freshDate || existing.amount !== freshAmount) {
+          await prisma.transaction.updateMany({
+            where: { userId, pluggyId: tx.id },
+            data: { name: tx.description, date: freshDate, amount: freshAmount },
+          });
+        }
+      }
 
       if (newPluggyTxs.length > 0) {
         const data = newPluggyTxs.map(tx => ({
@@ -709,13 +729,14 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           // `findMany` acima e este `createMany` (que, ao contrário de `create`
           // individual, falha inteiro — não por linha — ao violar a constraint única, e
           // o SQLite não suporta `skipDuplicates` no Prisma). Cai para upsert linha a
-          // linha só neste caso raro, protegido pela constraint (ver FIN-021).
+          // linha só neste caso raro, protegido pela constraint (ver FIN-021) — e também
+          // atualiza os dados no conflito, para ficar consistente com o loop de refresh acima.
           if (err.code === 'P2002') {
             for (const t of data) {
               await prisma.transaction.upsert({
                 where: { userId_pluggyId: { userId, pluggyId: t.pluggyId } },
                 create: t,
-                update: {},
+                update: { name: t.name, category: t.category, date: t.date, amount: t.amount },
               });
             }
           } else {
@@ -723,6 +744,13 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           }
         }
       }
+
+      // Nota: reconciliação de transações removidas/substituídas do lado da Pluggy (ex.:
+      // uma transação pendente que desaparece e é substituída por outra com ID diferente)
+      // fica fora do escopo desta correção — exigiria comparar todo o histórico já
+      // importado contra a janela de datas retornada pela Pluggy para decidir com segurança
+      // o que apagar, e um erro nessa lógica apagaria transações reais do usuário. Preferível
+      // tratar como item de backlog dedicado a ser desenhado com mais cuidado.
     }
 
     res.json({ success: true, message: `Sincronizacao concluida! ${totalTxs} novas transacoes importadas.` });

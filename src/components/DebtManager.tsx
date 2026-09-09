@@ -462,44 +462,44 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             </div>
 
             <div className="space-y-4">
-              <FormField label="Nome da Dívida">
-                <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Ex: Empréstimo Banco do Brasil" className="input-field" />
+              <FormField label="Nome da Dívida" htmlFor="debt-name">
+                <input id="debt-name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="Ex: Empréstimo Banco do Brasil" className="input-field" />
               </FormField>
 
-              <FormField label="Descrição (opcional)">
-                <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Detalhes adicionais..." className="input-field" />
+              <FormField label="Descrição (opcional)" htmlFor="debt-description">
+                <input id="debt-description" value={form.description} onChange={e => set('description', e.target.value)} placeholder="Detalhes adicionais..." className="input-field" />
               </FormField>
 
-              <FormField label="Categoria">
-                <select value={form.category} onChange={e => set('category', e.target.value as DebtCategory)} className="input-field">
+              <FormField label="Categoria" htmlFor="debt-category">
+                <select id="debt-category" value={form.category} onChange={e => set('category', e.target.value as DebtCategory)} className="input-field">
                   {DEBT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </FormField>
 
               <div className="grid grid-cols-2 gap-3">
-                <FormField label="Valor Total (R$)">
-                  <input type="number" step="0.01" value={form.totalAmount || ''} onChange={e => set('totalAmount', parseFloat(e.target.value) || 0)} placeholder="10000.00" className="input-field" />
+                <FormField label="Valor Total (R$)" htmlFor="debt-total-amount">
+                  <input id="debt-total-amount" type="number" step="0.01" value={form.totalAmount || ''} onChange={e => set('totalAmount', parseFloat(e.target.value) || 0)} placeholder="10000.00" className="input-field" />
                 </FormField>
-                <FormField label="Parcela Mensal (R$)">
-                  <input type="number" step="0.01" value={form.monthlyPayment || ''} onChange={e => set('monthlyPayment', parseFloat(e.target.value) || 0)} placeholder="500.00" className="input-field" />
+                <FormField label="Parcela Mensal (R$)" htmlFor="debt-monthly-payment">
+                  <input id="debt-monthly-payment" type="number" step="0.01" value={form.monthlyPayment || ''} onChange={e => set('monthlyPayment', parseFloat(e.target.value) || 0)} placeholder="500.00" className="input-field" />
                 </FormField>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <FormField label="Nº Total de Parcelas">
-                  <input type="number" min={1} value={form.totalInstallments || ''} onChange={e => set('totalInstallments', parseInt(e.target.value) || 1)} placeholder="24" className="input-field" />
+                <FormField label="Nº Total de Parcelas" htmlFor="debt-total-installments">
+                  <input id="debt-total-installments" type="number" min={1} value={form.totalInstallments || ''} onChange={e => set('totalInstallments', parseInt(e.target.value) || 1)} placeholder="24" className="input-field" />
                 </FormField>
-                <FormField label="Juros (% ao mês)">
-                  <input type="number" step="0.01" value={form.interestRate || ''} onChange={e => set('interestRate', parseFloat(e.target.value) || 0)} placeholder="2.5" className="input-field" />
+                <FormField label="Juros (% ao mês)" htmlFor="debt-interest-rate">
+                  <input id="debt-interest-rate" type="number" step="0.01" value={form.interestRate || ''} onChange={e => set('interestRate', parseFloat(e.target.value) || 0)} placeholder="2.5" className="input-field" />
                 </FormField>
               </div>
 
-              <FormField label="Próximo Vencimento">
-                <input type="date" value={form.nextDueDate} onChange={e => set('nextDueDate', e.target.value)} className="input-field" />
+              <FormField label="Próximo Vencimento" htmlFor="debt-next-due-date">
+                <input id="debt-next-due-date" type="date" value={form.nextDueDate} onChange={e => set('nextDueDate', e.target.value)} className="input-field" />
               </FormField>
 
-              <FormField label="Vincular à Conta">
-                <select value={form.accountId || ''} onChange={e => set('accountId', e.target.value)} className="input-field">
+              <FormField label="Vincular à Conta" htmlFor="debt-account">
+                <select id="debt-account" value={form.accountId || ''} onChange={e => set('accountId', e.target.value)} className="input-field">
                   <option value="">Sem conta específica</option>
                   {accounts.map(acc => (
                     <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
@@ -535,8 +535,9 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             </p>
 
             <div className="space-y-4">
-              <FormField label="Nome do Grupo/Fatura">
+              <FormField label="Nome do Grupo/Fatura" htmlFor="group-name">
                 <input
+                  id="group-name"
                   autoFocus
                   value={groupName}
                   onChange={e => setGroupName(e.target.value)}
@@ -546,20 +547,22 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                 />
               </FormField>
 
-              <FormField label="Categoria">
-                <select 
-                  value={groupCategory} 
-                  onChange={e => setGroupCategory(e.target.value as DebtCategory)} 
+              <FormField label="Categoria" htmlFor="group-category">
+                <select
+                  id="group-category"
+                  value={groupCategory}
+                  onChange={e => setGroupCategory(e.target.value as DebtCategory)}
                   className="input-field"
                 >
                   {DEBT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </FormField>
 
-              <FormField label="Vincular à Conta">
-                <select 
-                  value={selectedAccountId} 
-                  onChange={e => setSelectedAccountId(e.target.value)} 
+              <FormField label="Vincular à Conta" htmlFor="group-account">
+                <select
+                  id="group-account"
+                  value={selectedAccountId}
+                  onChange={e => setSelectedAccountId(e.target.value)}
                   className="input-field"
                 >
                   {accounts.map(acc => (

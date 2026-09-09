@@ -14,11 +14,14 @@ function makeDebt(overrides: Partial<Debt> = {}): Debt {
 }
 
 describe('isDebtPaid', () => {
-  it('não paga quando paidInstallments < totalInstallments', () => {
-    expect(isDebtPaid(makeDebt({ paidInstallments: 5, totalInstallments: 10 }))).toBe(false);
+  it('não paga quando paidInstallments < totalInstallments e paidAmount < totalAmount', () => {
+    expect(isDebtPaid(makeDebt({ paidInstallments: 5, totalInstallments: 10, paidAmount: 500, totalAmount: 1000 }))).toBe(false);
   });
   it('paga quando paidInstallments === totalInstallments', () => {
-    expect(isDebtPaid(makeDebt({ paidInstallments: 10, totalInstallments: 10 }))).toBe(true);
+    expect(isDebtPaid(makeDebt({ paidInstallments: 10, totalInstallments: 10, paidAmount: 1000, totalAmount: 1000 }))).toBe(true);
+  });
+  it('paga quando paidAmount atinge totalAmount antes da última parcela nominal (arredondamento acumulado)', () => {
+    expect(isDebtPaid(makeDebt({ paidInstallments: 9, totalInstallments: 10, paidAmount: 1000, totalAmount: 1000 }))).toBe(true);
   });
 });
 
@@ -45,6 +48,12 @@ describe('advanceMonth', () => {
   });
   it('vira o ano ao passar de dezembro para janeiro', () => {
     expect(advanceMonth('2026-12-20')).toBe('2027-01-20');
+  });
+  it('dia 31/jan clampa para o último dia de fevereiro em ano não-bissexto', () => {
+    expect(advanceMonth('2026-01-31')).toBe('2026-02-28');
+  });
+  it('dia 31/jan clampa para 29/fev em ano bissexto', () => {
+    expect(advanceMonth('2024-01-31')).toBe('2024-02-29');
   });
 });
 
