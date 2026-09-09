@@ -17,8 +17,10 @@ describe('isDebtPaid', () => {
   it('não paga quando paidInstallments < totalInstallments e paidAmount < totalAmount', () => {
     expect(isDebtPaid(makeDebt({ paidInstallments: 5, totalInstallments: 10, paidAmount: 500, totalAmount: 1000 }))).toBe(false);
   });
-  it('paga quando paidInstallments === totalInstallments', () => {
-    expect(isDebtPaid(makeDebt({ paidInstallments: 10, totalInstallments: 10, paidAmount: 1000, totalAmount: 1000 }))).toBe(true);
+  it('paga quando paidInstallments === totalInstallments, mesmo com paidAmount ainda abaixo de totalAmount', () => {
+    // paidAmount < totalAmount de propósito — isola a condição de parcelas (o teste
+    // anterior já cobre paidAmount atingindo totalAmount antes da última parcela).
+    expect(isDebtPaid(makeDebt({ paidInstallments: 10, totalInstallments: 10, paidAmount: 900, totalAmount: 1000 }))).toBe(true);
   });
   it('paga quando paidAmount atinge totalAmount antes da última parcela nominal (arredondamento acumulado)', () => {
     expect(isDebtPaid(makeDebt({ paidInstallments: 9, totalInstallments: 10, paidAmount: 1000, totalAmount: 1000 }))).toBe(true);
