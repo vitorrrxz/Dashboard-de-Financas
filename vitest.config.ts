@@ -16,5 +16,12 @@ export default defineConfig({
     // para preparar um banco SQLite isolado — com vários arquivos de teste em paralelo,
     // isso pode levar mais que o timeout padrão de 10s neste ambiente (ver FIN-031).
     hookTimeout: 30000,
+    // Mesmo com 30s de hookTimeout, rodar 5+ arquivos de backend em paralelo (cada um
+    // disparando seu próprio `npx prisma db push` via `execSync`) satura CPU/IO o
+    // suficiente para estourar o timeout de qualquer forma nesta máquina — não é uma
+    // race condition no código, é contenção de recursos do próprio ambiente de teste.
+    // Roda os arquivos de teste sequencialmente (mais lento no total, mas confiável) em
+    // vez de tentar compensar com um timeout ainda maior.
+    fileParallelism: false,
   },
 });

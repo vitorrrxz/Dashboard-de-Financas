@@ -1577,26 +1577,50 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ### Orçamento por categoria
 
-- [ ] **P2 — FIN-042 — Criar model `Budget` no schema Prisma**
+- [x] **P2 — FIN-042 — Criar model `Budget` no schema Prisma** ✅ Concluída
   Campos sugeridos: `id`, `userId`, `category`, `monthlyLimit` (Int, centavos — depende de FIN-015), `createdAt`. Relação com `User`. **Arquivos:** `prisma/schema.prisma`. **Dependências:** FIN-015 (para já nascer em centavos), FIN-020 (migration versionada).
 
-- [ ] **P2 — FIN-043 — Criar rotas CRUD `/api/budgets`**
+  **Nota de implementação (09/09/2026):** Model criado exatamente como sugerido, com `@@unique([userId, category])` (um orçamento por categoria por usuário — evita ambiguidade sobre qual limite vale no cálculo de progresso) e `@@index([userId])` (mesmo padrão de FIN-019). Migration `20260909192304_add_budget` criada e aplicada via `prisma migrate dev` (fluxo versionado de FIN-020, não `db push`).
+
+  **Validação executada:** `npx prisma migrate dev --name add_budget` aplicou limpo contra `dev.db`; `npx tsc -b --noEmit` sem novos erros.
+
+- [x] **P2 — FIN-043 — Criar rotas CRUD `/api/budgets`** ✅ Concluída
   `GET/POST/PUT/DELETE`, seguindo exatamente o padrão de autenticação/isolamento por `userId` já usado nas demais rotas de `server.js`. **Dependências:** FIN-042, FIN-008 (validação de payload).
 
-- [ ] **P2 — FIN-044 — Criar cálculo de progresso do orçamento (gasto vs. limite por categoria/mês)**
+  **Nota de implementação (09/09/2026):** `budgetSchema`/`budgetUpdateSchema` (Zod) seguem o mesmo formato de `accountSchema`; `category` é texto livre (não um enum fechado como `debtSchema.category`) porque precisa casar com `Transaction.category`, que aceita categorias digitadas manualmente. `monthlyLimit` exige `min(1)` — um orçamento de R$0 não tem sentido de negócio e evita ter que tratar divisão por zero em `computeBudgetProgress`. `PUT`/`DELETE` usam `updateMany`/`deleteMany` com `{id, userId}` no `where` (mesmo padrão de accounts — no-op silencioso em vez de 404/500 para outro usuário, ver FIN-032). Violação da constraint única (`P2002`) retorna 400 com mensagem específica em vez de 500 genérico.
+
+  **Validação executada:** `server.budgets.test.js` (FIN-048) cobre criação, rejeição de limite ≤ 0, rejeição de categoria duplicada por usuário, mesma categoria permitida entre usuários diferentes, e isolamento (get/put/delete cruzados).
+
+- [x] **P2 — FIN-044 — Criar cálculo de progresso do orçamento (gasto vs. limite por categoria/mês)** ✅ Concluída
   Função utilitária que recebe transações do mês + lista de budgets e retorna, por categoria, `{ limit, spent, percentage }`. **Arquivos:** novo `src/utils/budget.ts`. **Dependências:** FIN-043.
 
-- [ ] **P2 — FIN-045 — Criar aba "Orçamento" no frontend**
+  **Nota de implementação (09/09/2026):** `computeBudgetProgress(transactions, budgets, month)` — `month` no formato `YYYY-MM`, mesma convenção de `useFinancialStats.ts` (`tx.date.slice(0,7)`/`todayISO().slice(0,7)`). Só soma transações de despesa (`amount < 0`) — receitas não consomem orçamento. Retorna também `isOverLimit` (usado por FIN-047) além de `percentage` (que pode passar de 100).
+
+  **Validação executada:** `src/utils/budget.test.ts` — soma só despesas da categoria/mês corretos, `isOverLimit`/`percentage > 100` quando excede, categoria sem transações no mês (spent 0), e um item de progresso por orçamento na mesma ordem de entrada.
+
+- [x] **P2 — FIN-045 — Criar aba "Orçamento" no frontend** ✅ Concluída
   Novo componente `src/components/BudgetManager.tsx`, seguindo o padrão visual/estrutural de `AccountsManager.tsx`/`DebtManager.tsx` (cards + modal de formulário). Nova entrada de navegação em `App.tsx`. **Dependências:** FIN-044.
 
-- [ ] **P3 — FIN-046 — Integrar indicador de orçamento ao Dashboard**
+  **Nota de implementação (09/09/2026):** `CATEGORY_COLORS` (antes uma constante local em `App.tsx`) foi extraída para `src/utils/categories.ts` junto com a nova `EXPENSE_CATEGORIES` (mesma lista, sem "Receita") — evita duplicar a lista de categorias e um import circular (`App.tsx` → `BudgetManager.tsx` → `App.tsx`, caso `BudgetManager` importasse direto de `App.tsx`). O formulário só oferece categorias sem orçamento cadastrado (exceto a que já está sendo editada), para não depender só do 400 do backend. `budgetFromApi`/`budgetToApi` seguem o mesmo padrão de conversão reais↔centavos de `accountFromApi`/`debtFromApi`.
+
+  **Validação executada:** `npx tsc -b --noEmit` e `npm run lint` sem novos erros; fluxo completo validado via `npm run build`.
+
+- [x] **P3 — FIN-046 — Integrar indicador de orçamento ao Dashboard** ✅ Concluída
   Novo card ou seção no Dashboard mostrando resumo do orçamento do mês corrente. **Dependências:** FIN-045.
 
-- [ ] **P3 — FIN-047 — Criar alerta visual ao ultrapassar o limite do orçamento**
+  **Nota de implementação (09/09/2026):** Seção "Orçamento do Mês" no Dashboard (só aparece quando há orçamentos cadastrados), com barra de progresso por categoria reaproveitando o padrão visual já usado para o limite de cartão de crédito em `AccountsManager.tsx`. Calculado sobre **todas** as transações, não filtrado por `dashboardAccountId` — orçamento é por categoria, não por conta.
+
+- [x] **P3 — FIN-047 — Criar alerta visual ao ultrapassar o limite do orçamento** ✅ Concluída
   Reaproveitar o padrão de alerta já usado para dívidas vencidas ([App.tsx:407-415](src/App.tsx#L407-L415)). **Dependências:** FIN-046.
 
-- [ ] **P3 — FIN-048 — Testes do sistema de orçamento**
+  **Nota de implementação (09/09/2026):** Mesmo bloco de alerta (cor/ícone/estrutura) do usado para dívidas vencidas, exibido quando `overBudget.length > 0`, listando as categorias que ultrapassaram o limite no mês corrente.
+
+- [x] **P3 — FIN-048 — Testes do sistema de orçamento** ✅ Concluída
   Cobrir `src/utils/budget.ts` e as rotas `/api/budgets`. **Dependências:** FIN-030, FIN-031, FIN-045.
+
+  **Nota de implementação (09/09/2026):** `src/utils/budget.test.ts` (4 testes) + `server.budgets.test.js` (8 testes, incluindo isolamento entre usuários seguindo o padrão de `server.security.test.js`). Escrever `server.budgets.test.js` revelou que `npx prisma migrate dev` (FIN-042) não regenerou o Prisma Client automaticamente nesta máquina — `prisma.budget` ficava `undefined` em runtime até rodar `npx prisma generate` manualmente. Também foi necessário desligar `fileParallelism` em `vitest.config.ts`: com 5+ arquivos de teste de backend disparando `npx prisma db push`/`migrate` em paralelo (cada `beforeAll`), a contenção de CPU/IO nesta máquina estourava até o `hookTimeout` de 30s já aumentado — não era uma race condition no código, e sim recurso insuficiente para tanta concorrência; rodar os arquivos sequencialmente eliminou a flakiness por completo.
+
+  **Validação executada:** suíte completa (`npx vitest run`) — 11 arquivos, 92 testes, todos passando de forma consistente (múltiplas execuções, sem flakiness); `npm run lint`, `npx tsc -b --noEmit` e `npm run build` sem erros.
 
 ### Metas financeiras
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut, Edit2, X, Menu
+  LogOut, Edit2, X, Menu, PiggyBank
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -11,20 +11,18 @@ import {
 import { ImportModal } from './components/ImportModal';
 import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
+import { BudgetManager } from './components/BudgetManager';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { toCents, toReais } from './utils/money';
 import { apiFetch } from './services/api';
 import { useFinancialStats } from './hooks/useFinancialStats';
-import type { Account, Debt, DebtCategory, Transaction, PaymentType } from './types';
+import { computeBudgetProgress } from './utils/budget';
+import { todayISO } from './utils/debts';
+import { CATEGORY_COLORS } from './utils/categories';
+import type { Account, Budget, Debt, DebtCategory, Transaction, PaymentType } from './types';
 
-const CATEGORY_COLORS: Record<string, string> = {
-  'Alimentação': '#f59e0b', 'Transporte': '#3b82f6', 'Lazer': '#a855f7',
-  'Moradia': '#6366f1', 'Saúde': '#10b981', 'Educação': '#06b6d4',
-  'Compras': '#ec4899', 'Receita': '#14b8a6', 'Outros': '#6b7280',
-};
-
-type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts';
+type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets';
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -74,6 +72,14 @@ function debtToApi<T extends Partial<Debt>>(d: T): T {
   if (out.subItems != null) out.subItems = out.subItems.map(si => ({ ...si, amount: toCents(si.amount) }));
   return out;
 }
+function budgetFromApi(b: Budget): Budget {
+  return { ...b, monthlyLimit: toReais(b.monthlyLimit) };
+}
+function budgetToApi<T extends Partial<Budget>>(b: T): T {
+  const out: T = { ...b };
+  if (out.monthlyLimit != null) out.monthlyLimit = toCents(out.monthlyLimit);
+  return out;
+}
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
@@ -92,6 +98,7 @@ export default function App() {
   const [transactions, setTxs]        = useState<Transaction[]>([]);
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
+  const [budgets, setBudgets]         = useState<Budget[]>([]);
   // FIN-023: a carga inicial busca até 2000 transações (comportamento original,
   // preservado). Se bater exatamente nesse limite, pode haver mais — `txHasMore` habilita
   // o botão "Carregar mais", que busca o restante via paginação real da API.
@@ -112,6 +119,7 @@ export default function App() {
     setAccounts([]);
     setTxs([]);
     setDebts([]);
+    setBudgets([]);
     localStorage.removeItem('finflow_token');
   };
 
@@ -122,13 +130,15 @@ export default function App() {
         fetchAPI('/api/auth/me'),
         fetchAPI('/api/accounts'),
         fetchAPI('/api/transactions'),
-        fetchAPI('/api/debts')
-      ]).then(([meData, accsData, txsData, debtsData]) => {
+        fetchAPI('/api/debts'),
+        fetchAPI('/api/budgets'),
+      ]).then(([meData, accsData, txsData, debtsData, budgetsData]) => {
         setUser(meData.user);
         setAccounts((accsData as Account[]).map(accountFromApi));
         setTxs((txsData as Transaction[]).map(txFromApi));
         setTxHasMore((txsData as Transaction[]).length >= 2000);
         setDebts((debtsData as Debt[]).map(debtFromApi));
+        setBudgets((budgetsData as Budget[]).map(budgetFromApi));
       }).catch(err => {
         console.error('Sessão expirada ou erro:', err);
         handleLogout();
@@ -297,12 +307,41 @@ export default function App() {
     } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
   };
 
+  // CRUD BUDGETS (FIN-045)
+  const addBudget = async (budget: Omit<Budget, 'id' | 'createdAt'>) => {
+    try {
+      const newBudget = await fetchAPI('/api/budgets', 'POST', budgetToApi(budget));
+      setBudgets(prev => [...prev, budgetFromApi(newBudget)]);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  const updateBudget = async (id: string, budget: Omit<Budget, 'id' | 'createdAt'>) => {
+    try {
+      await fetchAPI(`/api/budgets/${id}`, 'PUT', budgetToApi(budget));
+      setBudgets(prev => prev.map(b => b.id === id ? { ...b, ...budget } : b));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  const deleteBudget = async (id: string) => {
+    try {
+      await fetchAPI(`/api/budgets/${id}`, 'DELETE');
+      setBudgets(prev => prev.filter(b => b.id !== id));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
 
   // ---------- Derived stats ----------
   // Lógica extraída para src/hooks/useFinancialStats.ts (ver FIN-086 em
   // docs/BACKLOG_DETAIL.md) — separa a regra de negócio da camada de UI e permite
   // testá-la sem renderizar componentes (ver FIN-034).
   const stats = useFinancialStats(transactions, accounts, debts, dashboardAccountId);
+
+  // FIN-044/FIN-046: progresso de orçamento do mês corrente, calculado sobre TODAS as
+  // transações (não filtradas por `dashboardAccountId`) — orçamento é por categoria, não
+  // por conta, então não faz sentido restringir a uma conta específica.
+  const currentMonth = todayISO().slice(0, 7);
+  const budgetProgress = useMemo(
+    () => computeBudgetProgress(transactions, budgets, currentMonth),
+    [transactions, budgets, currentMonth]
+  );
+  const overBudget = budgetProgress.filter(b => b.isOverLimit); // FIN-047
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -361,6 +400,12 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* FIN-045 */}
+            <NavItem icon={<PiggyBank size={18}/>} label="Orçamento" active={activeTab==='budgets'} onClick={() => { setActiveTab('budgets'); setMobileNavOpen(false); }}
+              badge={budgets.length > 0 ? budgets.length : undefined}
+              badgeColor={overBudget.length > 0 ? '#ef4444' : undefined}
+            />
           </nav>
         </div>
 
@@ -501,6 +546,17 @@ export default function App() {
                 </div>
               )}
 
+              {/* FIN-047: mesmo padrão de alerta usado para dívidas vencidas, acima. */}
+              {overBudget.length > 0 && (
+                <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)' }}>
+                  <AlertCircle size={18} className="text-red-400 shrink-0"/>
+                  <p className="text-sm text-red-300">
+                    Você ultrapassou o limite de <strong>{overBudget.length}</strong> orçamento(s) este mês:
+                    {' '}{overBudget.map(b => b.category).join(', ')}
+                  </p>
+                </div>
+              )}
+
               {/* Summary Cards Row 1 — Real Accounts */}
               {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem
                   contas de investimento, mostramos o total delas separadamente ao lado. */}
@@ -530,6 +586,30 @@ export default function App() {
                 <SummaryCard title="Este Mês (Gastos)" amount={fmt(stats.monthExpense)} isPositive={false}
                   icon={<ArrowDownRight size={22} className="text-orange-400"/>} badge="Mês corrente" />
               </div>
+
+              {/* FIN-046: indicador de orçamento do mês corrente no Dashboard. */}
+              {budgetProgress.length > 0 && (
+                <div className="glass-card rounded-2xl p-6 mb-8">
+                  <div className="flex justify-between items-center mb-5">
+                    <h3 className="text-lg font-semibold text-white">Orçamento do Mês</h3>
+                    <button onClick={() => setActiveTab('budgets')} className="text-xs text-textMuted hover:text-white transition-colors">Ver tudo →</button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {budgetProgress.map(b => (
+                      <div key={b.id}>
+                        <div className="flex justify-between text-xs mb-1.5">
+                          <span className="text-white font-medium">{b.category}</span>
+                          <span className={b.isOverLimit ? 'text-red-400' : 'text-textMuted'}>{fmt(b.spent)} / {fmt(b.limit)}</span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+                          <div className={`h-full rounded-full transition-all ${b.isOverLimit ? 'bg-red-400' : 'bg-primary'}`}
+                            style={{ width: `${Math.min(100, b.percentage)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {isEmpty && !hasAccounts && (
                 <div className="glass-card rounded-2xl p-16 flex flex-col items-center text-center">
@@ -714,12 +794,29 @@ export default function App() {
                 <h1 className="text-3xl font-bold text-white mb-1">Dívidas e Parcelamentos</h1>
                 <p className="text-textMuted text-sm">Controle de passivos a longo prazo</p>
               </div>
-              <DebtManager 
-                debts={debts} 
+              <DebtManager
+                debts={debts}
                 onAdd={addDebt}
                 onUpdate={updateDebt}
                 onDelete={deleteDebt}
-                accounts={accounts} 
+                accounts={accounts}
+              />
+            </>
+          )}
+
+          {/* ══════════ BUDGETS TAB (FIN-045) ══════════ */}
+          {activeTab === 'budgets' && (
+            <>
+              <div className="mb-6">
+                <h1 className="text-3xl font-bold text-white mb-1">Orçamento</h1>
+                <p className="text-textMuted text-sm">Limite de gasto mensal por categoria</p>
+              </div>
+              <BudgetManager
+                budgetProgress={budgetProgress}
+                onAdd={addBudget}
+                onUpdate={updateBudget}
+                onDelete={deleteBudget}
+                existingCategories={budgets.map(b => b.category)}
               />
             </>
           )}
