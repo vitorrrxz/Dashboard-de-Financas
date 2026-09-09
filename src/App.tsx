@@ -83,6 +83,11 @@ function budgetToApi<T extends Partial<Budget>>(b: T): T {
   return out;
 }
 
+/**
+ * Componente raiz do FinFlow — gerencia sessão (login/token), carrega contas, transações,
+ * dívidas e orçamentos do usuário autenticado, deriva as estatísticas do Dashboard e
+ * renderiza a navegação e as abas (Dashboard, Transações, Contas, Dívidas, Orçamento).
+ */
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
   const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
