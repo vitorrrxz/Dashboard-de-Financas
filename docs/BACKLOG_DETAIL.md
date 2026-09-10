@@ -1583,6 +1583,54 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
+- [x] **P2 — FIN-094 — Lançamentos parcelados na aba Dívidas, com mês de referência e total mensal** ✅ Concluída (10/09/2026)
+
+  **Objetivo**
+  Tirar da aba Transações tudo o que é parcelado e mostrá-lo na aba Dívidas, com o mesmo esquema de mês de referência e valor total mensal criado em FIN-093.
+
+  **Problema**
+  Uma compra parcelada chega do cartão como N transações independentes, uma por parcela ("Mercado*Mercadolivre 3/10"), inclusive as de meses futuros. Misturadas às compras do dia a dia, elas poluíam a lista e os totais da aba Transações e não davam visão nenhuma do compromisso em si: quanto falta pagar de cada compra e quanto vence em cada mês. Na base real, 33 das 88 transações eram parcelas.
+
+  **Arquivos envolvidos**
+  - `src/utils/installments.ts` e `src/utils/installments.test.ts` (novos)
+  - `src/components/InstallmentsPanel.tsx` (novo)
+  - `src/components/MonthNavigator.tsx` (novo — extraído de `App.tsx`)
+  - `src/utils/dates.ts`, `src/utils/debts.ts`, `src/utils/money.ts`, `src/utils/projection.ts`, `src/utils/transactions.ts`
+  - `src/App.tsx`
+
+  **O que é "parcelado"**
+  `isInstallmentTransaction`: parcela de compra no cartão (`paymentType: 'credit'` com sufixo `n/N` no nome) e saída importada como PIX parcelado, que a importação já converte em dívida. Só saídas contam — um estorno com sufixo de parcela é dinheiro voltando e continua na aba Transações. Numa conta corrente o sufixo sozinho não basta, porque ali `n/N` no fim do nome pode ser qualquer coisa. O sufixo também é validado: `12/05` (parcela maior que o total — em geral uma data), `1/1` e `0/3` não contam.
+
+  O reconhecimento é pelo nome, e não pelo `creditCardMetadata` da Pluggy, de propósito: o sufixo é o padrão dos extratos de cartão brasileiros e aparece igual nas duas origens de dados do app (Pluggy e importação manual de OFX/CSV, que não tem metadado). A consequência é que um banco que não use o sufixo no nome não terá as parcelas reconhecidas; guardar o metadado da Pluggy seria o próximo passo se isso aparecer.
+
+  **Reagrupamento em compras**
+  `groupInstallmentPurchases` junta as parcelas pela chave conta + nome-base + total de parcelas + mês da primeira parcela (deduzido de cada uma: mês dela − (n − 1)). O mês de início é o que separa duas compras na mesma loja com o mesmo número de parcelas feitas em meses diferentes. O valor ficou fora da chave de propósito, porque a primeira parcela carrega o arredondamento da divisão — R$ 147,93 contra R$ 147,89 nas demais, no caso real. Duas compras idênticas no mesmo mês aparecem como número de parcela repetido e são separadas por valor.
+
+  A sincronização só traz a janela do último mês em diante, então as parcelas anteriores (e eventuais lacunas) são **deduzidas**: data no mês esperado, no dia da parcela mais recente com ajuste ao tamanho do mês, e valor da parcela mais recente. Elas aparecem marcadas como "estimada" na tela, para não se passarem por dado sincronizado. Uma parcela é considerada "lançada" quando sua data já chegou — ela está em alguma fatura; se essa fatura foi paga, só o extrato da conta corrente diz, e por isso o texto é "lançada", não "paga".
+
+  **Aba Dívidas**
+  `InstallmentsPanel` fica acima do gerenciador de dívidas existente: mês de referência com Parcelas do cartão / Dívidas / **Valor total**, a lista de vencimentos do mês (data, descrição, parcela n/N, situação, valor) e os cards das compras parceladas (progresso, parcela, restante, próxima parcela). As compras parceladas são somente leitura — a fonte da verdade é o extrato do cartão. As dívidas cadastradas entram na visão mensal pelas parcelas ainda não pagas.
+
+  **Aba Transações**
+  Os parcelados deixam de aparecer na lista, nos totais do mês e nas exportações. Para não parecerem ter sumido, a aba mostra quantos ficaram de fora no mês, com um atalho para a aba Dívidas.
+
+  **Refatorações no caminho**
+  - O seletor de mês e o `MonthTotal` de FIN-093 viraram `components/MonthNavigator.tsx`, usado pelas duas abas — em vez de uma segunda cópia do JSX e da lógica das setas.
+  - O laço de cronograma de dívidas saiu de `computeBalanceProjection` (FIN-058) para `remainingDebtSchedule`, em `debts.ts`, usado pela projeção e pela visão mensal. Na extração, a última parcela passou a **fechar exatamente o saldo** (mesma regra de `computeNextInstallment`, que registra o último pagamento levando `paidAmount` a `totalAmount`) e cada parcela é arredondada ao centavo — antes, três parcelas de R$ 333,333 sobre R$ 1.000 deixavam R$ 0,01 de fora do cronograma.
+  - `formatMonthLabel`, `shiftMonth`, `dateInMonth` e `monthsDescending` foram para `dates.ts`, junto do resto da aritmética de datas; `formatBRL` foi para `money.ts` com `maximumFractionDigits: 2` — sem ele o `toLocaleString` usa até três casas, e um resíduo de ponto flutuante apareceria como "R$ 0,300".
+
+  **Limitações conhecidas**
+  - A importação **manual** de fatura de cartão (`paymentType: 'credit'`) continua criando a dívida "Fatura …" com o total do arquivo (fluxo de FIN-004). Se esse arquivo tiver parcelas com sufixo `n/N`, elas aparecem também como compra parcelada, e o mês da fatura importada conta essas parcelas duas vezes na visão mensal. Não afeta a sincronização via Pluggy.
+  - Os cards do Dashboard continuam somando todas as transações, parcelas incluídas (mesma ressalva registrada em FIN-092).
+
+  **Validação executada**
+  - `src/utils/installments.test.ts` — 35 testes: leitura do sufixo (zero à esquerda, "parc"/"parcela", data no fim da descrição, à vista, parcela zero, número colado ao nome); regra de parcelado (estorno, conta corrente, PIX parcelado); reagrupamento com o recorte real do Mercado Livre (parcela 2/10 ausente deduzida em 09/09, total de R$ 1.478,94 preservando o arredondamento da 1ª parcela); separação por número de parcelas, por mês de início, por parcela repetida e por cartão; dia 31 ajustado para 30; compra concluída no fim da lista; visão mensal com dívidas só pelas parcelas restantes; totais sem ruído de ponto flutuante. Um dos testes garante que toda transação escondida da aba Transações aparece em alguma compra — se as duas regras divergissem, a parcela sumiria das duas abas.
+  - `dates.test.ts` (+12) e `debts.test.ts` (+7) cobrem as funções novas; os 14 testes da projeção passaram inalterados depois da extração do cronograma.
+  - Conferência somente-leitura contra o banco real: das 88 transações, 33 parcelas saem da aba Transações e as mesmas 33 aparecem agrupadas em 10 compras (9 em andamento, 1 concluída); setembro/2026 soma 9 parcelas, R$ 442,06.
+  - `npm run lint`, `npm run typecheck`, `npx vitest run` (21 arquivos, 272 testes) e `npm run build` limpos.
+
+---
+
 ## 10. 📊 Dashboard
 
 Nenhuma tarefa adicional identificada além das já listadas nas seções **0 (Bugs Críticos)** e **2 (Integridade Financeira)** — em especial FIN-001, FIN-002, FIN-005 e FIN-018, que afetam diretamente os números exibidos no Dashboard.

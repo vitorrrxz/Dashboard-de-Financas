@@ -1,6 +1,6 @@
 import type { Debt, RecurringTransaction } from '../types';
 import { advanceMonth, advanceOccurrence } from './dates';
-import { isDebtPaid, todayISO } from './debts';
+import { remainingDebtSchedule, todayISO } from './debts';
 
 // FIN-058 — projeção de saldo futuro: saldo atual + recorrências previstas − parcelas de
 // dívidas previstas, mês a mês. Função pura, calculada no frontend a partir dos dados já
@@ -56,7 +56,7 @@ function monthLabel(month: string): string {
  * A última parcela de uma dívida é limitada ao saldo devedor restante
  * (`totalAmount − paidAmount`), e não a `monthlyPayment` cheio — do contrário a projeção
  * descontaria mais do que o usuário realmente ainda deve quando as parcelas têm
- * arredondamento (mesma regra de `computeNextInstallment` em `debts.ts`).
+ * arredondamento (o cronograma vem de `remainingDebtSchedule`, em `debts.ts`).
  */
 export function computeBalanceProjection(
   currentBalance: number,
@@ -97,20 +97,11 @@ export function computeBalanceProjection(
   }
 
   for (const debt of debts) {
-    if (isDebtPaid(debt)) continue;
-    const remainingInstallments = Math.max(0, debt.totalInstallments - debt.paidInstallments);
-    let remainingBalance = Math.max(0, debt.totalAmount - debt.paidAmount);
-    let dueDate = debt.nextDueDate;
-
-    for (let i = 0; i < remainingInstallments && remainingBalance > 0; i++) {
-      const installment = Math.min(debt.monthlyPayment, remainingBalance);
-      const key = monthKey(dueDate);
+    for (const installment of remainingDebtSchedule(debt)) {
+      const key = monthKey(installment.dueDate);
       if (key > lastMonth) break;
       const bucket = key < firstMonth ? firstMonth : key;
-      debtByMonth[bucket] = (debtByMonth[bucket] ?? 0) + installment;
-
-      remainingBalance -= installment;
-      dueDate = advanceMonth(dueDate);
+      debtByMonth[bucket] = (debtByMonth[bucket] ?? 0) + installment.amount;
     }
   }
 

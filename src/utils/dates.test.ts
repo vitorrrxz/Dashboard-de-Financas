@@ -2,7 +2,10 @@
 // recorrências (FIN-053). Os testes de `advanceMonth` vieram de `debts.test.ts`, junto com
 // a função, quando ela foi extraída para `dates.ts`.
 import { describe, it, expect } from 'vitest';
-import { isLeapYear, daysInMonth, advanceMonth, advanceDays, advanceYear, advanceOccurrence } from './dates';
+import {
+  isLeapYear, daysInMonth, advanceMonth, advanceDays, advanceYear, advanceOccurrence,
+  shiftMonth, dateInMonth, monthsDescending, formatMonthLabel,
+} from './dates';
 
 describe('isLeapYear', () => {
   it('ano divisível por 4 é bissexto', () => {
@@ -95,5 +98,59 @@ describe('advanceOccurrence', () => {
         expect(advanceOccurrence(date, freq) > date).toBe(true);
       }
     }
+  });
+});
+
+describe('shiftMonth', () => {
+  it('avança e recua dentro do mesmo ano', () => {
+    expect(shiftMonth('2026-09', 1)).toBe('2026-10');
+    expect(shiftMonth('2026-09', -1)).toBe('2026-08');
+  });
+  it('vira o ano nos dois sentidos', () => {
+    expect(shiftMonth('2026-12', 1)).toBe('2027-01');
+    expect(shiftMonth('2026-01', -1)).toBe('2025-12');
+  });
+  it('desloca vários anos de uma vez', () => {
+    expect(shiftMonth('2026-05', -13)).toBe('2025-04');
+    expect(shiftMonth('2026-05', 24)).toBe('2028-05');
+  });
+  it('devolve a entrada quando ela não é um mês válido', () => {
+    expect(shiftMonth('2026-13', 1)).toBe('2026-13');
+    expect(shiftMonth('2026-09-10', 1)).toBe('2026-09-10');
+  });
+});
+
+describe('dateInMonth', () => {
+  it('monta a data do dia dentro do mês', () => {
+    expect(dateInMonth('2026-09', 9)).toBe('2026-09-09');
+  });
+  it('ajusta o dia 31 ao último dia de um mês de 30', () => {
+    expect(dateInMonth('2026-09', 31)).toBe('2026-09-30');
+  });
+  it('respeita fevereiro, bissexto ou não', () => {
+    expect(dateInMonth('2028-02', 31)).toBe('2028-02-29');
+    expect(dateInMonth('2026-02', 31)).toBe('2026-02-28');
+  });
+});
+
+describe('monthsDescending', () => {
+  it('extrai os meses sem repetir, do mais recente para o mais antigo', () => {
+    expect(monthsDescending(['2026-07-15', '2026-09-02', '2026-07-28'])).toEqual(['2026-09', '2026-07']);
+  });
+  it('inclui o mês pedido mesmo sem nenhuma data nele', () => {
+    expect(monthsDescending([], '2026-09')).toEqual(['2026-09']);
+  });
+});
+
+describe('formatMonthLabel', () => {
+  it('formata o mês em português com a inicial maiúscula', () => {
+    expect(formatMonthLabel('2026-09')).toBe('Setembro/2026');
+  });
+  it('não desloca o mês por causa do fuso (janeiro não vira dezembro do ano anterior)', () => {
+    // `new Date('2026-01')` seria lido como UTC e, em UTC-3, cairia em 31/12/2025.
+    expect(formatMonthLabel('2026-01')).toBe('Janeiro/2026');
+  });
+  it('devolve a entrada quando ela não é um mês válido', () => {
+    expect(formatMonthLabel('nao-e-mes')).toBe('nao-e-mes');
   });
 });

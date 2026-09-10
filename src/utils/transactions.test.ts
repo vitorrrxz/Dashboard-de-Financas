@@ -1,8 +1,7 @@
 // FIN-093 — filtro mensal e totais da aba Transações.
 import { describe, it, expect } from 'vitest';
 import {
-  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch,
-  formatMonthLabel, summarizeTransactions,
+  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions,
 } from './transactions';
 import type { Transaction } from '../types';
 
@@ -36,21 +35,6 @@ describe('availableMonths', () => {
 
   it('devolve só o mês corrente quando não há transações', () => {
     expect(availableMonths([], '2026-09')).toEqual(['2026-09']);
-  });
-});
-
-describe('formatMonthLabel', () => {
-  it('formata o mês em português com a inicial maiúscula', () => {
-    expect(formatMonthLabel('2026-09')).toBe('Setembro/2026');
-  });
-
-  it('não desloca o mês por causa do fuso (janeiro não vira dezembro do ano anterior)', () => {
-    // `new Date('2026-01')` seria lido como UTC e, em UTC-3, cairia em 31/12/2025.
-    expect(formatMonthLabel('2026-01')).toBe('Janeiro/2026');
-  });
-
-  it('devolve a entrada quando ela não é um mês válido', () => {
-    expect(formatMonthLabel('nao-e-mes')).toBe('nao-e-mes');
   });
 });
 

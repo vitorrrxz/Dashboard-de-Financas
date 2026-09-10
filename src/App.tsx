@@ -2,8 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut, Edit2, X, Menu, PiggyBank, Target, Repeat, BarChart3, Download, FileText,
-  ChevronLeft, ChevronRight
+  LogOut, Edit2, X, Menu, PiggyBank, Target, Repeat, BarChart3, Download, FileText
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -16,6 +15,8 @@ import { BudgetManager } from './components/BudgetManager';
 import { GoalsManager } from './components/GoalsManager';
 import { RecurringManager } from './components/RecurringManager';
 import { ReportsView } from './components/ReportsView';
+import { InstallmentsPanel } from './components/InstallmentsPanel';
+import { MonthNavigator, MonthTotal } from './components/MonthNavigator';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { toCents, toReais } from './utils/money';
@@ -24,13 +25,13 @@ import { useFinancialStats } from './hooks/useFinancialStats';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
 import { todayISO } from './utils/debts';
-import { formatDateBR } from './utils/dates';
+import { formatDateBR, formatMonthLabel } from './utils/dates';
 import { downloadCSV, downloadPDFReport, exportDateSuffix, formatCurrencyCSV } from './utils/export';
 import { TRANSACTION_REPORT_HEADERS, transactionsPeriod } from './utils/reports';
 import {
-  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch,
-  formatMonthLabel, summarizeTransactions,
+  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions,
 } from './utils/transactions';
+import { isInstallmentTransaction } from './utils/installments';
 import { CATEGORY_COLORS } from './utils/categories';
 import type { Account, Budget, Debt, DebtCategory, Goal, RecurringTransaction, Transaction, PaymentType } from './types';
 
@@ -472,32 +473,34 @@ export default function App() {
     [transactions]
   );
 
+  // FIN-094: lançamentos parcelados (parcelas de compra no cartão, PIX parcelado) saem da
+  // aba Transações e passam a ser exibidos na aba Dívidas — ver `isInstallmentTransaction`.
+  const regularTransactions = useMemo(
+    () => transactions.filter(t => !isInstallmentTransaction(t)),
+    [transactions]
+  );
+
   // FIN-093: meses selecionáveis na aba Transações. O mês corrente entra sempre, mesmo
   // sem lançamentos, para que o seletor abra num valor que existe na lista.
-  const txMonths = useMemo(() => availableMonths(transactions, currentMonth), [transactions, currentMonth]);
+  const txMonths = useMemo(() => availableMonths(regularTransactions, currentMonth), [regularTransactions, currentMonth]);
 
   // Recorte do mês de referência + busca. Os totais saem daqui, e não de `filtered`, para
   // continuarem mostrando receitas E despesas quando a lista isola apenas um dos dois.
   const monthScoped = useMemo(
-    () => filterByMonthAndSearch(transactions, txMonth, search),
-    [transactions, txMonth, search]
+    () => filterByMonthAndSearch(regularTransactions, txMonth, search),
+    [regularTransactions, txMonth, search]
   );
   const monthTotals = useMemo(() => summarizeTransactions(monthScoped), [monthScoped]);
   const filtered = useMemo(() => filterByKind(monthScoped, txFilter), [monthScoped, txFilter]);
 
-  /**
-   * Navega entre os meses disponíveis. `txMonths` está ordenado do mais recente para o
-   * mais antigo, então avançar um índice significa ir para o mês anterior.
-   */
-  const stepMonth = (offset: 1 | -1) => {
-    const next = txMonths[txMonths.indexOf(txMonth) + offset];
-    if (next) setTxMonth(next);
-  };
-  /** Se há um mês naquela direção — em "Todos os meses" (índice -1) as setas ficam inertes. */
-  const canStepMonth = (offset: 1 | -1) => {
-    const i = txMonths.indexOf(txMonth);
-    return i !== -1 && txMonths[i + offset] !== undefined;
-  };
+  // FIN-094: quantos parcelados o recorte de mês deixou de fora — a aba mostra um aviso com
+  // atalho para Dívidas, para as parcelas não parecerem ter simplesmente sumido.
+  const hiddenInstallments = useMemo(
+    () => transactions.filter(t =>
+      isInstallmentTransaction(t) && (txMonth === ALL_MONTHS || t.date.startsWith(txMonth))
+    ).length,
+    [transactions, txMonth]
+  );
 
   /** Sufixo dos arquivos exportados: o mês de referência, ou a data de hoje em "Todos os meses". */
   const exportSuffix = () => (txMonth === ALL_MONTHS ? exportDateSuffix() : txMonth);
@@ -993,25 +996,7 @@ export default function App() {
               {/* FIN-093: mês de referência + total do recorte. Fica acima dos filtros de
                   tipo porque delimita o conjunto sobre o qual eles atuam. */}
               <div className="glass-card rounded-2xl p-4 mb-5 flex flex-wrap items-end justify-between gap-4">
-                <div className="flex items-end gap-2">
-                  <button onClick={() => stepMonth(1)} disabled={!canStepMonth(1)}
-                    aria-label="Mês anterior" title="Mês anterior"
-                    className="p-2.5 rounded-xl border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-                    <ChevronLeft size={16}/>
-                  </button>
-                  <div className="min-w-[170px]">
-                    <label htmlFor="tx-month" className="block text-[10px] uppercase tracking-wider text-textMuted mb-1">Mês de referência</label>
-                    <select id="tx-month" value={txMonth} onChange={e => setTxMonth(e.target.value)} className="input-field font-semibold">
-                      <option value={ALL_MONTHS}>Todos os meses</option>
-                      {txMonths.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
-                    </select>
-                  </div>
-                  <button onClick={() => stepMonth(-1)} disabled={!canStepMonth(-1)}
-                    aria-label="Mês seguinte" title="Mês seguinte"
-                    className="p-2.5 rounded-xl border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-                    <ChevronRight size={16}/>
-                  </button>
-                </div>
+                <MonthNavigator id="tx-month" value={txMonth} months={txMonths} onChange={setTxMonth} allowAll/>
 
                 <div className="flex flex-wrap items-end gap-6">
                   <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-accent)"/>
@@ -1020,6 +1005,19 @@ export default function App() {
                     color={monthTotals.balance >= 0 ? '#ffffff' : '#f87171'}/>
                 </div>
               </div>
+
+              {/* FIN-094: os parcelados não aparecem nesta aba — em vez de sumir com eles, avisa
+                  quantos ficaram de fora e leva direto para a aba onde estão. */}
+              {hiddenInstallments > 0 && (
+                <p className="text-xs text-textMuted -mt-2 mb-5">
+                  {hiddenInstallments} {hiddenInstallments === 1 ? 'lançamento parcelado' : 'lançamentos parcelados'}
+                  {txMonth === ALL_MONTHS ? '' : ' deste mês'} {hiddenInstallments === 1 ? 'está' : 'estão'} em{' '}
+                  <button type="button" onClick={() => setActiveTab('debts')}
+                    className="text-primary font-medium hover:underline">
+                    Dívidas e Parcelamentos
+                  </button>.
+                </p>
+              )}
               <div className="flex gap-2 mb-5">
                 {([
                   { key: 'all',     label: 'Todas',     color: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)',  text: '#a5b4fc' },
@@ -1084,8 +1082,10 @@ export default function App() {
             <>
               <div className="mb-6">
                 <h1 className="text-3xl font-bold text-white mb-1">Dívidas e Parcelamentos</h1>
-                <p className="text-textMuted text-sm">Controle de passivos a longo prazo</p>
+                <p className="text-textMuted text-sm">Compras parceladas no cartão, dívidas cadastradas e o que vence em cada mês</p>
               </div>
+              {/* FIN-094: mês de referência, vencimentos do mês e compras parceladas no cartão. */}
+              <InstallmentsPanel transactions={transactions} debts={debts} accounts={accounts}/>
               <DebtManager
                 debts={debts}
                 onAdd={addDebt}
@@ -1189,23 +1189,6 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { titl
   );
 }
 
-/**
- * Um dos valores exibidos ao lado do mês de referência (FIN-093).
- *
- * Receitas e despesas são sempre mostradas em módulo — a direção está no rótulo. Já o
- * "valor total" é o saldo do recorte e pode ser negativo, então ele passa `signed` para
- * receber o sinal explicitamente.
- */
-function MonthTotal({ label, value, color, signed }: { label: string; value: number; color: string; signed?: boolean }) {
-  return (
-    <div className="text-right">
-      <p className="text-[10px] uppercase tracking-wider text-textMuted mb-1">{label}</p>
-      <p className="text-xl font-bold tracking-tight" style={{ color }}>
-        {signed && value < 0 ? '−' : ''}{fmt(value)}
-      </p>
-    </div>
-  );
-}
 const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
   debit:           { label: 'Débito',       color: '#3b82f6' },
   credit:          { label: 'Crédito',      color: '#ec4899' },

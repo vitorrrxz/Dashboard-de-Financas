@@ -5,6 +5,7 @@
 // Todos os valores estão em REAIS — a conversão de centavos acontece na borda da API.
 
 import type { Transaction } from '../types';
+import { monthsDescending } from './dates';
 
 /** Filtro de tipo aplicado pelos botões "Todas / Receitas / Despesas". */
 export type TransactionKind = 'all' | 'income' | 'expense';
@@ -31,23 +32,7 @@ export interface TransactionTotals {
  * e o usuário não teria como voltar para ele.
  */
 export function availableMonths(transactions: Transaction[], alwaysInclude?: string): string[] {
-  const months = new Set(transactions.map(t => t.date.slice(0, 7)));
-  if (alwaysInclude) months.add(alwaysInclude);
-  // Comparação lexicográfica: para `YYYY-MM` ela equivale à cronológica, sem construir Date.
-  return Array.from(months).sort().reverse();
-}
-
-/**
- * Rótulo do mês para exibição ("Setembro/2026").
- *
- * Monta a data com componentes numéricos (`new Date(ano, mêsIndex, 1)`) de propósito:
- * `new Date('2026-09')` é interpretado como UTC e, em UTC-3, cairia no mês anterior.
- */
-export function formatMonthLabel(month: string): string {
-  const [year, monthNumber] = month.split('-').map(Number);
-  if (!year || !monthNumber) return month;
-  const name = new Date(year, monthNumber - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
-  return `${name.charAt(0).toUpperCase()}${name.slice(1)}/${year}`;
+  return monthsDescending(transactions.map(t => t.date), alwaysInclude);
 }
 
 /**

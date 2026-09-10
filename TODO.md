@@ -84,6 +84,7 @@
 - [x] Conectar sino de notificacoes do header a algum conteudo real (FIN-039)
 - [x] Parar de forcar troca para aba "Transacoes" a cada tecla digitada na busca (FIN-040)
 - [x] Filtro mensal de receitas/despesas com total do mes na aba Transacoes (FIN-093)
+- [x] Mover lancamentos parcelados para a aba Dividas, com mes de referencia e total mensal (FIN-094, depende de FIN-092, FIN-093)
 
 ### Open Finance / Pluggy
 - [x] Tratar status de item Pluggy expirado / erro de login (FIN-041)
