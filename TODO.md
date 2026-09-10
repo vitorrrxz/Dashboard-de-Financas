@@ -109,21 +109,21 @@
 ## Fase 4 - Planejamento Financeiro (Metas e Recorrencias)
 
 ### Metas financeiras
-- [ ] Criar model `Goal` no schema Prisma (FIN-049, depende de FIN-015, FIN-020)
-- [ ] Criar rotas CRUD `/api/goals` (FIN-050, depende de FIN-049, FIN-008)
-- [ ] Criar tela de Metas Financeiras (FIN-051, depende de FIN-050)
-- [ ] Testes de metas financeiras (FIN-052, depende de FIN-030, FIN-031, FIN-051)
+- [x] Criar model `Goal` no schema Prisma (FIN-049, depende de FIN-015, FIN-020)
+- [x] Criar rotas CRUD `/api/goals` (FIN-050, depende de FIN-049, FIN-008)
+- [x] Criar tela de Metas Financeiras (FIN-051, depende de FIN-050)
+- [x] Testes de metas financeiras (FIN-052, depende de FIN-030, FIN-031, FIN-051)
 
 ### Transacoes recorrentes
-- [ ] Criar model `RecurringTransaction` no schema Prisma (FIN-053, depende de FIN-015, FIN-020)
-- [ ] Criar rotas CRUD + endpoint de "lancar pendentes" (FIN-054, depende de FIN-053, FIN-008)
-- [ ] Disparar checagem/lancamento de recorrencias pendentes ao carregar o dashboard (FIN-055, depende de FIN-054)
-- [ ] Criar UI de gerenciamento de recorrencias (FIN-056, depende de FIN-054)
-- [ ] Testes de transacoes recorrentes (FIN-057, depende de FIN-030, FIN-031, FIN-056)
+- [x] Criar model `RecurringTransaction` no schema Prisma (FIN-053, depende de FIN-015, FIN-020)
+- [x] Criar rotas CRUD + endpoint de "lancar pendentes" (FIN-054, depende de FIN-053, FIN-008)
+- [x] Disparar checagem/lancamento de recorrencias pendentes ao carregar o dashboard (FIN-055, depende de FIN-054)
+- [x] Criar UI de gerenciamento de recorrencias (FIN-056, depende de FIN-054)
+- [x] Testes de transacoes recorrentes (FIN-057, depende de FIN-030, FIN-031, FIN-056)
 
 ### Projecao de saldo
-- [ ] Criar calculo de projecao de saldo futuro (FIN-058, depende de FIN-053, FIN-005)
-- [ ] Exibir grafico de projecao no Dashboard (FIN-059, depende de FIN-058)
+- [x] Criar calculo de projecao de saldo futuro (FIN-058, depende de FIN-053, FIN-005)
+- [x] Exibir grafico de projecao no Dashboard (FIN-059, depende de FIN-058)
 
 ## Fase 5 - Relatorios
 

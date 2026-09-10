@@ -1624,42 +1624,75 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ### Metas financeiras
 
-- [ ] **P3 — FIN-049 — Criar model `Goal` no schema Prisma**
+- [x] **P3 — FIN-049 — Criar model `Goal` no schema Prisma** ✅ Concluída
   Campos: `id`, `userId`, `name`, `targetAmount`, `currentAmount`, `targetDate`, `createdAt`. **Dependências:** FIN-015, FIN-020.
 
-- [ ] **P3 — FIN-050 — Criar rotas CRUD `/api/goals`**
+  **Nota de implementação (09/09/2026):** Model criado com os campos sugeridos, `currentAmount` com `@default(0)` e `@@index([userId])` (padrão de FIN-019). `targetDate` é `String` ISO (YYYY-MM-DD), mesma convenção de `Debt.nextDueDate` — comparação de prazo continua sendo lexicográfica, sem `new Date(string)` e sem risco de fuso (ver FIN-005). `currentAmount` é atualizado manualmente pelo usuário (aportes); vincular meta a conta/transação ficou explicitamente fora do escopo. Migration `20260910013420_add_goals_and_recurring` (junto com FIN-053) criada e aplicada via `prisma migrate dev`, seguida de `prisma generate` — passo que FIN-042 mostrou não ser automático nesta máquina.
+
+- [x] **P3 — FIN-050 — Criar rotas CRUD `/api/goals`** ✅ Concluída
   Mesmo padrão das demais rotas. **Dependências:** FIN-049, FIN-008.
 
-- [ ] **P3 — FIN-051 — Criar tela de Metas Financeiras**
+  **Nota de implementação (09/09/2026):** `goalSchema`/`goalUpdateSchema` (Zod) no mesmo formato de `budgetSchema`. `targetAmount` exige `min(1)` — uma meta de R$0 não tem sentido de negócio e tornaria o progresso uma divisão por zero. `currentAmount` é opcional no create (nasce em 0) para que o mesmo schema sirva de base ao `partial()` do update, mesmo padrão de `paidAmount` em `debtSchema`. `PUT`/`DELETE` usam `updateMany`/`deleteMany` com `{id, userId}` no `where` (no-op silencioso para outro usuário, ver FIN-032).
+
+  **Validação executada:** `server.goals.test.js` — 11 testes: criação (com e sem aporte inicial), rejeição de alvo ≤ 0, aporte negativo, data fora do formato e nome vazio, atualização de aporte, isolamento entre usuários (listagem/edição/exclusão cruzadas) e exigência de autenticação.
+
+- [x] **P3 — FIN-051 — Criar tela de Metas Financeiras** ✅ Concluída
   Novo componente `src/components/GoalsManager.tsx` com barra de progresso (reaproveitar o padrão visual já usado em `DebtManager.tsx` para progresso de parcelas). **Dependências:** FIN-050.
 
-- [ ] **P3 — FIN-052 — Testes de metas financeiras**
+  **Nota de implementação (09/09/2026):** `GoalsManager.tsx` segue o padrão de cards + modal dos demais managers, com barra de progresso que muda de cor conforme o estado (verde = atingida, vermelha = prazo estourado, roxa = em andamento). A regra em si foi extraída para `src/utils/goals.ts` (`computeGoalProgress` → `percentage`, `remaining`, `isAchieved`, `isOverdue`), como em FIN-044, para ser testável sem renderizar React. Nova aba e item de navegação em `App.tsx`, com mappers `goalFromApi`/`goalToApi` (centavos ↔ reais).
+
+- [x] **P3 — FIN-052 — Testes de metas financeiras** ✅ Concluída
   **Dependências:** FIN-030, FIN-031, FIN-051.
+
+  **Nota de implementação (09/09/2026):** `src/utils/goals.test.ts` (7 testes) + `server.goals.test.js` (11 testes). Os testes de unidade cobrem os limites: alvo atingido exatamente (não só acima), acumulado acima do alvo sem "restante" negativo, meta atingida nunca conta como atrasada, prazo hoje ainda não está atrasado e alvo zerado não gera `NaN`/`Infinity` na tela.
 
 ### Transações recorrentes
 
-- [ ] **P3 — FIN-053 — Criar model `RecurringTransaction` no schema Prisma**
+- [x] **P3 — FIN-053 — Criar model `RecurringTransaction` no schema Prisma** ✅ Concluída
   Campos: `id`, `userId`, `accountId?`, `name`, `category`, `amount`, `frequency` (mensal/semanal/anual), `nextOccurrence`, `active`. **Dependências:** FIN-015, FIN-020.
 
-- [ ] **P3 — FIN-054 — Criar rotas CRUD `/api/recurring-transactions` + endpoint de "lançar pendentes"**
+  **Nota de implementação (09/09/2026):** Model criado com os campos sugeridos + `createdAt`, relação opcional com `Account` e `@@index([userId])`. `amount` segue a convenção de `Transaction` (negativo = despesa, positivo = receita) e `nextOccurrence` é o ponteiro de até onde já foi lançado. `frequency` é `String` no banco, validada por Zod no backend (SQLite não tem enum nativo, mesma abordagem de `Account.type`).
+
+- [x] **P3 — FIN-054 — Criar rotas CRUD `/api/recurring-transactions` + endpoint de "lançar pendentes"** ✅ Concluída
   Endpoint adicional (`POST /api/recurring-transactions/process`) que gera as `Transaction` reais cujas ocorrências já passaram, avançando `nextOccurrence`. **Dependências:** FIN-053, FIN-008.
 
-- [ ] **P3 — FIN-055 — Disparar checagem/lançamento de recorrências pendentes ao carregar o dashboard**
+  **Nota de implementação (09/09/2026):** Três decisões de integridade no `/process`:
+  1. **Idempotência a nível de banco:** cada ocorrência recebe um `importHash` determinístico (`recurringOccurrenceHash` = sha256 de `recurring|userId|recurringId|data`), reaproveitando a constraint única `(userId, importHash)` criada em FIN-003. Dois processamentos simultâneos (dois carregamentos do dashboard, ou o duplo efeito do StrictMode em dev) não conseguem duplicar transações — a proteção não depende de a aplicação "lembrar" o que já lançou.
+  2. **Atomicidade:** as transações da ocorrência e o avanço de `nextOccurrence` são gravados no mesmo `prisma.$transaction`, então nunca sobra lançamento sem o ponteiro correspondente ter avançado (nem o contrário).
+  3. **Teto por execução** (`MAX_OCCURRENCES_PER_RUN = 120`): uma recorrência semanal parada há anos geraria centenas de linhas numa requisição; o teto distribui isso entre chamadas sucessivas. Há ainda uma checagem `if (next <= occurrence) break` como rede de segurança contra laço infinito se a data/frequência vierem inesperadas.
+
+  A aritmética de datas (`advanceOccurrence`) foi duplicada em `server.js` pelo mesmo motivo já documentado em `toCents`: backend (Node puro) e frontend (bundle Vite/TS) não compartilham módulos neste projeto.
+
+  **Validação executada:** `server.recurring.test.js` — 18 testes, incluindo lançamento da ocorrência de hoje, recuperação de 4 ocorrências atrasadas de uma vez, idempotência (processar 3× não duplica), avanço correto por frequência (semanal = +7 dias, anual = +1 ano), recorrência futura intocada, recorrência pausada ignorada, conta vinculada propagada e isolamento entre usuários.
+
+- [x] **P3 — FIN-055 — Disparar checagem/lançamento de recorrências pendentes ao carregar o dashboard** ✅ Concluída
   No `useEffect` de carregamento inicial do `App.tsx`, chamar o endpoint de processamento antes (ou em paralelo) de buscar transações. **Dependências:** FIN-054.
 
-- [ ] **P3 — FIN-056 — Criar UI de gerenciamento de recorrências**
+  **Nota de implementação (09/09/2026):** O `/process` roda **antes** do `Promise.all` de carga (e não em paralelo), para que as transações geradas já apareçam nesta mesma carga em vez de só no próximo refresh. O erro dele é capturado num `.catch` próprio, isolado do `.catch` do fluxo principal — este último faz `handleLogout()`, então, sem o tratamento separado, uma falha ao processar recorrências deslogaria o usuário.
+
+- [x] **P3 — FIN-056 — Criar UI de gerenciamento de recorrências** ✅ Concluída
   Novo componente seguindo o mesmo padrão dos demais managers. **Dependências:** FIN-054.
 
-- [ ] **P3 — FIN-057 — Testes de transações recorrentes**
+  **Nota de implementação (09/09/2026):** `RecurringManager.tsx` com cards + modal. O valor é digitado sempre positivo e o sinal vem de um seletor "Despesa/Receita" (sem isso o usuário teria que digitar "-350" para um aluguel). Cada recorrência pode ser **pausada** em vez de excluída (`active: false`), e excluir uma recorrência mantém as transações que ela já lançou — ambas as decisões estão explicitadas na própria UI (rótulo "Pausada" e texto do `confirm`). O seletor de categoria une as categorias curadas às que já aparecem nas transações do usuário, mesma correção aplicada ao orçamento após a revisão do CodeRabbit em FIN-045.
+
+- [x] **P3 — FIN-057 — Testes de transações recorrentes** ✅ Concluída
   Cobrir especialmente o cálculo de próxima ocorrência para cada frequência. **Dependências:** FIN-030, FIN-031, FIN-056.
+
+  **Nota de implementação (09/09/2026):** `src/utils/dates.test.ts` (19 testes) cobre a versão canônica da aritmética de datas e `server.recurring.test.js` (18 testes) cobre o comportamento via endpoint. Ao implementar, a lógica de ano bissexto/clamp de dia — que já existia em `advanceMonth` dentro de `debts.ts` — foi extraída para `src/utils/dates.ts` em vez de duplicada pela terceira vez; `debts.ts` passou a importá-la e os testes de `advanceMonth` migraram junto. Os testes de data cobrem as bordas que quebram implementações ingênuas: 31/jan → 28 ou 29/fev, 29/fev → 28/fev no ano seguinte, virada de ano em todas as frequências e a garantia de que toda frequência sempre avança estritamente (invariante da qual o laço de `/process` depende para terminar).
 
 ### Projeção de saldo
 
-- [ ] **P3 — FIN-058 — Criar cálculo de projeção de saldo futuro (saldo atual + recorrências previstas − parcelas de dívidas previstas)**
+- [x] **P3 — FIN-058 — Criar cálculo de projeção de saldo futuro (saldo atual + recorrências previstas − parcelas de dívidas previstas)** ✅ Concluída
   Nova função utilitária, sem endpoint novo necessário (pode ser calculada no frontend a partir dos dados já carregados). **Dependências:** FIN-053, FIN-005.
 
-- [ ] **P3 — FIN-059 — Exibir gráfico de projeção no Dashboard**
+  **Nota de implementação (09/09/2026):** `src/utils/projection.ts` — `computeBalanceProjection(saldoAtual, recorrências, dívidas, { months, from })`, pura e sem endpoint novo. Três regras que valem registrar: (1) ocorrências e parcelas com data já vencida caem no primeiro mês do horizonte, porque o dinheiro ainda não saiu da conta e continua sendo fluxo futuro; (2) só as parcelas que **faltam** são projetadas (`totalInstallments − paidInstallments`), não o total; (3) a última parcela é limitada ao saldo devedor restante (`totalAmount − paidAmount`) e não ao `monthlyPayment` cheio — mesma regra de `computeNextInstallment`, sem a qual a projeção descontaria mais do que o usuário realmente deve quando as parcelas têm arredondamento.
+
+  **Validação executada:** `src/utils/projection.test.ts` — 14 testes com `from` fixo (não dependem da data em que a suíte roda): recorrência de receita/despesa, recorrência inativa ignorada, semanal gerando 5 ocorrências no mesmo mês, anual só no mês certo, ocorrência atrasada não perdida, dívida quitada ignorada, parcelas restantes, última parcela limitada ao saldo devedor, combinação de tudo e saldo negativo projetado sem ser zerado.
+
+- [x] **P3 — FIN-059 — Exibir gráfico de projeção no Dashboard** ✅ Concluída
   Novo gráfico Recharts (reaproveitar o padrão de `AreaChart` já usado em [App.tsx:486-511](src/App.tsx#L486-L511)). **Dependências:** FIN-058.
+
+  **Nota de implementação (09/09/2026):** `AreaChart` de "Projeção de Saldo" (6 meses) no Dashboard, reaproveitando o padrão do gráfico de fluxo financeiro com gradiente próprio em teal para diferenciar do histórico. Só é renderizado quando há algo a projetar (recorrência ativa ou dívida em aberto) — sem isso seria apenas uma linha reta no saldo atual. Uma legenda abaixo do gráfico explica de onde vem o número, para não parecer previsão "mágica".
 
 ---
 

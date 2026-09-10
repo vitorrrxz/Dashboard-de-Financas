@@ -107,6 +107,77 @@ function computeImportHash(userId, tx) {
   return crypto.createHash('sha256').update(key.join('|')).digest('hex');
 }
 
+// Aritmética de datas ISO para o processamento de recorrências (FIN-054). Duplicado de
+// `src/utils/dates.ts` pelo mesmo motivo de `toCents`: backend (Node puro) e frontend
+// (bundle Vite/TS) não compartilham módulos neste projeto. Os testes de
+// `src/utils/dates.test.ts` cobrem a versão canônica; `server.recurring.test.js` cobre o
+// comportamento desta, via endpoint.
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+function daysInMonth(year, month) {
+  return [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+}
+function formatISODate(year, month, day) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Próxima ocorrência de uma recorrência, conforme a frequência. O dia é "clampado" ao
+ * último dia válido do mês de destino (31/jan → 28 ou 29/fev; 29/fev → 28/fev no ano
+ * seguinte), então nunca produz uma data inexistente, e o resultado é sempre estritamente
+ * maior que a entrada — o que garante o avanço do laço de lançamento em
+ * `/api/recurring-transactions/process`.
+ */
+function advanceOccurrence(dateString, frequency) {
+  const parts = dateString.split('-');
+  if (parts.length !== 3) return dateString;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return dateString;
+  if (month < 1 || month > 12 || day < 1) return dateString;
+
+  if (frequency === 'weekly') {
+    // `new Date(y, mIndex, d)` usa componentes locais (não faz parse UTC de string, ao
+    // contrário de `new Date('YYYY-MM-DD')`) e normaliza sozinho a virada de mês/ano.
+    const d = new Date(year, month - 1, day + 7);
+    return formatISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  if (frequency === 'yearly') {
+    return formatISODate(year + 1, month, Math.min(day, daysInMonth(year + 1, month)));
+  }
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return formatISODate(nextYear, nextMonth, Math.min(day, daysInMonth(nextYear, nextMonth)));
+}
+
+/**
+ * Data de hoje no fuso local do servidor, como string ISO — mesma convenção (e mesmo
+ * motivo de não usar `toISOString()`, que é UTC) de `todayISO` em `src/utils/debts.ts`.
+ */
+function todayISO() {
+  const d = new Date();
+  return formatISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+/**
+ * Chave determinística de uma ocorrência de recorrência, gravada em `Transaction.importHash`.
+ * Reaproveita a constraint única `(userId, importHash)` criada em FIN-003 para tornar o
+ * lançamento idempotente **no banco**, não só na aplicação: se o processamento rodar duas
+ * vezes em paralelo (ex.: dois carregamentos simultâneos do dashboard, ou o duplo efeito do
+ * StrictMode em dev), a segunda tentativa não cria uma transação duplicada.
+ */
+function recurringOccurrenceHash(userId, recurringId, occurrenceDate) {
+  return crypto.createHash('sha256').update(['recurring', userId, recurringId, occurrenceDate].join('|')).digest('hex');
+}
+
+// Teto de ocorrências geradas por chamada, por recorrência. Uma recorrência semanal parada
+// há anos geraria centenas de transações numa única requisição; o teto distribui isso entre
+// chamadas sucessivas (o ponteiro `nextOccurrence` avança a cada uma) e também limita o
+// estrago caso `advanceOccurrence` deixe de avançar por um dado inesperado.
+const MAX_OCCURRENCES_PER_RUN = 120;
+
 // Converte reais (decimal) para centavos (inteiro) — ver FIN-015. A API da Pluggy retorna
 // valores em reais; o schema local agora armazena tudo em centavos. Duplicado de
 // `src/utils/money.ts` porque backend (Node puro) e frontend (bundle Vite) não
@@ -228,6 +299,33 @@ const budgetSchema = z.object({
   monthlyLimit: z.coerce.number().int('Limite mensal deve ser um inteiro em centavos.').min(1, 'Limite mensal deve ser maior que zero.'),
 });
 const budgetUpdateSchema = budgetSchema.partial();
+// FIN-049/FIN-050 — metas financeiras (Fase 4). `targetAmount` exige > 0: uma meta de R$0
+// não tem sentido de negócio e tornaria o cálculo de progresso uma divisão por zero.
+// `currentAmount` é opcional no create (nasce em 0) para que o mesmo schema sirva de base
+// ao `partial()` usado no update — mesmo padrão de `paidAmount` em `debtSchema`.
+const goalSchema = z.object({
+  name: z.string({ error: 'Nome da meta é obrigatório.' }).trim().min(1, 'Nome da meta é obrigatório.'),
+  targetAmount: z.coerce.number().int('Valor da meta deve ser um inteiro em centavos.').min(1, 'Valor da meta deve ser maior que zero.'),
+  currentAmount: z.coerce.number().int('Valor acumulado deve ser um inteiro em centavos.').min(0, 'Valor acumulado não pode ser negativo.').optional(),
+  targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data-alvo deve estar no formato YYYY-MM-DD.'),
+});
+const goalUpdateSchema = goalSchema.partial();
+
+// FIN-053/FIN-054 — transações recorrentes (Fase 4). `amount` segue a convenção de
+// `Transaction`: negativo = despesa, positivo = receita — e não pode ser 0, que geraria
+// lançamentos sem efeito nenhum a cada ocorrência.
+const RECURRENCE_FREQUENCIES = ['weekly', 'monthly', 'yearly'];
+const recurringSchema = z.object({
+  name: z.string({ error: 'Nome da recorrência é obrigatório.' }).trim().min(1, 'Nome da recorrência é obrigatório.'),
+  category: z.string({ error: 'Categoria é obrigatória.' }).trim().min(1, 'Categoria é obrigatória.'),
+  amount: z.coerce.number().int('Valor deve ser um inteiro em centavos.').refine(v => v !== 0, 'Valor não pode ser zero.'),
+  frequency: z.enum(RECURRENCE_FREQUENCIES, { message: `Frequência deve ser uma de: ${RECURRENCE_FREQUENCIES.join(', ')}.` }),
+  nextOccurrence: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Próxima ocorrência deve estar no formato YYYY-MM-DD.'),
+  accountId: accountIdField,
+  active: z.boolean().optional(),
+});
+const recurringUpdateSchema = recurringSchema.partial();
+
 
 // Middleware de autenticação
 const authenticateToken = (req, res, next) => {
@@ -604,9 +702,170 @@ app.put('/api/budgets/:id', authenticateToken, async (req, res) => {
 app.delete('/api/budgets/:id', authenticateToken, async (req, res) => {
   try {
     await prisma.budget.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+
     res.json({ success: true });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao excluir orçamento.');
+  }
+});
+
+// --- GOALS (FIN-050) ---
+app.get('/api/goals', authenticateToken, async (req, res) => {
+  try {
+    const goals = await prisma.goal.findMany({ where: { userId: req.user.userId } });
+    res.json(goals);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar metas.');
+  }
+});
+
+app.post('/api/goals', authenticateToken, async (req, res) => {
+  const validation = validateBody(goalSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    // `currentAmount` é opcional no schema (para servir ao update parcial); no create, uma
+    // meta nova sempre começa em 0 quando não informado.
+    const data = { currentAmount: 0, ...validation.data, userId: req.user.userId };
+    const goal = await prisma.goal.create({ data });
+    res.json(goal);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao criar meta.');
+  }
+});
+
+app.put('/api/goals/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(goalUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const goal = await prisma.goal.updateMany({
+      where: { id: req.params.id, userId: req.user.userId },
+      data: validation.data,
+    });
+    res.json({ success: true, changes: goal.count });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao atualizar meta.');
+  }
+});
+
+app.delete('/api/goals/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.goal.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir meta.');
+  }
+});
+
+// --- RECURRING TRANSACTIONS (FIN-054) ---
+app.get('/api/recurring-transactions', authenticateToken, async (req, res) => {
+  try {
+    const recurring = await prisma.recurringTransaction.findMany({ where: { userId: req.user.userId } });
+    res.json(recurring);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar recorrências.');
+  }
+});
+
+app.post('/api/recurring-transactions', authenticateToken, async (req, res) => {
+  const validation = validateBody(recurringSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const data = { active: true, ...validation.data, userId: req.user.userId };
+    const recurring = await prisma.recurringTransaction.create({ data });
+    res.json(recurring);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao criar recorrência.');
+  }
+});
+
+/*
+ * Lança as ocorrências já vencidas de todas as recorrências ativas do usuário, criando as
+ * `Transaction` reais e avançando `nextOccurrence`. Declarado ANTES das rotas com `:id`
+ * para que "process" nunca seja capturado como um id.
+ *
+ * Idempotente por construção: cada ocorrência tem um `importHash` determinístico
+ * (`recurringOccurrenceHash`) protegido pela constraint única `(userId, importHash)`, e a
+ * criação das transações + o avanço do ponteiro acontecem na mesma transação de banco —
+ * então nunca fica uma transação lançada sem o ponteiro correspondente ter avançado, nem o
+ * contrário.
+ */
+app.post('/api/recurring-transactions/process', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    const today = todayISO();
+    // Comparação de data em string ISO (YYYY-MM-DD) é lexicográfica = cronológica, mesma
+    // convenção usada em `isDebtOverdue` no frontend.
+    const dueRecurrences = await prisma.recurringTransaction.findMany({
+      where: { userId, active: true, nextOccurrence: { lte: today } },
+    });
+
+    let processed = 0;
+    for (const rec of dueRecurrences) {
+      const ops = [];
+      let occurrence = rec.nextOccurrence;
+
+      while (occurrence <= today && ops.length < MAX_OCCURRENCES_PER_RUN) {
+        const importHash = recurringOccurrenceHash(userId, rec.id, occurrence);
+        ops.push(prisma.transaction.upsert({
+          where: { userId_importHash: { userId, importHash } },
+          create: {
+            userId,
+            accountId: rec.accountId,
+            name: rec.name,
+            category: rec.category,
+            date: occurrence,
+            amount: rec.amount,
+            importHash,
+          },
+          // Ocorrência já lançada por uma execução anterior/concorrente: nada a fazer.
+          update: {},
+        }));
+
+        const next = advanceOccurrence(occurrence, rec.frequency);
+        // Proteção contra dado inesperado (frequência desconhecida, data malformada): sem
+        // avanço, o laço giraria para sempre sobre a mesma ocorrência.
+        if (next <= occurrence) break;
+        occurrence = next;
+      }
+
+      if (ops.length === 0) continue;
+      ops.push(prisma.recurringTransaction.update({
+        where: { id: rec.id },
+        data: { nextOccurrence: occurrence },
+      }));
+      await prisma.$transaction(ops);
+      processed += ops.length - 1; // desconta o update do ponteiro
+    }
+
+    // `processed` conta ocorrências processadas nesta execução. Numa reexecução rara sobre
+    // as mesmas ocorrências (upsert no-op), o número reflete o que foi reprocessado, não
+    // transações novas — o frontend usa apenas "> 0" para decidir se recarrega a lista.
+    res.json({ success: true, processed });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao processar recorrências.');
+  }
+});
+
+app.put('/api/recurring-transactions/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(recurringUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const recurring = await prisma.recurringTransaction.updateMany({
+      where: { id: req.params.id, userId: req.user.userId },
+      data: validation.data,
+    });
+    res.json({ success: true, changes: recurring.count });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao atualizar recorrência.');
+  }
+});
+
+app.delete('/api/recurring-transactions/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.recurringTransaction.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir recorrência.');
   }
 });
 

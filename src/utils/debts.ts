@@ -1,3 +1,4 @@
+import { advanceMonth } from './dates';
 import type { Debt } from '../types';
 
 /**
@@ -38,38 +39,6 @@ export function isDebtPaid(debt: Pick<Debt, 'paidInstallments' | 'totalInstallme
  */
 export function isDebtOverdue(debt: Pick<Debt, 'nextDueDate' | 'paidInstallments' | 'totalInstallments' | 'paidAmount' | 'totalAmount'>): boolean {
   return !isDebtPaid(debt) && debt.nextDueDate < todayISO();
-}
-
-function isLeapYear(year: number): boolean {
-  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-}
-
-function daysInMonth(year: number, month: number): number {
-  const days = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return days[month - 1];
-}
-
-/**
- * Avança uma data ISO (YYYY-MM-DD) em exatamente um mês, ajustando o ano quando cruza
- * dezembro→janeiro. O dia é "clampado" para o último dia válido do mês de destino quando
- * necessário (ex.: 31/jan → 28 ou 29/fev, nunca "31/fev", que não é uma data válida) —
- * sem isso, uma dívida com vencimento no dia 31 quebraria ao avançar para um mês mais curto.
- */
-export function advanceMonth(dateString: string): string {
-  const parts = dateString.split('-');
-  if (parts.length !== 3) return dateString;
-  let year = parseInt(parts[0]);
-  let month = parseInt(parts[1]);
-  const day = parseInt(parts[2]);
-
-  month += 1;
-  if (month > 12) {
-    month = 1;
-    year += 1;
-  }
-
-  const clampedDay = Math.min(day, daysInMonth(year, month));
-  return `${year}-${String(month).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
 }
 
 /**

@@ -63,3 +63,30 @@ export interface Budget {
   monthlyLimit: number;
   createdAt: string;
 }
+
+// FIN-049 — meta financeira (Fase 4). `currentAmount` é o quanto já foi acumulado; o
+// progresso exibido na tela é derivado dele com `targetAmount` (ver GoalsManager.tsx).
+export interface Goal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  targetDate: string;   // ISO date
+  createdAt: string;
+}
+
+// FIN-053 — transação recorrente (Fase 4). A frequência vem de `utils/dates.ts`, onde
+// mora a lógica de avanço de ocorrência, para não ter duas listas de frequências.
+export type { RecurrenceFrequency } from './utils/dates';
+
+export interface RecurringTransaction {
+  id: string;
+  name: string;
+  category: string;
+  amount: number;        // negativo = despesa, positivo = receita (igual a Transaction)
+  frequency: import('./utils/dates').RecurrenceFrequency;
+  nextOccurrence: string; // ISO date — ponteiro de até onde já foi lançado
+  active: boolean;
+  accountId?: string;
+  createdAt: string;
+}

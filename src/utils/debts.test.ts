@@ -1,6 +1,6 @@
 // FIN-034 (parte 1/2) — regras de negócio de dívidas: vencimento, avanço de parcela.
 import { describe, it, expect } from 'vitest';
-import { isDebtPaid, isDebtOverdue, advanceMonth, computeNextInstallment } from './debts';
+import { isDebtPaid, isDebtOverdue, computeNextInstallment } from './debts';
 import type { Debt } from '../types';
 
 function makeDebt(overrides: Partial<Debt> = {}): Debt {
@@ -41,21 +41,6 @@ describe('isDebtOverdue', () => {
     const today = new Date();
     const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     expect(isDebtOverdue(makeDebt({ nextDueDate: iso, paidInstallments: 0, totalInstallments: 10 }))).toBe(false);
-  });
-});
-
-describe('advanceMonth', () => {
-  it('avança um mês normalmente', () => {
-    expect(advanceMonth('2026-03-15')).toBe('2026-04-15');
-  });
-  it('vira o ano ao passar de dezembro para janeiro', () => {
-    expect(advanceMonth('2026-12-20')).toBe('2027-01-20');
-  });
-  it('dia 31/jan clampa para o último dia de fevereiro em ano não-bissexto', () => {
-    expect(advanceMonth('2026-01-31')).toBe('2026-02-28');
-  });
-  it('dia 31/jan clampa para 29/fev em ano bissexto', () => {
-    expect(advanceMonth('2024-01-31')).toBe('2024-02-29');
   });
 });
 

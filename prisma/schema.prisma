@@ -17,6 +17,8 @@ model User {
   transactions Transaction[]
   debts        Debt[]
   budgets      Budget[]
+  goals        Goal[]
+  recurring    RecurringTransaction[]
 }
 
 model Account {
@@ -37,6 +39,7 @@ model Account {
   user        User     @relation(fields: [userId], references: [id])
   transactions Transaction[]
   debts       Debt[]
+  recurring   RecurringTransaction[]
 
   // Toda listagem filtra por userId; o sync Pluggy busca por (userId, pluggyId) — ver FIN-019.
   @@index([userId])
@@ -112,6 +115,45 @@ model Budget {
 
   @@index([userId]) // ver FIN-019
   @@unique([userId, category])
+}
+
+// FIN-049 — meta financeira (Fase 4): quanto o usuário quer juntar até uma data.
+// `currentAmount` é atualizado manualmente pelo usuário (aportes), não derivado de
+// transações — vincular meta a conta/transação específica ficou fora do escopo desta fase.
+model Goal {
+  id            String   @id @default(uuid())
+  userId        String
+  name          String
+  targetAmount  Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
+  currentAmount Int      @default(0) // centavos já acumulados
+  targetDate    String   // ISO YYYY-MM-DD, mesma convenção de Debt.nextDueDate
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@index([userId]) // ver FIN-019
+}
+
+// FIN-053 — transação recorrente (Fase 4): modela a recorrência em si, não as transações
+// geradas. `nextOccurrence` é o ponteiro de até onde já foi lançado; o endpoint de
+// processamento (FIN-054) cria as `Transaction` reais cujas ocorrências já passaram e
+// avança esse ponteiro.
+model RecurringTransaction {
+  id             String   @id @default(uuid())
+  userId         String
+  accountId      String?
+  name           String
+  category       String
+  amount         Int      // centavos; negativo = despesa, positivo = receita (igual a Transaction)
+  frequency      String   // 'weekly' | 'monthly' | 'yearly' — validado por Zod em server.js
+  nextOccurrence String   // ISO YYYY-MM-DD
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  user           User     @relation(fields: [userId], references: [id])
+  account        Account? @relation(fields: [accountId], references: [id])
+
+  @@index([userId]) // ver FIN-019
 }
 
 model DebtItem {
