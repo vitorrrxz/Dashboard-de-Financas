@@ -222,6 +222,236 @@ function isCreditCardBillPayment(pluggyTx) {
   return CREDIT_CARD_PAYMENT_MARKERS.some(marker => haystack.includes(marker));
 }
 
+/* -------------------------------------------------------------------------- */
+/*                        NOTIFICAÇÕES (FIN-065 a FIN-069)                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Lê um parâmetro numérico do ambiente, caindo no padrão quando ausente ou inválido — um
+ * valor malformado no `.env` não deve derrubar o servidor nem virar `NaN` silencioso no
+ * cálculo das notificações.
+ */
+function readNumberEnv(name, fallback, { min = -Infinity, max = Infinity, integer = false } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) {
+    console.warn(`⚠️  ${name}="${raw}" inválido — usando o padrão ${fallback}.`);
+    return fallback;
+  }
+  return value;
+}
+
+// Parâmetros das notificações automáticas, configuráveis por ambiente (ver .env.example).
+const NOTIFICATION_SETTINGS = {
+  // Com quantos dias de antecedência avisar sobre uma parcela ou fatura (FIN-067).
+  dueSoonDays: readNumberEnv('NOTIFY_DUE_SOON_DAYS', 7, { min: 0, max: 60, integer: true }),
+  // Quantos meses anteriores formam a média de gasto por categoria (FIN-069).
+  unusualSpendingMonths: readNumberEnv('UNUSUAL_SPENDING_MONTHS', 3, { min: 2, max: 12, integer: true }),
+  // Quanto acima da média (0.5 = 50%) o gasto do mês precisa ficar para gerar alerta.
+  unusualSpendingThreshold: readNumberEnv('UNUSUAL_SPENDING_THRESHOLD', 0.5, { min: 0.1, max: 10 }),
+  // Diferença mínima, em centavos, entre o gasto do mês e a média — sem ela, uma categoria de
+  // valor baixo geraria alerta por variação irrelevante (R$ 12 → R$ 20 é +66%, mas não importa).
+  unusualSpendingMinCents: readNumberEnv('UNUSUAL_SPENDING_MIN_CENTS', 5000, { min: 0, integer: true }),
+};
+
+// Mínimo de meses anteriores com dados para existir uma "média" a comparar (FIN-069). Com um
+// mês só, qualquer variação normal de um mês para o outro viraria alerta.
+const MIN_BASELINE_MONTHS = 2;
+
+/** Soma `days` dias a uma data ISO, com componentes locais (sem parse UTC de string). */
+function addDaysISO(dateString, days) {
+  const [year, month, day] = dateString.split('-').map(Number);
+  const d = new Date(year, month - 1, day + days);
+  return formatISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+/** Desloca uma chave de mês (YYYY-MM) em `delta` meses — espelho de `shiftMonth` em src/utils/dates.ts. */
+function shiftMonthKey(month, delta) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const absolute = year * 12 + (monthNumber - 1) + delta;
+  const newYear = Math.floor(absolute / 12);
+  return `${newYear}-${String(absolute - newYear * 12 + 1).padStart(2, '0')}`;
+}
+
+/** Nome do mês com inicial maiúscula ("Setembro"), montado com componentes numéricos. */
+function monthLabelPtBR(month) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const name = new Date(year, monthNumber - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/** "R$ 1.234,56" a partir de centavos — mesmo formato de `formatBRL` no frontend. */
+function formatCentsBRL(cents) {
+  const value = (Math.abs(cents) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `R$ ${value}`;
+}
+
+/** "15/09" a partir de uma data ISO, sem passar por `Date` (imune a fuso). */
+function formatDayMonth(dateString) {
+  const [, month, day] = dateString.split('-');
+  return `${day}/${month}`;
+}
+
+/** Mesma regra de `isDebtPaid` em src/utils/debts.ts: quitada pelo valor OU pelas parcelas. */
+function isDebtPaid(debt) {
+  return debt.paidAmount >= debt.totalAmount || debt.paidInstallments >= debt.totalInstallments;
+}
+
+/**
+ * Valor da próxima parcela de uma dívida, em centavos: a parcela cheia limitada ao saldo, e
+ * a última fechando o saldo exato — mesma regra de `remainingDebtSchedule` no frontend.
+ */
+function nextInstallmentCents(debt) {
+  const balance = Math.max(0, debt.totalAmount - debt.paidAmount);
+  const isLast = debt.totalInstallments - debt.paidInstallments <= 1;
+  return isLast ? balance : Math.min(debt.monthlyPayment, balance);
+}
+
+/**
+ * Próximo vencimento da fatura de um cartão, a partir do dia de vencimento cadastrado: o
+ * deste mês se ainda não passou (hoje conta), senão o do mês seguinte. O dia é "clampado" ao
+ * tamanho do mês — vencimento no dia 31 cai em 30/set e em 28 ou 29/fev.
+ */
+function nextBillDueDate(dueDay, today) {
+  const [year, month] = today.split('-').map(Number);
+  const thisMonth = formatISODate(year, month, Math.min(dueDay, daysInMonth(year, month)));
+  if (thisMonth >= today) return thisMonth;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return formatISODate(nextYear, nextMonth, Math.min(dueDay, daysInMonth(nextYear, nextMonth)));
+}
+
+/**
+ * Dia de vencimento (1–31) de uma fatura da Pluggy, ou `undefined` se a data não vier ou for
+ * inválida. As datas de fatura chegam como meia-noite UTC: ler o dia em UTC evita que o fuso
+ * do Brasil (UTC-3) o desloque para o dia anterior.
+ */
+function pluggyBillDueDay(bill) {
+  if (!bill?.dueDate) return undefined;
+  const date = new Date(bill.dueDate);
+  return Number.isNaN(date.getTime()) ? undefined : date.getUTCDate();
+}
+
+/**
+ * Notificações de vencimento (FIN-067): parcelas de dívida que vencem nos próximos
+ * `dueSoonDays` dias, parcelas já vencidas e faturas de cartão prestes a vencer.
+ *
+ * Cada candidata carrega uma `dedupeKey` que identifica a OCORRÊNCIA — a dívida e a data do
+ * vencimento, ou o cartão e a data da fatura. Quando a parcela é paga, `nextDueDate` avança e
+ * a próxima ocorrência ganha uma chave nova; o aviso da anterior não é recriado. As mensagens
+ * usam datas absolutas ("vence em 15/09"), nunca relativas ("vence amanhã"), porque ficam
+ * gravadas e seriam lidas em outro dia.
+ *
+ * Função pura (valores em centavos, datas ISO), exportada para os testes.
+ */
+function buildDueNotifications(debts, accounts, today, dueSoonDays) {
+  const limit = addDaysISO(today, dueSoonDays);
+  const candidates = [];
+
+  for (const debt of debts) {
+    if (isDebtPaid(debt)) continue;
+    const due = debt.nextDueDate;
+    const installment = `parcela ${debt.paidInstallments + 1}/${debt.totalInstallments}`;
+    const amount = formatCentsBRL(nextInstallmentCents(debt));
+    if (due < today) {
+      candidates.push({
+        type: 'debt_overdue',
+        dedupeKey: `debt_overdue:${debt.id}:${due}`,
+        title: debt.name,
+        message: `A ${installment} (${amount}) venceu em ${formatDayMonth(due)} e ainda não foi paga.`,
+      });
+    } else if (due <= limit) {
+      candidates.push({
+        type: 'debt_due',
+        dedupeKey: `debt_due:${debt.id}:${due}`,
+        title: debt.name,
+        message: `A ${installment} (${amount}) vence em ${formatDayMonth(due)}.`,
+      });
+    }
+  }
+
+  for (const account of accounts) {
+    if (account.type !== 'credit' || !(account.pendingBill > 0)) continue;
+    if (!Number.isInteger(account.dueDay) || account.dueDay < 1 || account.dueDay > 31) continue;
+    const due = nextBillDueDate(account.dueDay, today);
+    if (due > limit) continue;
+    candidates.push({
+      type: 'bill_due',
+      dedupeKey: `bill_due:${account.id}:${due}`,
+      title: `Fatura ${account.name}`,
+      message: `A fatura de ${formatCentsBRL(account.pendingBill)} vence em ${formatDayMonth(due)}.`,
+    });
+  }
+
+  return candidates;
+}
+
+/**
+ * Alertas de gasto incomum (FIN-069): compara, por categoria, o gasto do mês corrente com a
+ * média mensal dos meses anteriores e sinaliza as categorias que passaram do limiar.
+ *
+ * Decisões que evitam falso alarme:
+ * - Só entra na média um mês anterior que esteja inteiro dentro do histórico do usuário
+ *   (começa depois da primeira transação conhecida) E que tenha alguma transação. Um mês sem
+ *   dado — antes de o usuário começar, fora da janela sincronizada, ou uma lacuna de
+ *   importação — não é um mês de gasto zero; contá-lo derrubaria a média e acusaria tudo de
+ *   incomum. Com menos de `MIN_BASELINE_MONTHS` meses assim, nada é gerado.
+ * - Dentro desses meses, uma categoria sem gasto conta como zero — isso sim é informação.
+ * - O mês corrente conta só até hoje: parcelas já lançadas para o fim do mês ainda não
+ *   aconteceram. Comparar um mês parcial com meses cheios só subestima o atual, então o que
+ *   passa do limiar é desvio real.
+ * - Além do percentual, a diferença absoluta precisa chegar a `minCents`.
+ *
+ * `transactions` em centavos (negativo = despesa). A `dedupeKey` inclui o mês: no máximo um
+ * alerta por categoria por mês, atualizado (não duplicado) conforme o gasto cresce.
+ */
+function detectUnusualSpending(transactions, today, { months, threshold, minCents, historyStart } = {}) {
+  if (transactions.length === 0) return [];
+  const currentMonth = today.slice(0, 7);
+  const start = historyStart ?? transactions.reduce((min, t) => (t.date < min ? t.date : min), transactions[0].date);
+
+  const monthsWithData = new Set(transactions.map(t => t.date.slice(0, 7)));
+  const baselineMonths = Array.from({ length: months }, (_, i) => shiftMonthKey(currentMonth, -(i + 1)))
+    .filter(month => `${month}-01` >= start && monthsWithData.has(month));
+  if (baselineMonths.length < MIN_BASELINE_MONTHS) return [];
+
+  // mês → (categoria → centavos gastos)
+  const spendByMonth = new Map();
+  for (const t of transactions) {
+    if (t.amount >= 0) continue;
+    const month = t.date.slice(0, 7);
+    const counts = month === currentMonth ? t.date <= today : baselineMonths.includes(month);
+    if (!counts) continue;
+    const byCategory = spendByMonth.get(month) ?? new Map();
+    byCategory.set(t.category, (byCategory.get(t.category) ?? 0) - t.amount);
+    spendByMonth.set(month, byCategory);
+  }
+
+  const current = spendByMonth.get(currentMonth);
+  if (!current) return [];
+
+  const label = monthLabelPtBR(currentMonth);
+  const candidates = [];
+  for (const [category, spent] of current) {
+    const total = baselineMonths.reduce((sum, month) => sum + (spendByMonth.get(month)?.get(category) ?? 0), 0);
+    const average = total / baselineMonths.length;
+    if (spent - average < minCents) continue;
+    if (spent < average * (1 + threshold)) continue;
+
+    const base = `${label}: ${formatCentsBRL(spent)} em ${category}`;
+    candidates.push({
+      type: 'unusual_spending',
+      dedupeKey: `unusual_spending:${currentMonth}:${category}`,
+      title: `Gasto acima do normal em ${category}`,
+      message: average > 0
+        ? `${base}, ${Math.round((spent / average - 1) * 100)}% acima da média de ${formatCentsBRL(Math.round(average))} dos ${baselineMonths.length} meses anteriores.`
+        : `${base}, sem gasto nessa categoria nos ${baselineMonths.length} meses anteriores.`,
+    });
+  }
+  return candidates.sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey));
+}
+
 // Loga o erro completo no servidor e retorna uma mensagem genérica ao cliente — nunca
 // `error.message`/detalhes internos do Prisma/Node, que podem vazar schema, nomes de
 // coluna etc. (ver FIN-011 em docs/BACKLOG_DETAIL.md).
@@ -905,6 +1135,128 @@ app.delete('/api/recurring-transactions/:id', authenticateToken, async (req, res
   }
 });
 
+// --- NOTIFICATIONS (FIN-065 a FIN-069) ---
+
+// Quantas notificações a listagem devolve. A central mostra as mais recentes; o total de não
+// lidas vem à parte (`unreadCount`), então o limite nunca esconde nada do contador do sino.
+const NOTIFICATIONS_PAGE_SIZE = 50;
+
+// Tipos cujo aviso deixa de valer quando a ocorrência sai de cena: a parcela foi paga, ou o
+// "vence em" virou "venceu" (outro aviso, com outra chave). Faturas ficam de fora — não há
+// como saber se foram pagas, então o aviso só sai do contador quando o usuário o lê — e os
+// alertas de gasto incomum também, porque são informativos e valem para o mês inteiro.
+const RECONCILED_NOTIFICATION_TYPES = ['debt_due', 'debt_overdue'];
+
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    const [notifications, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where: { userId },
+        orderBy: [{ read: 'asc' }, { createdAt: 'desc' }],
+        take: NOTIFICATIONS_PAGE_SIZE,
+      }),
+      prisma.notification.count({ where: { userId, read: false } }),
+    ]);
+    res.json({ notifications, unreadCount });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar notificações.');
+  }
+});
+
+/*
+ * Gera as notificações automáticas — vencimentos (FIN-067) e gasto incomum (FIN-069) — a
+ * partir do estado atual das dívidas, cartões e transações. O frontend chama ao carregar o
+ * app e sempre que esses dados mudam. Declarado antes das rotas com `:id`, pelo mesmo motivo
+ * de `/recurring-transactions/process`.
+ *
+ * Idempotente no banco: cada aviso tem uma `dedupeKey` protegida pela constraint única
+ * `(userId, dedupeKey)`, e o upsert atualiza só título e mensagem — nunca `read`, para que um
+ * aviso já lido não volte a acender o sino. Tudo numa transação, junto da reconciliação.
+ */
+app.post('/api/notifications/generate', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    const today = todayISO();
+    const settings = NOTIFICATION_SETTINGS;
+    const baselineStart = `${shiftMonthKey(today.slice(0, 7), -settings.unusualSpendingMonths)}-01`;
+
+    const [debts, creditAccounts, recentTransactions, firstTransaction] = await Promise.all([
+      prisma.debt.findMany({ where: { userId } }),
+      prisma.account.findMany({ where: { userId, type: 'credit' } }),
+      prisma.transaction.findMany({
+        where: { userId, date: { gte: baselineStart, lte: today } },
+        select: { date: true, amount: true, category: true },
+      }),
+      // O início do histórico decide quais meses da média estão completos — ver
+      // `detectUnusualSpending`. Precisa ser o de TODAS as transações, não só as da janela.
+      prisma.transaction.findFirst({ where: { userId }, orderBy: { date: 'asc' }, select: { date: true } }),
+    ]);
+
+    const candidates = [
+      ...buildDueNotifications(debts, creditAccounts, today, settings.dueSoonDays),
+      ...detectUnusualSpending(recentTransactions, today, {
+        months: settings.unusualSpendingMonths,
+        threshold: settings.unusualSpendingThreshold,
+        minCents: settings.unusualSpendingMinCents,
+        historyStart: firstTransaction?.date,
+      }),
+    ];
+
+    await prisma.$transaction([
+      ...candidates.map(candidate => prisma.notification.upsert({
+        where: { userId_dedupeKey: { userId, dedupeKey: candidate.dedupeKey } },
+        create: { userId, ...candidate },
+        update: { title: candidate.title, message: candidate.message },
+      })),
+      // Reconciliação não destrutiva: marca como lidos (nunca apaga) os avisos de dívida cuja
+      // ocorrência não está mais entre as candidatas — parcela paga, dívida quitada ou
+      // excluída, ou "vence em" que virou "venceu". Sem isso o sino continuaria aceso por algo
+      // que já foi resolvido.
+      prisma.notification.updateMany({
+        where: {
+          userId,
+          read: false,
+          type: { in: RECONCILED_NOTIFICATION_TYPES },
+          dedupeKey: { notIn: candidates.map(c => c.dedupeKey) },
+        },
+        data: { read: true },
+      }),
+    ]);
+
+    res.json({ success: true, active: candidates.length });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao gerar notificações.');
+  }
+});
+
+app.put('/api/notifications/read-all', authenticateToken, async (req, res) => {
+  try {
+    const result = await prisma.notification.updateMany({
+      where: { userId: req.user.userId, read: false },
+      data: { read: true },
+    });
+    res.json({ success: true, changes: result.count });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao marcar notificações como lidas.');
+  }
+});
+
+app.put('/api/notifications/:id/read', authenticateToken, async (req, res) => {
+  try {
+    // `userId` no filtro: a notificação de outro usuário simplesmente não é encontrada, e a
+    // resposta é a mesma de um id inexistente — não revela que o id existe (ver FIN-032).
+    const result = await prisma.notification.updateMany({
+      where: { id: req.params.id, userId: req.user.userId },
+      data: { read: true },
+    });
+    if (result.count === 0) return res.status(404).json({ error: 'Notificação não encontrada.' });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao marcar notificação como lida.');
+  }
+});
+
 /* -------------------------------------------------------------------------- */
 /*                           PLUGGY OPEN FINANCE                               */
 /* -------------------------------------------------------------------------- */
@@ -1014,9 +1366,13 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               const dateB = new Date(b.billClosingDate ?? b.dueDate).getTime();
               return dateB - dateA;
             })[0];
+            // FIN-067: o dia de vencimento vem da própria fatura. Sem ele, o aviso de fatura a
+            // vencer nunca dispararia para um cartão conectado via Pluggy — o cadastro manual de
+            // `dueDay` era o único caminho, e a sincronização não o preenchia.
+            const dueDay = pluggyBillDueDay(currentBill);
             await prisma.account.updateMany({
               where: { id: localAccount.id, userId },
-              data: { pendingBill: toCents(currentBill.totalAmount) },
+              data: { pendingBill: toCents(currentBill.totalAmount), ...(dueDay ? { dueDay } : {}) },
             });
           }
         } catch (billError) {
@@ -1147,4 +1503,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // `prisma` também exportado para que os testes possam chamar `$disconnect()` no
 // `afterAll` — sem isso, better-sqlite3 mantém o arquivo aberto e a limpeza do banco de
 // teste (`unlink`) falha com `EBUSY` no Windows (ver FIN-031).
-export { app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment };
+export {
+  app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment,
+  nextBillDueDate, pluggyBillDueDay, buildDueNotifications, detectUnusualSpending,
+};

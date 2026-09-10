@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
-  Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
+  Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
   LogOut, Edit2, X, Menu, PiggyBank, Target, Repeat, BarChart3, Download, FileText
 } from 'lucide-react';
 import {
@@ -17,6 +17,7 @@ import { RecurringManager } from './components/RecurringManager';
 import { ReportsView } from './components/ReportsView';
 import { InstallmentsPanel } from './components/InstallmentsPanel';
 import { MonthNavigator, MonthTotal } from './components/MonthNavigator';
+import { NotificationBell } from './components/NotificationBell';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { toCents, toReais } from './utils/money';
@@ -33,9 +34,26 @@ import {
 } from './utils/transactions';
 import { isInstallmentTransaction } from './utils/installments';
 import { CATEGORY_COLORS } from './utils/categories';
-import type { Account, Budget, Debt, DebtCategory, Goal, RecurringTransaction, Transaction, PaymentType } from './types';
+import type {
+  Account, AppNotification, Budget, Debt, DebtCategory, Goal, NotificationType,
+  RecurringTransaction, Transaction, PaymentType,
+} from './types';
 
 type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'recurring' | 'reports';
+
+// FIN-066: aba para onde o clique numa notificação leva, por tipo.
+const NOTIFICATION_TAB: Record<NotificationType, Tab> = {
+  debt_due: 'debts',
+  debt_overdue: 'debts',
+  bill_due: 'accounts',
+  unusual_spending: 'transactions',
+};
+
+/** Resposta de `GET /api/notifications` (FIN-065). */
+interface NotificationsResponse {
+  notifications: AppNotification[];
+  unreadCount: number;
+}
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -138,7 +156,8 @@ export default function App() {
   const [dashboardAccountId, setDashboardAccountId] = useState<string | null>(null);
   const [chartPeriod, setChartPeriod] = useState<'30d' | 'all'>('30d');
   const [mobileNavOpen, setMobileNavOpen] = useState(false); // FIN-028
-  const [showNotifications, setShowNotifications] = useState(false); // FIN-039
+  const [notifications, setNotifications] = useState<AppNotification[]>([]); // FIN-066
+  const [unreadCount, setUnreadCount] = useState(0);
   const [exportingPDF, setExportingPDF] = useState(false); // FIN-061
   
   const [transactions, setTxs]        = useState<Transaction[]>([]);
@@ -165,6 +184,8 @@ export default function App() {
     setToken(null);
     setUser(null);
     setAccounts([]);
+    setNotifications([]);
+    setUnreadCount(0);
     setTxs([]);
     setDebts([]);
     setBudgets([]);
@@ -208,6 +229,29 @@ export default function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // FIN-066/FIN-067: gera as notificações automáticas e recarrega a central na carga inicial
+  // e sempre que os dados que as originam mudam (pagamento de parcela, importação, edição de
+  // cartão). A geração é idempotente no servidor, então rodar a cada mudança não duplica
+  // nada; `cancelled` descarta a resposta de uma rodada que já foi superada por outra.
+  // Uma falha aqui não derruba a sessão — o sino só fica desatualizado.
+  useEffect(() => {
+    if (!token || loading) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await apiFetch('/api/notifications/generate', { method: 'POST', token });
+        const data = await apiFetch<Partial<NotificationsResponse> | null>('/api/notifications', { token });
+        if (cancelled) return;
+        // Normaliza a resposta: um corpo inesperado não pode quebrar o header inteiro.
+        setNotifications(Array.isArray(data?.notifications) ? data.notifications : []);
+        setUnreadCount(typeof data?.unreadCount === 'number' ? data.unreadCount : 0);
+      } catch (err) {
+        console.error('Falha ao atualizar notificações:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, loading, debts, accounts, transactions]);
 
   const handleLogin = (newToken: string, newUser: { id: string; name: string; email: string }) => {
     localStorage.setItem('finflow_token', newToken);
@@ -556,6 +600,38 @@ export default function App() {
     }
   };
 
+  /**
+   * FIN-066: abre a aba relacionada à notificação e a marca como lida. A marcação é otimista
+   * — o sino responde na hora — e é desfeita se a API falhar, para a tela não mentir.
+   */
+  const openNotification = async (notification: AppNotification) => {
+    setActiveTab(NOTIFICATION_TAB[notification.type] ?? 'dashboard');
+    if (notification.read) return;
+    setNotifications(list => list.map(n => (n.id === notification.id ? { ...n, read: true } : n)));
+    setUnreadCount(count => Math.max(0, count - 1));
+    try {
+      await fetchAPI(`/api/notifications/${notification.id}/read`, 'PUT');
+    } catch (err) {
+      console.error('Falha ao marcar notificação como lida:', err);
+      setNotifications(list => list.map(n => (n.id === notification.id ? { ...n, read: false } : n)));
+      setUnreadCount(count => count + 1);
+    }
+  };
+
+  /** FIN-066: marca todas como lidas, também de forma otimista e reversível. */
+  const markAllNotificationsRead = async () => {
+    const previous = { notifications, unreadCount };
+    setNotifications(list => list.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
+    try {
+      await fetchAPI('/api/notifications/read-all', 'PUT');
+    } catch (err) {
+      console.error('Falha ao marcar notificações como lidas:', err);
+      setNotifications(previous.notifications);
+      setUnreadCount(previous.unreadCount);
+    }
+  };
+
   const hasAccounts = accounts.length > 0;
   const isEmpty     = transactions.length === 0;
 
@@ -696,35 +772,9 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4 relative">
-            {/* FIN-039: sino agora abre um dropdown real com as dívidas vencidas, em vez
-                de ser puramente decorativo. */}
-            <button onClick={() => setShowNotifications(o => !o)} className="relative p-2 rounded-full hover:bg-white/5 transition-colors">
-              <Bell size={20} className="text-textMuted" />
-              {stats.overdueDebts.length > 0 && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-[#0a0a0f]"/>}
-            </button>
-            {showNotifications && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setShowNotifications(false)} />
-                <div className="absolute right-0 top-full mt-2 w-72 max-w-[90vw] glass-card rounded-2xl p-3 z-40 shadow-2xl">
-                  <p className="text-xs font-semibold text-textMuted uppercase tracking-wide px-2 py-1.5">Notificações</p>
-                  {stats.overdueDebts.length === 0 ? (
-                    <p className="text-sm text-textMuted px-2 py-4 text-center">Nenhuma notificação.</p>
-                  ) : (
-                    <div className="space-y-1 max-h-72 overflow-y-auto">
-                      {stats.overdueDebts.map(d => (
-                        <div key={d.id} className="px-2 py-2 rounded-lg hover:bg-white/5 flex items-center gap-2">
-                          <AlertCircle size={14} className="text-red-400 shrink-0"/>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm text-white truncate">{d.name}</p>
-                            <p className="text-xs text-red-400">Vencida em {formatDateBR(d.nextDueDate)}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+            {/* FIN-066: central de notificações persistidas no servidor (substitui FIN-039). */}
+            <NotificationBell notifications={notifications} unreadCount={unreadCount}
+              onSelect={openNotification} onMarkAllRead={markAllNotificationsRead}/>
           </div>
         </header>
 

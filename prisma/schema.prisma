@@ -19,6 +19,7 @@ model User {
   budgets      Budget[]
   goals        Goal[]
   recurring    RecurringTransaction[]
+  notifications Notification[]
 }
 
 model Account {
@@ -164,4 +165,25 @@ model DebtItem {
   date        String
 
   debt        Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+}
+
+// FIN-065 — notificação da central do sino (Fase 6). `dedupeKey` identifica a ocorrência que
+// gerou o aviso (ex.: a parcela de uma dívida com vencimento em tal data): a constraint única
+// garante, no banco, que rodar a geração várias vezes — a cada carregamento do app — não
+// duplique o aviso da mesma ocorrência. Mesmo padrão de `Transaction.importHash` (FIN-003).
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // 'debt_due' | 'debt_overdue' | 'bill_due' | 'unusual_spending'
+  title     String
+  message   String
+  dedupeKey String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  // A central lista por usuário, com as não lidas primeiro, e conta as não lidas.
+  @@index([userId, read])
+  @@unique([userId, dedupeKey])
 }

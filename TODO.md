@@ -138,11 +138,11 @@
 
 ## Fase 6 - Notificacoes
 
-- [ ] Criar model `Notification` e endpoint de listagem/leitura (FIN-065, depende de FIN-020, FIN-008)
-- [ ] Conectar sino do header a uma central de notificacoes real (FIN-066, depende de FIN-039, FIN-065)
-- [ ] Gerar notificacoes automaticas de vencimento de divida/fatura (FIN-067, depende de FIN-065, FIN-005)
-- [ ] Avaliar notificacoes por e-mail para vencimentos (FIN-068, depende de FIN-067)
-- [ ] Alertas de gasto incomum por categoria (FIN-069, depende de FIN-065)
+- [x] Criar model `Notification` e endpoint de listagem/leitura (FIN-065, depende de FIN-020, FIN-008)
+- [x] Conectar sino do header a uma central de notificacoes real (FIN-066, depende de FIN-039, FIN-065)
+- [x] Gerar notificacoes automaticas de vencimento de divida/fatura (FIN-067, depende de FIN-065, FIN-005)
+- [x] Avaliar notificacoes por e-mail para vencimentos (FIN-068, depende de FIN-067 — avaliacao registrada; implementacao aguarda decisao de produto/infra)
+- [x] Alertas de gasto incomum por categoria (FIN-069, depende de FIN-065)
 
 ## Fase 7 - Investimentos e Multi-moeda
 

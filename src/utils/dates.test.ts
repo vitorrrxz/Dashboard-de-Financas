@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   isLeapYear, daysInMonth, advanceMonth, advanceDays, advanceYear, advanceOccurrence,
-  shiftMonth, dateInMonth, monthsDescending, formatMonthLabel,
+  shiftMonth, dateInMonth, monthsDescending, formatMonthLabel, formatRelativeTime,
 } from './dates';
 
 describe('isLeapYear', () => {
@@ -152,5 +152,38 @@ describe('formatMonthLabel', () => {
   });
   it('devolve a entrada quando ela não é um mês válido', () => {
     expect(formatMonthLabel('nao-e-mes')).toBe('nao-e-mes');
+  });
+});
+
+describe('formatRelativeTime', () => {
+  const now = new Date('2026-09-10T15:00:00Z');
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+  const ago = (ms: number) => new Date(now.getTime() - ms).toISOString();
+
+  it('menos de um minuto é "agora"', () => {
+    expect(formatRelativeTime(ago(30_000), now)).toBe('agora');
+  });
+  it('minutos', () => {
+    expect(formatRelativeTime(ago(5 * MINUTE), now)).toBe('há 5 min');
+  });
+  it('horas', () => {
+    expect(formatRelativeTime(ago(3 * HOUR), now)).toBe('há 3 h');
+  });
+  it('entre 24 e 48 h é "ontem"', () => {
+    expect(formatRelativeTime(ago(30 * HOUR), now)).toBe('ontem');
+  });
+  it('dias', () => {
+    expect(formatRelativeTime(ago(4 * DAY), now)).toBe('há 4 dias');
+  });
+  it('a partir de uma semana mostra a data', () => {
+    expect(formatRelativeTime(ago(10 * DAY), now)).toBe(new Date(now.getTime() - 10 * DAY).toLocaleDateString('pt-BR'));
+  });
+  it('instante no futuro (relógio adiantado) vira "agora", não tempo negativo', () => {
+    expect(formatRelativeTime(new Date(now.getTime() + 5 * MINUTE).toISOString(), now)).toBe('agora');
+  });
+  it('timestamp inválido devolve texto vazio', () => {
+    expect(formatRelativeTime('xyz', now)).toBe('');
   });
 });

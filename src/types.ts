@@ -90,3 +90,16 @@ export interface RecurringTransaction {
   accountId?: string;
   createdAt: string;
 }
+
+// FIN-065/FIN-066 — notificação da central do sino. `AppNotification`, e não `Notification`,
+// para não colidir com a API de notificações do navegador (`window.Notification`).
+export type NotificationType = 'debt_due' | 'debt_overdue' | 'bill_due' | 'unusual_spending';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: string; // ISO date-time
+}
