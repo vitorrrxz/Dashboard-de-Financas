@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut, Edit2, X, Menu, PiggyBank, Target, Repeat
+  LogOut, Edit2, X, Menu, PiggyBank, Target, Repeat, BarChart3, Download, FileText,
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -14,6 +15,7 @@ import { DebtManager } from './components/DebtManager';
 import { BudgetManager } from './components/BudgetManager';
 import { GoalsManager } from './components/GoalsManager';
 import { RecurringManager } from './components/RecurringManager';
+import { ReportsView } from './components/ReportsView';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { toCents, toReais } from './utils/money';
@@ -22,10 +24,17 @@ import { useFinancialStats } from './hooks/useFinancialStats';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
 import { todayISO } from './utils/debts';
+import { formatDateBR } from './utils/dates';
+import { downloadCSV, downloadPDFReport, exportDateSuffix, formatCurrencyCSV } from './utils/export';
+import { TRANSACTION_REPORT_HEADERS, transactionsPeriod } from './utils/reports';
+import {
+  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch,
+  formatMonthLabel, summarizeTransactions,
+} from './utils/transactions';
 import { CATEGORY_COLORS } from './utils/categories';
 import type { Account, Budget, Debt, DebtCategory, Goal, RecurringTransaction, Transaction, PaymentType } from './types';
 
-type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'recurring';
+type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'recurring' | 'reports';
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -122,10 +131,14 @@ export default function App() {
   const [showImport, setShowImport]   = useState(false);
   const [search, setSearch]           = useState('');
   const [txFilter, setTxFilter]       = useState<'all' | 'income' | 'expense'>('all');
+  // Mês de referência da aba Transações (FIN-093). Começa no mês corrente de propósito:
+  // sem recorte, os totais somavam também as parcelas de meses futuros já lançadas no cartão.
+  const [txMonth, setTxMonth]         = useState<string>(() => todayISO().slice(0, 7));
   const [dashboardAccountId, setDashboardAccountId] = useState<string | null>(null);
   const [chartPeriod, setChartPeriod] = useState<'30d' | 'all'>('30d');
   const [mobileNavOpen, setMobileNavOpen] = useState(false); // FIN-028
   const [showNotifications, setShowNotifications] = useState(false); // FIN-039
+  const [exportingPDF, setExportingPDF] = useState(false); // FIN-061
   
   const [transactions, setTxs]        = useState<Transaction[]>([]);
   const [accounts, setAccounts]       = useState<Account[]>([]);
@@ -459,16 +472,86 @@ export default function App() {
     [transactions]
   );
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return transactions
-      .filter(t => {
-        if (txFilter === 'income')  return t.amount > 0;
-        if (txFilter === 'expense') return t.amount < 0;
-        return true;
-      })
-      .filter(t => t.name.toLowerCase().includes(q) || t.category.toLowerCase().includes(q));
-  }, [transactions, search, txFilter]);
+  // FIN-093: meses selecionáveis na aba Transações. O mês corrente entra sempre, mesmo
+  // sem lançamentos, para que o seletor abra num valor que existe na lista.
+  const txMonths = useMemo(() => availableMonths(transactions, currentMonth), [transactions, currentMonth]);
+
+  // Recorte do mês de referência + busca. Os totais saem daqui, e não de `filtered`, para
+  // continuarem mostrando receitas E despesas quando a lista isola apenas um dos dois.
+  const monthScoped = useMemo(
+    () => filterByMonthAndSearch(transactions, txMonth, search),
+    [transactions, txMonth, search]
+  );
+  const monthTotals = useMemo(() => summarizeTransactions(monthScoped), [monthScoped]);
+  const filtered = useMemo(() => filterByKind(monthScoped, txFilter), [monthScoped, txFilter]);
+
+  /**
+   * Navega entre os meses disponíveis. `txMonths` está ordenado do mais recente para o
+   * mais antigo, então avançar um índice significa ir para o mês anterior.
+   */
+  const stepMonth = (offset: 1 | -1) => {
+    const next = txMonths[txMonths.indexOf(txMonth) + offset];
+    if (next) setTxMonth(next);
+  };
+  /** Se há um mês naquela direção — em "Todos os meses" (índice -1) as setas ficam inertes. */
+  const canStepMonth = (offset: 1 | -1) => {
+    const i = txMonths.indexOf(txMonth);
+    return i !== -1 && txMonths[i + offset] !== undefined;
+  };
+
+  /** Sufixo dos arquivos exportados: o mês de referência, ou a data de hoje em "Todos os meses". */
+  const exportSuffix = () => (txMonth === ALL_MONTHS ? exportDateSuffix() : txMonth);
+  /** Mês de referência por extenso, para o cabeçalho do PDF. */
+  const referenceLabel = () => (txMonth === ALL_MONTHS ? 'todos os meses' : formatMonthLabel(txMonth));
+
+  /**
+   * Linhas do relatório de transações, compartilhadas por CSV e PDF (FIN-060/FIN-061) —
+   * a mesma seleção que está na tela, já filtrada por busca e por tipo.
+   */
+  const buildTransactionRows = () => filtered.map(t => [
+    formatDateBR(t.date),
+    t.name,
+    t.category,
+    accounts.find(a => a.id === t.accountId)?.name ?? 'Sem conta',
+    PAYMENT_TYPE_META[t.paymentType ?? 'debit']?.label ?? 'Débito',
+    formatCurrencyCSV(t.amount),
+  ]);
+
+  /** FIN-060: exporta as transações filtradas em CSV. */
+  const exportTransactionsCSV = () => {
+    if (filtered.length === 0) return;
+    downloadCSV(`transacoes_${exportSuffix()}.csv`, TRANSACTION_REPORT_HEADERS, buildTransactionRows());
+  };
+
+  /**
+   * FIN-061: exporta as mesmas transações em PDF. Assíncrono porque `jspdf` é carregado
+   * sob demanda (ver `downloadPDFReport`); o estado de "gerando" evita cliques repetidos
+   * enquanto a biblioteca baixa.
+   */
+  const exportTransactionsPDF = async () => {
+    if (filtered.length === 0 || exportingPDF) return;
+    setExportingPDF(true);
+    try {
+      const periodo = transactionsPeriod(filtered);
+      const receitas = filtered.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+      const despesas = filtered.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+      await downloadPDFReport({
+        title: 'FinFlow — Relatório de Transações',
+        subtitles: [
+          `Mês de referência: ${referenceLabel()}`,
+          `Período: ${formatDateBR(periodo.from)} a ${formatDateBR(periodo.to)}  ·  ${filtered.length} transação(ões)`,
+          `Receitas: ${fmt(receitas)}  ·  Despesas: ${fmt(despesas)}  ·  Saldo: ${fmt(receitas - despesas)}`,
+        ],
+        headers: TRANSACTION_REPORT_HEADERS,
+        rows: buildTransactionRows(),
+        filename: `transacoes_${exportSuffix()}.pdf`,
+      });
+    } catch (e: unknown) {
+      alert('Erro ao gerar o PDF: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setExportingPDF(false);
+    }
+  };
 
   const hasAccounts = accounts.length > 0;
   const isEmpty     = transactions.length === 0;
@@ -532,6 +615,9 @@ export default function App() {
             <NavItem icon={<Repeat size={18}/>} label="Recorrências" active={activeTab==='recurring'} onClick={() => { setActiveTab('recurring'); setMobileNavOpen(false); }}
               badge={recurring.filter(r => r.active).length > 0 ? recurring.filter(r => r.active).length : undefined}
             />
+
+            {/* FIN-062/FIN-063/FIN-064 */}
+            <NavItem icon={<BarChart3 size={18}/>} label="Relatórios" active={activeTab==='reports'} onClick={() => { setActiveTab('reports'); setMobileNavOpen(false); }} />
           </nav>
         </div>
 
@@ -627,7 +713,7 @@ export default function App() {
                           <AlertCircle size={14} className="text-red-400 shrink-0"/>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm text-white truncate">{d.name}</p>
-                            <p className="text-xs text-red-400">Vencida em {new Date(d.nextDueDate + 'T12:00:00').toLocaleDateString('pt-BR')}</p>
+                            <p className="text-xs text-red-400">Vencida em {formatDateBR(d.nextDueDate)}</p>
                           </div>
                         </div>
                       ))}
@@ -884,13 +970,56 @@ export default function App() {
                   <h1 className="text-3xl font-bold text-white mb-1">Transações</h1>
                   <p className="text-textMuted text-sm">{filtered.length} registros</p>
                 </div>
-                <button onClick={() => setShowImport(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-white font-medium transition-colors"
-                  style={{ backgroundColor:'var(--color-primary)' }}>
-                  <Upload size={15}/> Importar
-                </button>
+                <div className="flex gap-2">
+                  {/* FIN-060/FIN-061: exportam exatamente o recorte visível (busca + filtro). */}
+                  <button onClick={exportTransactionsCSV} disabled={filtered.length === 0}
+                    title={filtered.length === 0 ? 'Nenhuma transação para exportar' : 'Exportar as transações filtradas em CSV'}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    <Download size={15}/> CSV
+                  </button>
+                  <button onClick={exportTransactionsPDF} disabled={filtered.length === 0 || exportingPDF}
+                    title={filtered.length === 0 ? 'Nenhuma transação para exportar' : 'Exportar as transações filtradas em PDF'}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    <FileText size={15}/> {exportingPDF ? 'Gerando...' : 'PDF'}
+                  </button>
+                  <button onClick={() => setShowImport(true)}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-white font-medium transition-colors"
+                    style={{ backgroundColor:'var(--color-primary)' }}>
+                    <Upload size={15}/> Importar
+                  </button>
+                </div>
               </div>
 
+              {/* FIN-093: mês de referência + total do recorte. Fica acima dos filtros de
+                  tipo porque delimita o conjunto sobre o qual eles atuam. */}
+              <div className="glass-card rounded-2xl p-4 mb-5 flex flex-wrap items-end justify-between gap-4">
+                <div className="flex items-end gap-2">
+                  <button onClick={() => stepMonth(1)} disabled={!canStepMonth(1)}
+                    aria-label="Mês anterior" title="Mês anterior"
+                    className="p-2.5 rounded-xl border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                    <ChevronLeft size={16}/>
+                  </button>
+                  <div className="min-w-[170px]">
+                    <label htmlFor="tx-month" className="block text-[10px] uppercase tracking-wider text-textMuted mb-1">Mês de referência</label>
+                    <select id="tx-month" value={txMonth} onChange={e => setTxMonth(e.target.value)} className="input-field font-semibold">
+                      <option value={ALL_MONTHS}>Todos os meses</option>
+                      {txMonths.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
+                    </select>
+                  </div>
+                  <button onClick={() => stepMonth(-1)} disabled={!canStepMonth(-1)}
+                    aria-label="Mês seguinte" title="Mês seguinte"
+                    className="p-2.5 rounded-xl border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                    <ChevronRight size={16}/>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-end gap-6">
+                  <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-accent)"/>
+                  <MonthTotal label="Despesas" value={monthTotals.expense} color="#f87171"/>
+                  <MonthTotal label="Valor total" value={monthTotals.balance} signed
+                    color={monthTotals.balance >= 0 ? '#ffffff' : '#f87171'}/>
+                </div>
+              </div>
               <div className="flex gap-2 mb-5">
                 {([
                   { key: 'all',     label: 'Todas',     color: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)',  text: '#a5b4fc' },
@@ -1018,6 +1147,21 @@ export default function App() {
               />
             </>
           )}
+
+          {/* ══════════ REPORTS TAB (FIN-062/FIN-063/FIN-064) ══════════ */}
+          {activeTab === 'reports' && (
+            <>
+              <div className="mb-6">
+                <h1 className="text-3xl font-bold text-white mb-1">Relatórios</h1>
+                <p className="text-textMuted text-sm">Patrimônio líquido e comparativos de receitas e despesas</p>
+              </div>
+              <ReportsView
+                transactions={transactions}
+                accounts={accounts}
+                debts={debts}
+              />
+            </>
+          )}
         </div>
       </main>
 
@@ -1045,6 +1189,23 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { titl
   );
 }
 
+/**
+ * Um dos valores exibidos ao lado do mês de referência (FIN-093).
+ *
+ * Receitas e despesas são sempre mostradas em módulo — a direção está no rótulo. Já o
+ * "valor total" é o saldo do recorte e pode ser negativo, então ele passa `signed` para
+ * receber o sinal explicitamente.
+ */
+function MonthTotal({ label, value, color, signed }: { label: string; value: number; color: string; signed?: boolean }) {
+  return (
+    <div className="text-right">
+      <p className="text-[10px] uppercase tracking-wider text-textMuted mb-1">{label}</p>
+      <p className="text-xl font-bold tracking-tight" style={{ color }}>
+        {signed && value < 0 ? '−' : ''}{fmt(value)}
+      </p>
+    </div>
+  );
+}
 const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
   debit:           { label: 'Débito',       color: '#3b82f6' },
   credit:          { label: 'Crédito',      color: '#ec4899' },
@@ -1102,7 +1263,7 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
             const pt = PAYMENT_TYPE_META[t.paymentType ?? 'debit'] ?? PAYMENT_TYPE_META['debit'];
             return (
               <tr key={t.id} className="group hover:bg-white/[0.02] transition-colors">
-                <td className="py-4 text-textMuted">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                <td className="py-4 text-textMuted">{formatDateBR(t.date)}</td>
                 <td className="py-4 font-medium text-white">{t.name}</td>
                 <td className="py-4">
                   <span className="px-2.5 py-1 rounded-full text-xs border"

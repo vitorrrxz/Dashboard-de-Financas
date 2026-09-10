@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Edit2, Target, CheckCircle2, AlertTriangle } from 'luc
 import type { Goal } from '../types';
 import { computeGoalProgress } from '../utils/goals';
 import { todayISO } from '../utils/debts';
+import { formatDateBR } from '../utils/dates';
 import { FormField } from './shared/FormField';
 
 type GoalFormData = Omit<Goal, 'id' | 'createdAt'>;
@@ -110,7 +111,7 @@ export function GoalsManager({ goals, onAdd, onUpdate, onDelete }: GoalsManagerP
                     {Math.round(progress.percentage)}%
                   </p>
                   <p className={`text-xs ${progress.isOverdue ? 'text-red-400' : 'text-textMuted'}`}>
-                    até {new Date(goal.targetDate + 'T12:00:00').toLocaleDateString('pt-BR')}
+                    até {formatDateBR(goal.targetDate)}
                   </p>
                 </div>
 

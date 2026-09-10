@@ -3,6 +3,8 @@ import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Downloa
 import type { Debt, DebtCategory, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
 import { isDebtOverdue, isDebtPaid, computeNextInstallment } from '../utils/debts';
+import { formatDateBR } from '../utils/dates';
+import { downloadCSV, exportDateSuffix, formatCurrencyCSV } from '../utils/export';
 import { FormField } from './shared/FormField';
 
 const CATEGORY_COLORS: Record<DebtCategory, string> = {
@@ -132,27 +134,18 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       d.name,
       d.description ?? '',
       d.category,
-      d.totalAmount.toFixed(2).replace('.', ','),
-      d.paidAmount.toFixed(2).replace('.', ','),
-      remaining(d).toFixed(2).replace('.', ','),
-      d.monthlyPayment.toFixed(2).replace('.', ','),
+      formatCurrencyCSV(d.totalAmount),
+      formatCurrencyCSV(d.paidAmount),
+      formatCurrencyCSV(remaining(d)),
+      formatCurrencyCSV(d.monthlyPayment),
       d.paidInstallments,
       d.totalInstallments,
       progress(d).toFixed(1).replace('.', ','),
-      (d.interestRate ?? 0).toFixed(2).replace('.', ','),
-      new Date(d.nextDueDate + 'T12:00:00').toLocaleDateString('pt-BR'),
+      formatCurrencyCSV(d.interestRate ?? 0),
+      formatDateBR(d.nextDueDate),
       isPaid(d) ? 'Quitada' : isOverdue(d) ? 'Vencida' : 'Em dia',
     ]);
-    const csvContent = [headers, ...rows]
-      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
-      .join('\n');
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `dividas_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCSV(`dividas_${exportDateSuffix()}.csv`, headers, rows);
   };
 
   const handleImportClick = () => {
@@ -382,7 +375,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                   <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
                     <p className="text-xs text-textMuted mb-0.5">Vencimento</p>
                     <p className={`text-sm font-bold ${overdue ? 'text-red-400' : 'text-white'}`}>
-                      {paid ? '—' : new Date(debt.nextDueDate + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                      {paid ? '—' : formatDateBR(debt.nextDueDate, { day: '2-digit', month: '2-digit' })}
                     </p>
                   </div>
                 </div>

@@ -96,3 +96,15 @@ export function advanceOccurrence(dateString: string, frequency: RecurrenceFrequ
   if (frequency === 'yearly') return advanceYear(dateString);
   return advanceMonth(dateString);
 }
+
+/**
+ * Formata uma data ISO (YYYY-MM-DD) no padrão brasileiro para exibição.
+ *
+ * O `T12:00:00` (meio-dia) é essencial: `new Date('YYYY-MM-DD')` é interpretado como UTC
+ * 00:00 e, num fuso negativo como o do Brasil (UTC-3), vira 21h do dia ANTERIOR — a data
+ * exibida ficaria um dia atrás da real. Ancorar no meio-dia dá margem suficiente para
+ * qualquer fuso do mundo cair no dia certo.
+ */
+export function formatDateBR(dateISO: string, options?: Intl.DateTimeFormatOptions): string {
+  return new Date(dateISO + 'T12:00:00').toLocaleDateString('pt-BR', options);
+}

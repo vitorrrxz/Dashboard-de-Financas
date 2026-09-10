@@ -329,6 +329,39 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
+- [x] **P0 — FIN-092 — Compras no cartão de crédito importadas como RECEITA** ✅ Concluída (achado em uso real, 10/09/2026)
+
+  **Objetivo**
+  Fazer com que uma compra no cartão de crédito sincronizada via Pluggy seja contabilizada como despesa, e não como receita.
+
+  **Problema**
+  O sync gravava `amount: toCents(tx.amount)` — o valor cru devolvido pela Pluggy — para qualquer tipo de conta. Em conta `BANK` isso está correto (a Pluggy já usa a convenção do app: negativo = saiu dinheiro). Em conta `CREDIT`, porém, o referencial é o da **fatura**, não o do bolso do usuário: uma **compra** aumenta a fatura e vem **positiva**, e o **pagamento da fatura** a reduz e vem **negativo** — exatamente o inverso.
+
+  O efeito no app era grave e silencioso: toda compra no cartão entrava como receita. Como a Pluggy devolve também as parcelas já lançadas para meses futuros, o usuário via "receitas" com data em 2027. Confirmado no banco real antes da correção: das 58 transações do cartão conectado, 56 estavam positivas (compras e parcelas, R$ 2.762,60 contabilizados como entrada) e as 2 negativas eram justamente os pagamentos de fatura.
+
+  **Arquivos envolvidos**
+  - `server.js` (rota `POST /api/pluggy/sync/:itemId`)
+  - `scripts/fix-pluggy-credit-signs.mjs` (novo)
+  - `server.pluggy-credit.test.js` (novo)
+
+  **Correção**
+  `pluggyAmountToCents(pluggyTx, accountType)` inverte o sinal quando a conta é do tipo `credit` e o preserva nos demais casos. O discriminador escolhido foi o **tipo da conta**, e não o campo `type` (`DEBIT`/`CREDIT`) da transação: `type` seria mais genérico, mas não foi possível confirmar sua polaridade nos conectores de cartão contra dados reais, e um engano ali inverteria também as contas correntes — que hoje estão corretas. O tipo da conta, esse sim, foi conferido contra o extrato real de um cartão.
+
+  Junto disso, `isCreditCardBillPayment` descarta o pagamento da própria fatura em contas de cartão. Ele não é uma movimentação nova: o dinheiro já saiu da conta corrente (onde aparece como despesa) e as compras que compõem a fatura já foram contabilizadas uma a uma — importá-lo somaria o mesmo valor duas vezes e, com o sinal corrigido, ele viraria uma receita de R$ 1.543,20 no lugar do problema que se acabou de resolver. O filtro é aplicado logo após a paginação, antes de qualquer uso, para que a consulta de existentes, o refresh e a inserção enxerguem todos o mesmo conjunto. A verificação só roda em contas de cartão: numa conta corrente, "pagamento recebido" é uma entrada legítima.
+
+  As transações de cartão passam a ser gravadas com `paymentType: 'credit'` — o que o app já exibia como rótulo na lista, e que serve de marca de "sinal já normalizado". O laço de refresh das transações existentes passou a comparar e atualizar `paymentType` também, senão a correção nunca alcançaria o que já estava no banco.
+
+  **Dados já gravados**
+  `scripts/fix-pluggy-credit-signs.mjs` corrige o histórico que ficou fora da janela consultada pelo sync (que busca a partir de um mês atrás). Ele roda em **simulação por padrão** e só grava com `--apply`, fazendo antes uma cópia do arquivo SQLite. A idempotência vem do `paymentType`: só são tocadas as transações de cartão vindas da Pluggy que ainda estão com `paymentType != 'credit'`, então rodar duas vezes não desfaz a correção. As duas operações vão numa única `$transaction` — uma falha no meio deixaria parte das transações corrigidas e parte não, sem como distinguir depois.
+
+  **Validação executada**
+  `server.pluggy-credit.test.js` — 11 testes: compra e parcela futura de cartão viram despesa; estorno (valor negativo na fatura) vira entrada; conta corrente e poupança preservam o sinal nos dois sentidos; arredondamento de `0.1 + 0.2` fecha em 30 centavos sem erro de ponto flutuante; zero não vira `-0`; e o reconhecimento do pagamento de fatura pela categoria, pela descrição, sem confundir uma compra e sem quebrar com ambos os campos ausentes. A simulação do script foi executada contra o banco real e relatou exatamente os 56 lançamentos a inverter e os 2 pagamentos de fatura a remover.
+
+  **Fora de escopo**
+  Os cards "Total de Receitas"/"Total de Despesas" do Dashboard continuam somando todo o histórico, agora incluindo as parcelas de meses futuros do lado das despesas. Definir se esses totais devem ser do mês corrente, do histórico ou do período selecionado é uma decisão de produto separada — a aba Transações ganhou o recorte mensal em FIN-093.
+
+---
+
 ## 1. 🔐 Segurança
 
 - [x] **P0 — FIN-006 — CRITICAL — `JWT_SECRET` com fallback inseguro hardcoded no código** ✅ Concluída
@@ -1522,6 +1555,34 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
+- [x] **P2 — FIN-093 — Filtro mensal de receitas/despesas com total do mês na aba Transações** ✅ Concluída (10/09/2026)
+
+  **Objetivo**
+  Permitir olhar as transações mês a mês e ver, ao lado do mês de referência, o total do recorte.
+
+  **Problema**
+  A aba Transações listava e somava tudo de uma vez. Com transações parceladas vindas do cartão, a lista mistura lançamentos já ocorridos com parcelas de meses futuros (até 2027, no caso real que motivou a tarefa), sem nenhuma forma de isolar um período — e sem nenhum total à vista, o usuário precisava somar de cabeça.
+
+  **Arquivos envolvidos**
+  - `src/utils/transactions.ts` (novo)
+  - `src/utils/transactions.test.ts` (novo)
+  - `src/App.tsx`
+
+  **Alterações realizadas**
+  Um seletor de mês de referência com setas de navegação, acompanhado de três valores: Receitas, Despesas e **Valor total** (o saldo do mês, com sinal). O estado inicial é o **mês corrente**, de propósito — é o recorte que deixa de somar as parcelas futuras já lançadas no cartão. "Todos os meses" continua disponível para o comportamento anterior.
+
+  A lógica é pura e vive em `src/utils/transactions.ts`, pelo mesmo motivo de `useFinancialStats`: é regra de negócio, testável sem renderizar React. O recorte foi separado em dois passos de propósito — `filterByMonthAndSearch` produz o conjunto do mês (e é dele que saem os totais), e `filterByKind` aplica por cima o filtro Todas/Receitas/Despesas. Assim o resumo continua mostrando os **dois** lados mesmo quando a lista está isolando apenas um deles; se os totais saíssem da lista já filtrada, clicar em "Receitas" zeraria o total de despesas.
+
+  Detalhes que valem registro: o mês corrente entra sempre na lista de meses, mesmo sem lançamentos, senão o seletor abriria num valor inexistente logo após o login (as transações chegam de forma assíncrona); a comparação de meses é lexicográfica sobre `YYYY-MM`, que equivale à cronológica sem construir `Date`; e `formatMonthLabel` monta a data com componentes numéricos (`new Date(ano, mesIndex, 1)`) porque `new Date('2026-01')` seria lido como UTC e, em UTC-3, cairia em dezembro do ano anterior. As exportações CSV/PDF (FIN-060/FIN-061) seguem o mesmo recorte: o arquivo passa a se chamar `transacoes_2026-09.csv` e o PDF ganhou o mês de referência no cabeçalho.
+
+  **Dependências**
+  Nenhuma. Complementa FIN-092, que corrigiu o sinal das transações de cartão.
+
+  **Validação executada**
+  `src/utils/transactions.test.ts` — 22 testes: ordenação dos meses inclusive na virada de ano, mês corrente presente sem transações e sem duplicar quando já existe, rótulo em português sem deslocamento de fuso, combinação de mês + busca (a busca sozinha traria mais registros), busca por categoria sem diferenciar maiúsculas, prefixo `2026-1` não capturando `2026-10`, despesa reportada em módulo, saldo negativo, transação de valor zero contada sem somar a nenhum dos lados, e recorte vazio.
+
+---
+
 ## 10. 📊 Dashboard
 
 Nenhuma tarefa adicional identificada além das já listadas nas seções **0 (Bugs Críticos)** e **2 (Integridade Financeira)** — em especial FIN-001, FIN-002, FIN-005 e FIN-018, que afetam diretamente os números exibidos no Dashboard.
@@ -1698,20 +1759,40 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 15. 📈 Relatórios (Roadmap)
 
-- [ ] **P3 — FIN-060 — Exportar relatório de transações em CSV**
+- [x] **P3 — FIN-060 — Exportar relatório de transações em CSV** ✅ Concluída
   Reaproveitar diretamente o padrão já implementado e funcional em `exportCSV` do `DebtManager.tsx` ([DebtManager.tsx:155-187](src/components/DebtManager.tsx#L155-L187)), adaptado para transações, na aba Transações do `App.tsx`. **Dependências:** Nenhuma — pode ser feita a qualquer momento, é isolada.
 
-- [ ] **P3 — FIN-061 — Exportar relatório de transações em PDF**
+  **Nota de implementação (10/09/2026):** Em vez de copiar o `exportCSV` das dívidas, a lógica foi extraída para `src/utils/export.ts` (`buildCSV`, `downloadCSV`, `formatCurrencyCSV`) e o `DebtManager` passou a usar o utilitário — evitando a segunda cópia do mesmo código de serialização/download. Dois detalhes do download foram corrigidos na extração: o `<a>` agora é anexado ao documento antes do clique (o Firefox ignora clique em elemento fora da árvore) e a URL do blob só é revogada no tick seguinte — revogar logo após `click()` cancela downloads que ainda não começaram em alguns navegadores. A exportação usa exatamente o recorte visível na tela (busca + filtro de receita/despesa aplicados), não a lista inteira.
+
+  **Validação executada:** `src/utils/export.test.ts` — 10 testes cobrindo o dialeto pt-BR do Excel (separador `;`), escape de aspas conforme RFC 4180, campo contendo o próprio separador, quebra de linha dentro de campo, e formatação monetária com vírgula decimal.
+
+- [x] **P3 — FIN-061 — Exportar relatório de transações em PDF** ✅ Concluída
   Adicionar dependência de geração de PDF no cliente (ex. `jspdf` + `jspdf-autotable`) ou gerar server-side. **Dependências:** FIN-060 (reaproveitar mesma seleção/filtro de dados).
 
-- [ ] **P3 — FIN-062 — Criar comparativo mês a mês de receitas/despesas**
+  **Nota de implementação (10/09/2026):** `jspdf` + `jspdf-autotable` no cliente, carregados por **`import()` dinâmico** dentro de `downloadPDFReport`. Isso importa: juntas, com suas dependências (`html2canvas`, `purify`), essas bibliotecas passam de 600 kB, e a maioria das sessões nunca exporta um PDF. Com o carregamento sob demanda, elas ficam em chunks separados (`jspdf.es.min` 399 kB, `html2canvas` 199 kB, `jspdf.plugin.autotable` 29 kB) e o bundle principal cresceu apenas ~16 kB com toda a Fase 5 — o custo só é pago por quem clica em "Exportar PDF". O PDF sai em paisagem com cabeçalho de período e totais (receitas, despesas, saldo) do mesmo recorte filtrado usado no CSV.
+
+  **Validação executada:** o contrato do import dinâmico foi verificado executando de fato a geração (`autoTableModule.default` é função e o documento sai com 4.268 bytes), em vez de confiar só na tipagem; `npm run build` confirma os chunks separados.
+
+- [x] **P3 — FIN-062 — Criar comparativo mês a mês de receitas/despesas** ✅ Concluída
   Nova visão (gráfico de barras agrupadas) usando os dados já agregados em `stats.balanceByMonth` como base, estendido para separar receita/despesa por mês. **Dependências:** Nenhuma.
 
-- [ ] **P3 — FIN-063 — Criar comparativo ano a ano**
+  **Nota de implementação (10/09/2026):** `computeMonthlyComparison` em `src/utils/reports.ts` — função pura, separada de `useFinancialStats` porque a agregação é diferente (`balanceByMonth` soma o saldo líquido do mês; aqui receita e despesa são somadas separadamente). Exibida na nova aba "Relatórios" (`ReportsView.tsx`) como `BarChart` de barras agrupadas, limitada aos 12 meses mais recentes **com movimento** — o corte é no fim de propósito, e meses sem transação não viram colunas vazias. Abaixo do gráfico vai a mesma série em tabela, que mostra o saldo do período (número que não é nenhuma das barras).
+
+- [x] **P3 — FIN-063 — Criar comparativo ano a ano** ✅ Concluída
   Extensão de FIN-062 agregando por ano. **Dependências:** FIN-062.
 
-- [ ] **P3 — FIN-064 — Criar relatório de patrimônio líquido (contas + investimentos − dívidas)**
+  **Nota de implementação (10/09/2026):** `computeYearlyComparison` reaproveita a mesma função interna de agrupamento de FIN-062, trocando apenas a chave do período (`YYYY` em vez de `YYYY-MM`) — nenhuma lógica de soma duplicada. Na UI é um alternador "Mês a Mês / Ano a Ano" sobre o mesmo gráfico e a mesma tabela.
+
+  **Validação executada:** `src/utils/reports.test.ts` cobre ordenação cronológica independente da ordem de entrada, virada de ano, corte dos N meses mais recentes, transação de valor zero, lista vazia e ano com saldo negativo.
+
+- [x] **P3 — FIN-064 — Criar relatório de patrimônio líquido (contas + investimentos − dívidas)** ✅ Concluída (com ressalva de escopo)
   Novo cálculo combinando `realBalance`, saldo de investimentos (depende do módulo de Investimentos, FIN-070) e `activeDebts`. **Dependências:** FIN-018, FIN-070.
+
+  **Nota de implementação (10/09/2026):** **Decisão de escopo:** a tarefa dependia de FIN-070 (módulo de Investimentos, Fase 7), que ainda não existe. Foi implementada assim mesmo, porque toda a informação necessária já está no app desde FIN-018: as contas do tipo `investment` são somadas à parte do dinheiro líquido. O que FIN-070 vai mudar é a **qualidade** dessa parcela (ativos com quantidade e cotação em vez de um saldo digitado à mão), não a estrutura do cálculo — quando ele chegar, basta trocar a origem de `investments` em `computeNetWorth`. Isso está anotado como nota de escopo dentro da própria função.
+
+  `computeNetWorth(accounts, debts)` devolve a composição completa (líquido, investimentos, faturas em aberto, dívidas, ativos, passivos e total), respeitando as mesmas regras de classificação de `useFinancialStats`: cartão de crédito nunca entra como ativo (seu saldo é a fatura, um passivo) e investimento fica separado do líquido (FIN-018). Dívidas quitadas não entram no passivo, e o saldo devedor é limitado em 0 — um `paidAmount` maior que o total (dado inconsistente) viraria um "ativo fantasma" sem esse limite.
+
+  **Validação executada:** `src/utils/reports.test.ts` — 7 testes de patrimônio: composição completa, cartão de crédito fora dos ativos mesmo com saldo preenchido, fatura ausente sem virar `NaN`, dívida quitada fora do passivo, dívida com pago > total sem virar ativo, patrimônio negativo e caso vazio.
 
 ---
 
