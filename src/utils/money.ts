@@ -36,3 +36,13 @@ export function toReaisOrNull(cents: number | null | undefined): number | null |
   if (cents === null || cents === undefined) return cents;
   return toReais(cents);
 }
+
+/**
+ * Formata um valor em reais para exibição ("R$ 1.234,56"), sempre em módulo — o sinal,
+ * quando importa, fica a cargo de quem exibe (ver `MonthTotal`). Limita a duas casas: sem
+ * `maximumFractionDigits`, o padrão do `toLocaleString` é três, e um resíduo de ponto
+ * flutuante apareceria como "R$ 0,300".
+ */
+export function formatBRL(value: number): string {
+  return `R$ ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}

@@ -65,3 +65,50 @@ export function computeNextInstallment(
     nextDueDate: advanceMonth(debt.nextDueDate),
   };
 }
+
+/** Uma parcela prevista de uma dívida cadastrada (ver `remainingDebtSchedule`). */
+export interface ScheduledInstallment {
+  /** Número da parcela (1 = primeira), contando também as que já foram pagas. */
+  number: number;
+  /** Vencimento (ISO YYYY-MM-DD). */
+  dueDate: string;
+  /** Valor da parcela, em reais, arredondado ao centavo. */
+  amount: number;
+}
+
+// Teto de parcelas geradas por dívida. Um financiamento de 30 anos tem 360; o teto é só a
+// rede de segurança contra dado inconsistente (ex.: `totalInstallments` absurdo).
+const MAX_SCHEDULED_INSTALLMENTS = 600;
+
+/**
+ * Parcelas que ainda faltam pagar de uma dívida, em ordem de vencimento, a partir de
+ * `nextDueDate` e em intervalos mensais.
+ *
+ * As parcelas intermediárias são limitadas ao saldo devedor, para nenhuma cobrar além do
+ * que ainda se deve; a última fecha exatamente o saldo — mesma regra de
+ * `computeNextInstallment`, que registra o último pagamento levando `paidAmount` a
+ * `totalAmount`. Extraído de `computeBalanceProjection` (FIN-058) para que a visão mensal da
+ * aba Dívidas (FIN-094) use o mesmo cronograma, em vez de uma segunda cópia do laço.
+ */
+export function remainingDebtSchedule(
+  debt: Pick<Debt, 'totalAmount' | 'paidAmount' | 'monthlyPayment' | 'totalInstallments' | 'paidInstallments' | 'nextDueDate'>
+): ScheduledInstallment[] {
+  if (isDebtPaid(debt)) return [];
+  const remainingInstallments = Math.max(0, debt.totalInstallments - debt.paidInstallments);
+  const count = Math.min(remainingInstallments, MAX_SCHEDULED_INSTALLMENTS);
+  const schedule: ScheduledInstallment[] = [];
+  let remainingBalance = Math.max(0, debt.totalAmount - debt.paidAmount);
+  let dueDate = debt.nextDueDate;
+
+  for (let i = 0; i < count && remainingBalance > 0; i++) {
+    const isLast = i === remainingInstallments - 1;
+    const raw = isLast ? remainingBalance : Math.min(debt.monthlyPayment, remainingBalance);
+    // Arredonda ao centavo: subtrair floats repetidamente acumula ruído (ver FIN-015).
+    const amount = Math.round(raw * 100) / 100;
+    if (amount <= 0) break; // parcela zerada (ex.: `monthlyPayment` 0): nada a prever
+    schedule.push({ number: debt.paidInstallments + i + 1, dueDate, amount });
+    remainingBalance -= amount;
+    dueDate = advanceMonth(dueDate);
+  }
+  return schedule;
+}

@@ -21,6 +21,7 @@
 - [x] Evitar divida duplicada ao reimportar fatura de credito/PIX parcelado (FIN-004, depende de FIN-003)
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
 - [x] Corrigir servidor crashando no boot sem credenciais Pluggy configuradas (FIN-090, achado em revisao de codigo)
+- [x] Corrigir compras no cartao de credito importadas da Pluggy como RECEITA (FIN-092, achado em uso real)
 
 ## Fase 1 - Seguranca e Integridade Financeira (P1/P2)
 
@@ -82,6 +83,8 @@
 ### UX/UI
 - [x] Conectar sino de notificacoes do header a algum conteudo real (FIN-039)
 - [x] Parar de forcar troca para aba "Transacoes" a cada tecla digitada na busca (FIN-040)
+- [x] Filtro mensal de receitas/despesas com total do mes na aba Transacoes (FIN-093)
+- [x] Mover lancamentos parcelados para a aba Dividas, com mes de referencia e total mensal (FIN-094, depende de FIN-092, FIN-093)
 
 ### Open Finance / Pluggy
 - [x] Tratar status de item Pluggy expirado / erro de login (FIN-041)
@@ -127,11 +130,11 @@
 
 ## Fase 5 - Relatorios
 
-- [ ] Exportar relatorio de transacoes em CSV (FIN-060)
-- [ ] Exportar relatorio de transacoes em PDF (FIN-061, depende de FIN-060)
-- [ ] Criar comparativo mes a mes de receitas/despesas (FIN-062)
-- [ ] Criar comparativo ano a ano (FIN-063, depende de FIN-062)
-- [ ] Criar relatorio de patrimonio liquido — contas + investimentos - dividas (FIN-064, depende de FIN-018, FIN-070)
+- [x] Exportar relatorio de transacoes em CSV (FIN-060)
+- [x] Exportar relatorio de transacoes em PDF (FIN-061, depende de FIN-060)
+- [x] Criar comparativo mes a mes de receitas/despesas (FIN-062)
+- [x] Criar comparativo ano a ano (FIN-063, depende de FIN-062)
+- [x] Criar relatorio de patrimonio liquido — contas + investimentos - dividas (FIN-064, depende de FIN-018, FIN-070)
 
 ## Fase 6 - Notificacoes
 

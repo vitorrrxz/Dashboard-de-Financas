@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Edit2, Repeat, Pause, Play } from 'lucide-react';
 import type { Account, RecurrenceFrequency, RecurringTransaction } from '../types';
 import { CATEGORY_COLORS, EXPENSE_CATEGORIES } from '../utils/categories';
 import { todayISO } from '../utils/debts';
+import { formatDateBR } from '../utils/dates';
 import { FormField } from './shared/FormField';
 
 type RecurringFormData = Omit<RecurringTransaction, 'id' | 'createdAt'>;
@@ -148,7 +149,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
                 <p className="text-xs text-textMuted">
                   {rec.category}
                   {account ? ` · ${account.name}` : ''}
-                  {rec.active ? ` · próxima em ${new Date(rec.nextOccurrence + 'T12:00:00').toLocaleDateString('pt-BR')}` : ''}
+                  {rec.active ? ` · próxima em ${formatDateBR(rec.nextOccurrence)}` : ''}
                 </p>
               </div>
 

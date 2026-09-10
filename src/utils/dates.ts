@@ -96,3 +96,76 @@ export function advanceOccurrence(dateString: string, frequency: RecurrenceFrequ
   if (frequency === 'yearly') return advanceYear(dateString);
   return advanceMonth(dateString);
 }
+
+/**
+ * Formata uma data ISO (YYYY-MM-DD) no padrão brasileiro para exibição.
+ *
+ * O `T12:00:00` (meio-dia) é essencial: `new Date('YYYY-MM-DD')` é interpretado como UTC
+ * 00:00 e, num fuso negativo como o do Brasil (UTC-3), vira 21h do dia ANTERIOR — a data
+ * exibida ficaria um dia atrás da real. Ancorar no meio-dia dá margem suficiente para
+ * qualquer fuso do mundo cair no dia certo.
+ */
+export function formatDateBR(dateISO: string, options?: Intl.DateTimeFormatOptions): string {
+  return new Date(dateISO + 'T12:00:00').toLocaleDateString('pt-BR', options);
+}
+
+/** Quebra uma chave de mês (YYYY-MM) em componentes numéricos; `null` se o formato for inválido. */
+function parseMonthKey(month: string): { year: number; month: number } | null {
+  const parts = month.split('-');
+  if (parts.length !== 2) return null;
+  const year = Number(parts[0]);
+  const monthNumber = Number(parts[1]);
+  if (!Number.isInteger(year) || year < 1) return null;
+  if (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12) return null;
+  return { year, month: monthNumber };
+}
+
+/**
+ * Desloca uma chave de mês (YYYY-MM) em `delta` meses, para a frente ou para trás.
+ *
+ * Opera sobre os componentes numéricos, sem `Date`, pelo mesmo motivo do resto deste
+ * módulo. Devolve a entrada intacta quando ela não é um mês válido ou `delta` não é inteiro.
+ */
+export function shiftMonth(month: string, delta: number): string {
+  const parsed = parseMonthKey(month);
+  if (!parsed || !Number.isInteger(delta)) return month;
+  const absolute = parsed.year * 12 + (parsed.month - 1) + delta;
+  const year = Math.floor(absolute / 12);
+  return `${year}-${String(absolute - year * 12 + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Data ISO de um dia dentro de um mês (YYYY-MM), com o dia "clampado" ao intervalo válido
+ * do mês — o dia 31 num mês de 30 dias vira 30, e nunca sai uma data inexistente como 31/fev.
+ */
+export function dateInMonth(month: string, day: number): string {
+  const parsed = parseMonthKey(month);
+  if (!parsed) return month;
+  const safeDay = Math.min(Math.max(1, Math.trunc(day) || 1), daysInMonth(parsed.year, parsed.month));
+  return formatISO(parsed.year, parsed.month, safeDay);
+}
+
+/**
+ * Meses (YYYY-MM) em que caem as datas informadas, do mais recente para o mais antigo, sem
+ * repetição. `alwaysInclude` força a presença de um mês mesmo sem nenhuma data nele — o mês
+ * corrente, para que um seletor nunca abra num valor que não está na própria lista.
+ */
+export function monthsDescending(dates: string[], alwaysInclude?: string): string[] {
+  const months = new Set(dates.map(d => d.slice(0, 7)));
+  if (alwaysInclude) months.add(alwaysInclude);
+  // Comparação lexicográfica: para YYYY-MM ela equivale à cronológica, sem construir Date.
+  return Array.from(months).sort().reverse();
+}
+
+/**
+ * Rótulo do mês para exibição ("Setembro/2026").
+ *
+ * Monta a data com componentes numéricos (`new Date(ano, mêsIndex, 1)`) de propósito:
+ * `new Date('2026-01')` seria lido como UTC e, em UTC-3, cairia em dezembro do ano anterior.
+ */
+export function formatMonthLabel(month: string): string {
+  const parsed = parseMonthKey(month);
+  if (!parsed) return month;
+  const name = new Date(parsed.year, parsed.month - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)}/${parsed.year}`;
+}

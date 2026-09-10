@@ -3,6 +3,7 @@ import { Upload, X, FileText, CheckCircle, AlertCircle, Loader, CreditCard, Bank
 import { parseFile } from '../utils/parsers';
 import type { Transaction } from '../utils/parsers';
 import type { PaymentType, Account } from '../types';
+import { formatDateBR } from '../utils/dates';
 
 interface ImportModalProps {
   onClose: () => void;
@@ -258,7 +259,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
                       <td className="px-4 py-2.5">
                         <span className="text-xs px-2 py-1 bg-white/5 border border-white/10 rounded-full text-textMuted">{tx.category}</span>
                       </td>
-                      <td className="px-4 py-2.5 text-xs text-textMuted">{new Date(tx.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                      <td className="px-4 py-2.5 text-xs text-textMuted">{formatDateBR(tx.date)}</td>
                       <td className={`px-4 py-2.5 text-sm font-semibold text-right ${tx.amount > 0 ? 'text-accent' : 'text-white'}`}>
                         {tx.amount > 0 ? '+' : ''}R$ {Math.abs(tx.amount).toFixed(2).replace('.', ',')}
                       </td>

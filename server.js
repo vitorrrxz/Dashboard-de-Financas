@@ -186,6 +186,42 @@ function toCents(reais) {
   return Math.round(reais * 100);
 }
 
+// FIN-092 — Sinal das transações vindas da Pluggy.
+//
+// Em conta BANK a Pluggy já devolve o valor na convenção do app: negativo = saiu dinheiro,
+// positivo = entrou. Em conta CREDIT o referencial é o da fatura, não o do bolso do
+// usuário: uma COMPRA aumenta a fatura e vem POSITIVA; o PAGAMENTO da fatura a reduz e vem
+// NEGATIVO. Importar esse valor cru fazia toda compra no cartão — inclusive as parcelas já
+// lançadas para meses futuros — ser contabilizada como receita.
+//
+// O discriminador é o tipo da CONTA, e não o campo `type` (DEBIT/CREDIT) da transação:
+// `type` seria mais genérico, mas não foi possível confirmar sua polaridade nos conectores
+// de cartão contra dados reais, e um engano ali inverteria também as contas correntes, que
+// hoje estão corretas. O tipo da conta foi conferido contra o extrato real de um cartão.
+function pluggyAmountToCents(pluggyTx, accountType) {
+  const cents = toCents(pluggyTx.amount);
+  // O teste de zero evita gravar -0: inofensivo em SQLite, mas confuso ao depurar.
+  if (accountType !== 'credit' || cents === 0) return cents;
+  return -cents;
+}
+
+// Marcadores com que a Pluggy identifica o pagamento da própria fatura do cartão. A
+// comparação é por inclusão e em minúsculas porque o texto varia entre conectores
+// (categoria normalizada em inglês, descrição no idioma do banco).
+const CREDIT_CARD_PAYMENT_MARKERS = ['credit card payment', 'pagamento de fatura', 'pagamento recebido'];
+
+// Um lançamento de cartão que é o pagamento da fatura, e não uma compra.
+//
+// Ele não é uma movimentação nova: o dinheiro já saiu da conta corrente (onde aparece como
+// despesa) e as compras que compõem a fatura já foram contabilizadas uma a uma. Importá-lo
+// somaria o mesmo valor duas vezes — e, com o sinal corrigido acima, ainda apareceria como
+// RECEITA. A verificação só é aplicada em contas de cartão: numa conta corrente,
+// "pagamento recebido" é uma entrada legítima.
+function isCreditCardBillPayment(pluggyTx) {
+  const haystack = ((pluggyTx.category ?? '') + ' ' + (pluggyTx.description ?? '')).toLowerCase();
+  return CREDIT_CARD_PAYMENT_MARKERS.some(marker => haystack.includes(marker));
+}
+
 // Loga o erro completo no servidor e retorna uma mensagem genérica ao cliente — nunca
 // `error.message`/detalhes internos do Prisma/Node, que podem vazar schema, nomes de
 // coluna etc. (ver FIN-011 em docs/BACKLOG_DETAIL.md).
@@ -947,6 +983,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
     let totalTxs = 0;
 
     for (const pluggyAcc of accountsRes.results) {
+      const accountType = mapPluggyAccountType(pluggyAcc);
       // Upsert atômico via constraint (userId, pluggyId) — ver FIN-021.
       const localAccount = await prisma.account.upsert({
         where: { userId_pluggyId: { userId, pluggyId: pluggyAcc.id } },
@@ -955,7 +992,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           pluggyId: pluggyAcc.id,
           name: pluggyAcc.name,
           bank: pluggyAcc.marketingName || 'Banco Conectado',
-          type: mapPluggyAccountType(pluggyAcc),
+          type: accountType,
           balance: toCents(pluggyAcc.balance),
           color: '#6366f1',
         },
@@ -1005,15 +1042,22 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
         page++;
       } while (page <= totalPages);
 
+      // FIN-092: em conta de cartão, descarta o pagamento da própria fatura — ver
+      // `isCreditCardBillPayment`. O filtro é feito aqui, antes de qualquer uso, para que
+      // a query de existentes, o refresh e a inserção enxerguem todos o mesmo conjunto.
+      const pluggyTxs = accountType === 'credit'
+        ? allPluggyTxs.filter(tx => !isCreditCardBillPayment(tx))
+        : allPluggyTxs;
+
       // FIN-037: busca de uma vez os `pluggyId` já existentes desta sincronização (1
       // consulta), em vez de um `findFirst` por transação (N consultas).
       const existingTxs = await prisma.transaction.findMany({
-        where: { userId, pluggyId: { in: allPluggyTxs.map(t => t.id) } },
-        select: { pluggyId: true, name: true, date: true, amount: true },
+        where: { userId, pluggyId: { in: pluggyTxs.map(t => t.id) } },
+        select: { pluggyId: true, name: true, date: true, amount: true, paymentType: true },
       });
       const existingByPluggyId = new Map(existingTxs.map(t => [t.pluggyId, t]));
 
-      const newPluggyTxs = allPluggyTxs.filter(tx => !existingByPluggyId.has(tx.id));
+      const newPluggyTxs = pluggyTxs.filter(tx => !existingByPluggyId.has(tx.id));
       totalTxs += newPluggyTxs.length;
 
       // Transações já existentes: a Pluggy pode reportar valor/descrição/data diferentes
@@ -1022,15 +1066,19 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
       // desatualizados indefinidamente após a primeira sincronização. Só grava (1 UPDATE)
       // quando algo realmente mudou, então o custo extra é próximo de zero na maioria das
       // sincronizações (poucas transações do último mês mudam de um sync para o outro).
-      for (const tx of allPluggyTxs) {
+      for (const tx of pluggyTxs) {
         const existing = existingByPluggyId.get(tx.id);
         if (!existing) continue;
         const freshDate = tx.date.toISOString().split('T')[0];
-        const freshAmount = toCents(tx.amount);
-        if (existing.name !== tx.description || existing.date !== freshDate || existing.amount !== freshAmount) {
+        const freshAmount = pluggyAmountToCents(tx, accountType);
+        const freshPaymentType = accountType === 'credit' ? 'credit' : 'debit';
+        if (
+          existing.name !== tx.description || existing.date !== freshDate ||
+          existing.amount !== freshAmount || existing.paymentType !== freshPaymentType
+        ) {
           await prisma.transaction.updateMany({
             where: { userId, pluggyId: tx.id },
-            data: { name: tx.description, date: freshDate, amount: freshAmount },
+            data: { name: tx.description, date: freshDate, amount: freshAmount, paymentType: freshPaymentType },
           });
         }
       }
@@ -1043,7 +1091,10 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           name: tx.description,
           category: tx.category || 'Outros',
           date: tx.date.toISOString().split('T')[0],
-          amount: toCents(tx.amount),
+          amount: pluggyAmountToCents(tx, accountType),
+          // Deixa explícito na transação que ela veio de um cartão — é o que o app já
+          // exibe na lista, e serve de marca de que o sinal foi normalizado (FIN-092).
+          paymentType: accountType === 'credit' ? 'credit' : 'debit',
         }));
         try {
           await prisma.transaction.createMany({ data });
@@ -1059,7 +1110,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               await prisma.transaction.upsert({
                 where: { userId_pluggyId: { userId, pluggyId: t.pluggyId } },
                 create: t,
-                update: { name: t.name, category: t.category, date: t.date, amount: t.amount },
+                update: { name: t.name, category: t.category, date: t.date, amount: t.amount, paymentType: t.paymentType },
               });
             }
           } else {
@@ -1096,4 +1147,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // `prisma` também exportado para que os testes possam chamar `$disconnect()` no
 // `afterAll` — sem isso, better-sqlite3 mantém o arquivo aberto e a limpeza do banco de
 // teste (`unlink`) falha com `EBUSY` no Windows (ver FIN-031).
-export { app, prisma, pluggyReauthMessage };
+export { app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment };
