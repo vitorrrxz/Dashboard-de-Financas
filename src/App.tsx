@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut, Edit2, X, Menu, PiggyBank
+  LogOut, Edit2, X, Menu, PiggyBank, Target, Repeat
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -12,17 +12,20 @@ import { ImportModal } from './components/ImportModal';
 import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
 import { BudgetManager } from './components/BudgetManager';
+import { GoalsManager } from './components/GoalsManager';
+import { RecurringManager } from './components/RecurringManager';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { toCents, toReais } from './utils/money';
 import { apiFetch } from './services/api';
 import { useFinancialStats } from './hooks/useFinancialStats';
 import { computeBudgetProgress } from './utils/budget';
+import { computeBalanceProjection } from './utils/projection';
 import { todayISO } from './utils/debts';
 import { CATEGORY_COLORS } from './utils/categories';
-import type { Account, Budget, Debt, DebtCategory, Transaction, PaymentType } from './types';
+import type { Account, Budget, Debt, DebtCategory, Goal, RecurringTransaction, Transaction, PaymentType } from './types';
 
-type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets';
+type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'recurring';
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -88,6 +91,28 @@ function budgetToApi<T extends Partial<Budget>>(b: T): T {
  * dívidas e orçamentos do usuário autenticado, deriva as estatísticas do Dashboard e
  * renderiza a navegação e as abas (Dashboard, Transações, Contas, Dívidas, Orçamento).
  */
+/** Converte os valores da meta de centavos (API) para reais (UI) — ver conversão no topo deste bloco. */
+function goalFromApi(g: Goal): Goal {
+  return { ...g, targetAmount: toReais(g.targetAmount), currentAmount: toReais(g.currentAmount) };
+}
+/** Converte os valores da meta de reais (UI) para centavos (API) — ver conversão no topo deste bloco. */
+function goalToApi<T extends Partial<Goal>>(g: T): T {
+  const out: T = { ...g };
+  if (out.targetAmount != null) out.targetAmount = toCents(out.targetAmount);
+  if (out.currentAmount != null) out.currentAmount = toCents(out.currentAmount);
+  return out;
+}
+/** Converte `amount` da recorrência de centavos (API) para reais (UI). */
+function recurringFromApi(r: RecurringTransaction): RecurringTransaction {
+  return { ...r, amount: toReais(r.amount) };
+}
+/** Converte `amount` da recorrência de reais (UI) para centavos (API). */
+function recurringToApi<T extends Partial<RecurringTransaction>>(r: T): T {
+  const out: T = { ...r };
+  if (out.amount != null) out.amount = toCents(out.amount);
+  return out;
+}
+
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
   const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
@@ -106,6 +131,8 @@ export default function App() {
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
   const [budgets, setBudgets]         = useState<Budget[]>([]);
+  const [goals, setGoals]             = useState<Goal[]>([]);
+  const [recurring, setRecurring]     = useState<RecurringTransaction[]>([]);
   // FIN-023: a carga inicial busca até 2000 transações (comportamento original,
   // preservado). Se bater exatamente nesse limite, pode haver mais — `txHasMore` habilita
   // o botão "Carregar mais", que busca o restante via paginação real da API.
@@ -127,25 +154,37 @@ export default function App() {
     setTxs([]);
     setDebts([]);
     setBudgets([]);
+    setGoals([]);
+    setRecurring([]);
     localStorage.removeItem('finflow_token');
   };
 
   useEffect(() => {
     if (token) {
       setLoading(true);
-      Promise.all([
-        fetchAPI('/api/auth/me'),
-        fetchAPI('/api/accounts'),
-        fetchAPI('/api/transactions'),
-        fetchAPI('/api/debts'),
-        fetchAPI('/api/budgets'),
-      ]).then(([meData, accsData, txsData, debtsData, budgetsData]) => {
+      // FIN-055: lança as ocorrências vencidas das recorrências ANTES de buscar as
+      // transações, para que as geradas já apareçam nesta carga. O erro é tratado aqui
+      // (e não no `.catch` do fluxo principal, que faz logout): uma falha ao processar
+      // recorrências não deve derrubar a sessão do usuário nem impedir o app de abrir.
+      fetchAPI('/api/recurring-transactions/process', 'POST')
+        .catch(err => { console.error('Falha ao processar recorrências pendentes:', err); })
+        .then(() => Promise.all([
+          fetchAPI('/api/auth/me'),
+          fetchAPI('/api/accounts'),
+          fetchAPI('/api/transactions'),
+          fetchAPI('/api/debts'),
+          fetchAPI('/api/budgets'),
+          fetchAPI('/api/goals'),
+          fetchAPI('/api/recurring-transactions'),
+        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData]) => {
         setUser(meData.user);
         setAccounts((accsData as Account[]).map(accountFromApi));
         setTxs((txsData as Transaction[]).map(txFromApi));
         setTxHasMore((txsData as Transaction[]).length >= 2000);
         setDebts((debtsData as Debt[]).map(debtFromApi));
         setBudgets((budgetsData as Budget[]).map(budgetFromApi));
+        setGoals((goalsData as Goal[]).map(goalFromApi));
+        setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
       }).catch(err => {
         console.error('Sessão expirada ou erro:', err);
         handleLogout();
@@ -337,6 +376,57 @@ export default function App() {
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
+  // CRUD GOALS (FIN-051)
+  /** Cria uma meta via `POST /api/goals` e adiciona o resultado (já em reais) ao estado local. */
+  const addGoal = async (goal: Omit<Goal, 'id' | 'createdAt'>) => {
+    try {
+      const newGoal = await fetchAPI('/api/goals', 'POST', goalToApi(goal));
+      setGoals(prev => [...prev, goalFromApi(newGoal)]);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  /** Atualiza uma meta via `PUT /api/goals/:id` e reflete a mudança (em reais) no estado local. */
+  const updateGoal = async (id: string, goal: Omit<Goal, 'id' | 'createdAt'>) => {
+    try {
+      await fetchAPI(`/api/goals/${id}`, 'PUT', goalToApi(goal));
+      setGoals(prev => prev.map(g => g.id === id ? { ...g, ...goal } : g));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  /** Exclui uma meta via `DELETE /api/goals/:id` e remove do estado local. */
+  const deleteGoal = async (id: string) => {
+    try {
+      await fetchAPI(`/api/goals/${id}`, 'DELETE');
+      setGoals(prev => prev.filter(g => g.id !== id));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+
+  // CRUD RECURRING (FIN-056)
+  /** Cria uma recorrência via `POST /api/recurring-transactions`. */
+  const addRecurring = async (rec: Omit<RecurringTransaction, 'id' | 'createdAt'>) => {
+    try {
+      const created = await fetchAPI('/api/recurring-transactions', 'POST', recurringToApi(rec));
+      setRecurring(prev => [...prev, recurringFromApi(created)]);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  /**
+   * Atualiza uma recorrência — edição completa pelo formulário ou só o `active`, ao
+   * pausar/retomar. Não lança ocorrências: mesmo que a edição coloque `nextOccurrence` no
+   * passado, o lançamento continua sendo responsabilidade exclusiva do `/process`, que roda
+   * no carregamento do app (FIN-055) — um único ponto de geração de transações.
+   */
+  const updateRecurring = async (id: string, rec: Partial<Omit<RecurringTransaction, 'id' | 'createdAt'>>) => {
+    try {
+      await fetchAPI(`/api/recurring-transactions/${id}`, 'PUT', recurringToApi(rec));
+      setRecurring(prev => prev.map(r => r.id === id ? { ...r, ...rec } : r));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  /** Exclui uma recorrência; as transações já lançadas por ela permanecem no histórico. */
+  const deleteRecurring = async (id: string) => {
+    try {
+      await fetchAPI(`/api/recurring-transactions/${id}`, 'DELETE');
+      setRecurring(prev => prev.filter(r => r.id !== id));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+
   // ---------- Derived stats ----------
   // Lógica extraída para src/hooks/useFinancialStats.ts (ver FIN-086 em
   // docs/BACKLOG_DETAIL.md) — separa a regra de negócio da camada de UI e permite
@@ -352,6 +442,13 @@ export default function App() {
     [transactions, budgets, currentMonth]
   );
   const overBudget = budgetProgress.filter(b => b.isOverLimit); // FIN-047
+
+  // FIN-058: projeção dos próximos 6 meses a partir do saldo real (contas líquidas),
+  // somando as recorrências previstas e descontando as parcelas de dívida previstas.
+  const projection = useMemo(
+    () => computeBalanceProjection(stats.realBalance, recurring, debts, { months: 6 }),
+    [stats.realBalance, recurring, debts]
+  );
 
   // Categorias que já aparecem nas transações do usuário, além das curadas em
   // EXPENSE_CATEGORIES — a importação manual aceita categoria livre, então o
@@ -424,6 +521,16 @@ export default function App() {
             <NavItem icon={<PiggyBank size={18}/>} label="Orçamento" active={activeTab==='budgets'} onClick={() => { setActiveTab('budgets'); setMobileNavOpen(false); }}
               badge={budgets.length > 0 ? budgets.length : undefined}
               badgeColor={overBudget.length > 0 ? '#ef4444' : undefined}
+            />
+
+            {/* FIN-051 */}
+            <NavItem icon={<Target size={18}/>} label="Metas" active={activeTab==='goals'} onClick={() => { setActiveTab('goals'); setMobileNavOpen(false); }}
+              badge={goals.length > 0 ? goals.length : undefined}
+            />
+
+            {/* FIN-056 */}
+            <NavItem icon={<Repeat size={18}/>} label="Recorrências" active={activeTab==='recurring'} onClick={() => { setActiveTab('recurring'); setMobileNavOpen(false); }}
+              badge={recurring.filter(r => r.active).length > 0 ? recurring.filter(r => r.active).length : undefined}
             />
           </nav>
         </div>
@@ -729,6 +836,43 @@ export default function App() {
                   )}
                 </div>
               )}
+
+              {/* FIN-059: projeção de saldo — só aparece quando há algo a projetar
+                  (recorrência ativa ou dívida em aberto), senão seria uma linha reta. */}
+              {(recurring.some(r => r.active) || debts.length > 0) && (
+                <div className="glass-card rounded-2xl p-6 mb-8">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-semibold text-white">Projeção de Saldo</h3>
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-textMuted bg-white/5 px-2.5 py-1 rounded-full border border-white/5">
+                      Próximos 6 meses
+                    </span>
+                  </div>
+                  <div className="h-60">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={projection}>
+                        <defs>
+                          <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#14b8a6" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false}/>
+                        <XAxis dataKey="name" stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }}/>
+                        <YAxis stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
+                        <RechartsTooltip
+                          contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
+                          formatter={(v) => [fmt(Number(v)), 'Saldo projetado']}
+                          labelStyle={{ color:'#9ca3af' }}
+                        />
+                        <Area type="monotone" dataKey="balance" stroke="#14b8a6" strokeWidth={2.5} fill="url(#pg)" animationDuration={1000}/>
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-xs text-textMuted mt-3">
+                    Saldo real de hoje somado às recorrências ativas e descontadas as parcelas de dívidas em aberto.
+                  </p>
+                </div>
+              )}
             </>
           )}
 
@@ -836,6 +980,40 @@ export default function App() {
                 onUpdate={updateBudget}
                 onDelete={deleteBudget}
                 existingCategories={budgets.map(b => b.category)}
+                transactionCategories={transactionCategories}
+              />
+            </>
+          )}
+
+          {/* ══════════ GOALS TAB (FIN-051) ══════════ */}
+          {activeTab === 'goals' && (
+            <>
+              <div className="mb-6">
+                <h1 className="text-3xl font-bold text-white mb-1">Metas</h1>
+                <p className="text-textMuted text-sm">Quanto você quer juntar e até quando</p>
+              </div>
+              <GoalsManager
+                goals={goals}
+                onAdd={addGoal}
+                onUpdate={updateGoal}
+                onDelete={deleteGoal}
+              />
+            </>
+          )}
+
+          {/* ══════════ RECURRING TAB (FIN-056) ══════════ */}
+          {activeTab === 'recurring' && (
+            <>
+              <div className="mb-6">
+                <h1 className="text-3xl font-bold text-white mb-1">Recorrências</h1>
+                <p className="text-textMuted text-sm">Lançamentos que se repetem — salário, aluguel, assinaturas</p>
+              </div>
+              <RecurringManager
+                recurring={recurring}
+                accounts={accounts}
+                onAdd={addRecurring}
+                onUpdate={updateRecurring}
+                onDelete={deleteRecurring}
                 transactionCategories={transactionCategories}
               />
             </>
