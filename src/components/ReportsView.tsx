@@ -40,7 +40,7 @@ function CompositionCard({ title, amount, icon, negative, detail }: {
   return (
     <div className="glass-card rounded-2xl p-5">
       <div className="flex justify-between items-start mb-3">
-        <div className="p-2 rounded-xl" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="p-2 rounded-xl" style={{ backgroundColor: 'var(--fg-3)', border: '1px solid var(--fg-5)' }}>
           {icon}
         </div>
       </div>
@@ -102,11 +102,11 @@ export function ReportsView({ transactions, accounts, debts, investments }: Repo
           <h3 className="text-lg font-semibold text-white">Receitas × Despesas</h3>
           <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
             <button onClick={() => setGranularity('monthly')}
-              className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${granularity === 'monthly' ? 'bg-primary text-white shadow-lg' : 'text-textMuted hover:text-white'}`}>
+              className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${granularity === 'monthly' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}>
               Mês a Mês
             </button>
             <button onClick={() => setGranularity('yearly')}
-              className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${granularity === 'yearly' ? 'bg-primary text-white shadow-lg' : 'text-textMuted hover:text-white'}`}>
+              className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${granularity === 'yearly' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}>
               Ano a Ano
             </button>
           </div>
@@ -121,13 +121,13 @@ export function ReportsView({ transactions, accounts, debts, investments }: Repo
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={comparison} margin={{ left: -10, right: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false} />
-                  <XAxis dataKey="label" stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                  <YAxis stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize: 10 }}
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }}
                     tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
-                  <RechartsTooltip cursor={{ fill: 'rgba(255,255,255,0.03)' }}
-                    contentStyle={{ backgroundColor: '#1c1c24', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12 }}
-                    labelStyle={{ color: '#9ca3af' }}
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 12 }}
+                    labelStyle={{ color: 'var(--color-textMuted)' }}
                     formatter={(v, name) => [fmt(Number(v)), name]} />
                   <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
                   <Bar dataKey="income" name="Receitas" fill="#14b8a6" radius={[4, 4, 0, 0]} maxBarSize={28} />

@@ -147,7 +147,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-white truncate">{acc.name}</p>
-                  <span className="text-xs px-2 py-0.5 rounded-full text-textMuted" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                  <span className="text-xs px-2 py-0.5 rounded-full text-textMuted" style={{ backgroundColor: 'var(--fg-5)' }}>
                     {acc.bank}
                   </span>
                   {/* FIN-076: a moeda só aparece quando não é real, para não poluir o caso comum. */}
@@ -164,7 +164,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
                       <span>Fatura: {formatMoney(acc.pendingBill ?? 0, currency)}</span>
                       <span>Limite: {formatMoney(acc.limit, currency)}</span>
                     </div>
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
                       <div className="h-full rounded-full bg-red-400 transition-all"
                         style={{ width: `${Math.min(100, ((acc.pendingBill ?? 0) / acc.limit) * 100)}%` }} />
                     </div>
@@ -195,7 +195,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
       </div>
 
       <button onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
+        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
         style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
         <Plus size={16} /> Adicionar Conta
       </button>
@@ -288,7 +288,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
                   {PRESET_COLORS.map(c => (
                     <button key={c} type="button" onClick={() => set('color', c)} aria-label={`Cor ${c}`} aria-pressed={form.color === c}
                       className="w-7 h-7 rounded-lg border-2 transition-transform hover:scale-110"
-                      style={{ backgroundColor: c, borderColor: form.color === c ? '#fff' : 'transparent' }} />
+                      style={{ backgroundColor: c, borderColor: form.color === c ? 'var(--color-white)' : 'transparent' }} />
                   ))}
                 </div>
               </FormField>
@@ -296,7 +296,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
 
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors"
+              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
                 style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
                 {editing ? 'Salvar' : 'Adicionar'}
               </button>

@@ -5,6 +5,7 @@ import type { Transaction } from '../utils/parsers';
 import type { PaymentType, Account } from '../types';
 import { formatDateBR } from '../utils/dates';
 import { BASE_CURRENCY, currencyOf, formatMoney } from '../utils/currency';
+import { readableColor } from '../utils/theme';
 
 interface ImportModalProps {
   onClose: () => void;
@@ -108,7 +109,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
       <div
         className="w-full max-w-2xl glass-card rounded-2xl p-8 relative"
         onClick={e => e.stopPropagation()}
-        style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+        style={{ border: '1px solid var(--fg-10)' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -131,13 +132,13 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
                 onClick={() => setPaymentType(p.value)}
                 className="flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all duration-200"
                 style={{
-                  backgroundColor: paymentType === p.value ? `${p.color}18` : 'rgba(255,255,255,0.03)',
-                  borderColor: paymentType === p.value ? `${p.color}60` : 'rgba(255,255,255,0.08)',
-                  color: paymentType === p.value ? p.color : '#6b7280',
+                  backgroundColor: paymentType === p.value ? `${p.color}18` : 'var(--fg-3)',
+                  borderColor: paymentType === p.value ? `${p.color}60` : 'var(--fg-8)',
+                  color: paymentType === p.value ? readableColor(p.color) : 'var(--color-textMuted)',
                   boxShadow: paymentType === p.value ? `0 0 14px ${p.color}18` : 'none',
                 }}
               >
-                <span style={{ color: paymentType === p.value ? p.color : '#6b7280' }}>{p.icon}</span>
+                <span style={{ color: paymentType === p.value ? readableColor(p.color) : 'var(--color-textMuted)' }}>{p.icon}</span>
                 <span className="text-xs font-bold">{p.label}</span>
               </button>
             ))}
@@ -304,7 +305,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
               </button>
               <button
                 onClick={handleConfirm}
-                className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-all shadow-lg active:scale-95"
+                className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-all shadow-lg active:scale-95"
                 style={{
                   background: `linear-gradient(135deg, ${selectedPayment.color}cc, ${selectedPayment.color}88)`,
                   boxShadow: `0 4px 20px ${selectedPayment.color}30`,

@@ -230,7 +230,7 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
         <section className="glass-card rounded-2xl p-5 mb-6" aria-labelledby="allocation-title">
           <h3 id="allocation-title" className="text-sm font-semibold text-white mb-3">Alocação por tipo</h3>
           {/* A barra é só visual; os números estão na lista logo abaixo. */}
-          <div className="flex h-2.5 rounded-full overflow-hidden mb-4" aria-hidden="true" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+          <div className="flex h-2.5 rounded-full overflow-hidden mb-4" aria-hidden="true" style={{ backgroundColor: 'var(--fg-8)' }}>
             {summary.allocation.map(slice => (
               <div key={slice.type} style={{ width: `${slice.share}%`, backgroundColor: TYPE_META[slice.type].color }} />
             ))}
@@ -342,7 +342,7 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
       </div>
 
       <button type="button" onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
+        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
         style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
         <Plus size={16} aria-hidden="true" /> Adicionar Investimento
       </button>
@@ -423,7 +423,7 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
                 Cancelar
               </button>
               <button type="button" onClick={handleSave} disabled={saving}
-                className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors disabled:opacity-50"
+                className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
                 {saving ? 'Salvando...' : editingId ? 'Salvar' : 'Adicionar'}
               </button>

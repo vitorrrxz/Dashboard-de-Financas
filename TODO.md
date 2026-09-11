@@ -35,6 +35,7 @@
 - [x] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
 - [x] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
 - [ ] Recusar `accountId` de conta de outro usuario em transacoes, dividas e recorrencias (FIN-096, achado ao implementar FIN-071)
+- [ ] Remover do git o banco real (`dev.db`) e as copias de backup (FIN-097, achado ao iniciar a Fase 8)
 
 ### Integridade financeira
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
@@ -58,6 +59,7 @@
 - [x] Criar endpoints `PUT`/`DELETE` para transacao individual (FIN-022, depende de FIN-008)
 - [x] Implementar paginacao real em `GET /api/transactions` (FIN-023)
 - [x] Adicionar script `typecheck` no `package.json` (FIN-024)
+- [ ] Aceitar importacao de extrato com mais de ~500 transacoes — limite de 100 kB do corpo JSON (FIN-098, achado ao implementar FIN-080)
 
 ### Frontend
 - [x] Centralizar base URL da API (hoje hardcoded em 3 arquivos) (FIN-025)
@@ -67,6 +69,7 @@
 ### Mobile / Responsividade
 - [x] Criar navegacao mobile — sidebar hoje fica 100% inacessivel abaixo de `md` (FIN-028)
 - [x] Adaptar grids fixos de 2 colunas em telas muito pequenas (FIN-029)
+- [ ] Mostrar editar/excluir transacao em telas de toque e no foco do teclado (FIN-099, achado ao implementar FIN-081)
 
 ### Testes automatizados
 - [x] Configurar Vitest + Testing Library no frontend (FIN-030)
@@ -162,15 +165,15 @@
 ## Fase 8 - Colaboracao e PWA
 
 ### Colaboracao
-- [ ] Modelar compartilhamento de dados entre usuarios / household (FIN-077 — requer alinhamento de produto antes de iniciar)
-- [ ] Implementar 2FA (TOTP) no login (FIN-078, depende de FIN-012)
-- [ ] Implementar exportacao completa de dados do usuario / backup (FIN-079)
-- [ ] Implementar importacao/restauracao de backup (FIN-080, depende de FIN-079, FIN-008)
+- [ ] Modelar compartilhamento de dados entre usuarios / household (FIN-077 — fora do escopo por decisao de produto: dashboard pessoal, sem compartilhamento; NAO implementar)
+- [x] Implementar 2FA (TOTP) no login (FIN-078, depende de FIN-012)
+- [x] Implementar exportacao completa de dados do usuario / backup (FIN-079)
+- [x] Implementar importacao/restauracao de backup (FIN-080, depende de FIN-079, FIN-008)
 
 ### PWA / Mobile avancado
-- [ ] Refinar navegacao mobile — UX/acessibilidade (FIN-081, depende de FIN-028)
-- [ ] Adicionar `manifest.json` + service worker — PWA instalavel (FIN-082, depende de FIN-081)
-- [ ] Implementar tema claro / light mode (FIN-083)
+- [x] Refinar navegacao mobile — UX/acessibilidade (FIN-081, depende de FIN-028)
+- [x] Adicionar `manifest.json` + service worker — PWA instalavel (FIN-082, depende de FIN-081)
+- [x] Implementar tema claro / light mode (FIN-083)
 
 ## Fase 9 - Entregaveis
 
@@ -186,7 +189,7 @@
 - [ ] Relatorios e patrimonio liquido (Fase 5)
 - [ ] Central de notificacoes completa (Fase 6)
 - [ ] Investimentos e multi-moeda (Fase 7)
-- [ ] Colaboracao, 2FA, backup e PWA (Fase 8)
+- [ ] 2FA, backup e PWA (Fase 8 — colaboracao ficou fora do escopo, ver FIN-077)
 
 ---
 

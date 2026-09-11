@@ -124,7 +124,7 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
                 </button>
               </div>
             </div>
-            <div className="h-1.5 rounded-full overflow-hidden mt-3" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+            <div className="h-1.5 rounded-full overflow-hidden mt-3" style={{ backgroundColor: 'var(--fg-8)' }}>
               <div className={`h-full rounded-full transition-all ${b.isOverLimit ? 'bg-red-400' : 'bg-primary'}`}
                 style={{ width: `${Math.min(100, b.percentage)}%` }} />
             </div>
@@ -135,7 +135,7 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
       {/* Desabilitado quando toda categoria de despesa já tem orçamento — independe de
           `editingId`, que pode ainda referenciar a última edição até `openAdd` rodar. */}
       <button onClick={openAdd} disabled={categoriesWithoutBudget.length === 0}
-        className="w-full py-3.5 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all shadow-lg disabled:opacity-50"
+        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg disabled:opacity-50"
         style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
         <Plus size={16} /> Adicionar Orçamento
       </button>
@@ -166,7 +166,7 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
 
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors"
+              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
                 style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
                 {editingId ? 'Salvar' : 'Adicionar'}
               </button>

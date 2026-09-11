@@ -15,6 +15,9 @@ import { unlinkSync, existsSync } from 'fs';
 // expirado/forjado em server.auth.test.js) usem o MESMO segredo que `server.js` valida em
 // tempo de teste, sem duplicar o literal — evita os dois valores divergirem silenciosamente.
 export const TEST_JWT_SECRET = 'test_jwt_secret_' + 'x'.repeat(40); // >= 32 chars, exigido por server.js
+// Chave que cifra os segredos TOTP (FIN-078). Exportada para o teste que simula o servidor sem
+// chave poder restaurá-la depois.
+export const TEST_TWO_FACTOR_KEY = 'test_2fa_key_' + 'y'.repeat(40); // >= 32 chars
 
 export async function createTestApp(dbName, { authRateLimit } = {}) {
   const dbFile = `./test_${dbName}.db`;
@@ -27,6 +30,7 @@ export async function createTestApp(dbName, { authRateLimit } = {}) {
   process.env.PLUGGY_CLIENT_ID = '';
   process.env.PLUGGY_CLIENT_SECRET = '';
   process.env.FRONTEND_URL = 'http://localhost:5173';
+  process.env.TWO_FACTOR_ENCRYPTION_KEY = TEST_TWO_FACTOR_KEY;
   // Testes de auth/isolamento fazem dezenas de register/login em sequência contra o mesmo
   // app — sem um limite alto aqui, o rate limit de produção (10/15min, ver FIN-007)
   // derrubaria a própria suíte de testes com 429. `authRateLimit` permite o inverso: um

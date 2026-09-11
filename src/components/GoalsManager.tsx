@@ -90,7 +90,7 @@ export function GoalsManager({ goals, onAdd, onUpdate, onDelete }: GoalsManagerP
                   style={{
                     backgroundColor: progress.isAchieved ? 'rgba(20,184,166,0.15)' : progress.isOverdue ? 'rgba(239,68,68,0.15)' : 'rgba(99,102,241,0.15)',
                     border: `1px solid ${progress.isAchieved ? 'rgba(20,184,166,0.3)' : progress.isOverdue ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.3)'}`,
-                    color: progress.isAchieved ? '#2dd4bf' : progress.isOverdue ? '#f87171' : 'var(--color-primary)',
+                    color: progress.isAchieved ? 'var(--text-positive)' : progress.isOverdue ? 'var(--text-negative)' : 'var(--color-primary)',
                   }}>
                   {progress.isAchieved ? <CheckCircle2 size={18} /> : progress.isOverdue ? <AlertTriangle size={18} /> : <Target size={18} />}
                 </div>
@@ -125,7 +125,7 @@ export function GoalsManager({ goals, onAdd, onUpdate, onDelete }: GoalsManagerP
                 </div>
               </div>
 
-              <div className="h-1.5 rounded-full overflow-hidden mt-3" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+              <div className="h-1.5 rounded-full overflow-hidden mt-3" style={{ backgroundColor: 'var(--fg-8)' }}>
                 <div className={`h-full rounded-full transition-all ${barColor}`}
                   style={{ width: `${Math.min(100, progress.percentage)}%` }} />
               </div>
@@ -135,7 +135,7 @@ export function GoalsManager({ goals, onAdd, onUpdate, onDelete }: GoalsManagerP
       </div>
 
       <button onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
+        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
         style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
         <Plus size={16} /> Adicionar Meta
       </button>
@@ -177,7 +177,7 @@ export function GoalsManager({ goals, onAdd, onUpdate, onDelete }: GoalsManagerP
 
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors"
+              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
                 style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
                 {editingId ? 'Salvar' : 'Adicionar'}
               </button>

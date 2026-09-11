@@ -11,6 +11,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { fileURLToPath } from 'url';
+import * as OTPAuth from 'otpauth';
+import qrcode from 'qrcode-generator';
 
 dotenv.config();
 
@@ -19,7 +21,16 @@ app.use(helmet()); // cabeçalhos de segurança HTTP padrão (ver FIN-010)
 // CORS restrito à origem conhecida do frontend — evita que qualquer site de terceiros
 // consiga ler respostas desta API (ver FIN-009 em docs/BACKLOG_DETAIL.md).
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
-app.use(express.json());
+// Corpo JSON de até 100 kB (padrão do Express) em todas as rotas, menos a restauração de backup
+// (FIN-080): ela recebe o arquivo inteiro e usa um parser próprio, com limite maior, que só roda
+// depois da autenticação — ver a rota.
+const BACKUP_IMPORT_PATH = '/api/account/import';
+// Sem caixa e sem barra final, porque o roteamento do Express também ignora as duas.
+function isBackupImportPath(req) {
+  return req.path.replace(/\/+$/, '').toLowerCase() === BACKUP_IMPORT_PATH;
+}
+const jsonBody = express.json();
+app.use((req, res, next) => (isBackupImportPath(req) ? next() : jsonBody(req, res, next)));
 
 const PORT = 3001;
 const adapter = new PrismaBetterSqlite3({
@@ -820,6 +831,165 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
   }
 });
 
+/* -------------------------------------------------------------------------- */
+/*                 VERIFICAÇÃO EM DUAS ETAPAS — TOTP (FIN-078)                 */
+/* -------------------------------------------------------------------------- */
+// Códigos de 6 dígitos que mudam a cada 30 s (RFC 6238), compatíveis com Google Authenticator,
+// Microsoft Authenticator, Authy, 1Password etc. Aceita também o intervalo anterior e o seguinte
+// (±30 s), para tolerar o relógio do celular um pouco adiantado ou atrasado.
+const TOTP_ISSUER = 'FinFlow';
+const TOTP_WINDOW = 1;
+const TOTP_CODE_PATTERN = /^\d{6}$/;
+// Códigos de recuperação: entram no lugar do aplicativo quando o celular se perde, uma vez cada.
+// Sem I, O, 0 e 1, que se confundem ao copiar à mão; 32 símbolos = 5 bits por caractere, então
+// 10 caracteres = 50 bits. Guardados com bcrypt, e não sha256: com 50 bits, um hash rápido seria
+// quebrável por força bruta em quem copiasse o banco.
+const RECOVERY_CODE_COUNT = 10;
+const RECOVERY_CODE_LENGTH = 10;
+const RECOVERY_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+const TWO_FACTOR_UNAVAILABLE = 'A verificação em duas etapas não está configurada neste servidor.';
+const TWO_FACTOR_ALREADY_ENABLED = 'A verificação em duas etapas já está ativa.';
+const INVALID_SECOND_FACTOR = 'Código de verificação inválido.';
+
+let twoFactorKeyWarned = false;
+
+/**
+ * Chave AES-256 que cifra os segredos TOTP no banco, derivada (HKDF) de
+ * TWO_FACTOR_ENCRYPTION_KEY. Sem a variável — ou com menos de 32 caracteres —, a ativação fica
+ * indisponível: gravar o segredo em texto puro deixaria qualquer cópia do banco gerar os códigos.
+ * É uma chave própria, e não derivada do JWT_SECRET, para que trocar o JWT_SECRET (a resposta a
+ * um token vazado) não invalide o 2FA de todos. Lida a cada uso, e não só no carregamento do
+ * módulo, para os testes poderem simular um servidor sem a chave.
+ */
+function twoFactorKey() {
+  const raw = process.env.TWO_FACTOR_ENCRYPTION_KEY || '';
+  if (raw.length >= 32) return Buffer.from(crypto.hkdfSync('sha256', raw, '', 'finflow-2fa-secret', 32));
+  if (raw && !twoFactorKeyWarned) {
+    console.warn('⚠️  TWO_FACTOR_ENCRYPTION_KEY tem menos de 32 caracteres e foi ignorada — verificação em duas etapas indisponível.');
+    twoFactorKeyWarned = true;
+  }
+  return null;
+}
+
+// Formato gravado: "v1.<iv>.<tag>.<cifrado>", em base64url. O `userId` entra como dado
+// autenticado (AAD): o segredo de um usuário copiado para a linha de outro não decifra. A tag
+// tem tamanho fixo de 16 bytes na decifragem — sem isso o Node aceitaria tags truncadas.
+function encryptTwoFactorSecret(plain, userId, key) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+  cipher.setAAD(Buffer.from(userId, 'utf8'));
+  const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return ['v1', iv.toString('base64url'), cipher.getAuthTag().toString('base64url'), encrypted.toString('base64url')].join('.');
+}
+
+/** Decifra o segredo TOTP; `null` quando a chave falta, mudou, ou o valor foi adulterado. */
+function decryptTwoFactorSecret(payload, userId, key) {
+  if (!key || typeof payload !== 'string') return null;
+  const parts = payload.split('.');
+  if (parts.length !== 4 || parts[0] !== 'v1') return null;
+  try {
+    const [, iv, tag, data] = parts;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url'), { authTagLength: 16 });
+    decipher.setAAD(Buffer.from(userId, 'utf8'));
+    decipher.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([decipher.update(Buffer.from(data, 'base64url')), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+/** Gerador TOTP do segredo (base32). O `label` só aparece no QR code — não afeta a validação. */
+function buildTotp(secretBase32, label = '') {
+  return new OTPAuth.TOTP({ issuer: TOTP_ISSUER, label, secret: OTPAuth.Secret.fromBase32(secretBase32) });
+}
+
+/** QR code do `otpauth://` como imagem (data URL), para o aplicativo autenticador ler. */
+function qrCodeDataUrl(text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return qr.createDataURL(4, 4);
+}
+
+function generateRecoveryCodes() {
+  return Array.from({ length: RECOVERY_CODE_COUNT }, () => {
+    let code = '';
+    for (let i = 0; i < RECOVERY_CODE_LENGTH; i++) {
+      code += RECOVERY_CODE_ALPHABET[crypto.randomInt(RECOVERY_CODE_ALPHABET.length)];
+    }
+    return `${code.slice(0, 5)}-${code.slice(5)}`;
+  });
+}
+
+/** Forma canônica do código de recuperação: maiúsculas, sem espaços nem hífens. */
+function normalizeRecoveryCode(input) {
+  return input.toUpperCase().replace(/[\s-]/g, '');
+}
+
+/** Hashes dos códigos de recuperação restantes; um valor corrompido vale como lista vazia. */
+function parseRecoveryHashes(stored) {
+  try {
+    const list = JSON.parse(stored);
+    return Array.isArray(list) ? list.filter(hash => typeof hash === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Confere o segundo fator de um `UserTwoFactor` ativo — código de 6 dígitos do aplicativo ou
+ * código de recuperação — e consome o que foi usado: o intervalo TOTP passa a ser o
+ * `lastUsedStep`, e o código de recuperação sai da lista. O consumo é um `updateMany`
+ * condicionado ao valor que acabou de ser lido, então duas requisições simultâneas com o mesmo
+ * código não passam as duas. Devolve `{ ok: true, method, remaining? }` ou `{ ok: false, reason }`.
+ */
+async function consumeSecondFactor(record, rawCode) {
+  const code = typeof rawCode === 'string' ? rawCode.replace(/\s/g, '') : '';
+
+  if (TOTP_CODE_PATTERN.test(code)) {
+    const secret = decryptTwoFactorSecret(record.secret, record.userId, twoFactorKey());
+    if (!secret) {
+      console.error(`2FA: o segredo do usuário ${record.userId} não pôde ser decifrado (TWO_FACTOR_ENCRYPTION_KEY ausente ou trocada).`);
+      return { ok: false, reason: 'undecryptable' };
+    }
+    const totp = buildTotp(secret);
+    const timestamp = Date.now();
+    const delta = totp.validate({ token: code, timestamp, window: TOTP_WINDOW });
+    if (delta === null) return { ok: false, reason: 'invalid' };
+    const step = totp.counter({ timestamp }) + delta;
+    const result = await prisma.userTwoFactor.updateMany({
+      where: { userId: record.userId, OR: [{ lastUsedStep: null }, { lastUsedStep: { lt: step } }] },
+      data: { lastUsedStep: step },
+    });
+    return result.count === 1 ? { ok: true, method: 'totp' } : { ok: false, reason: 'invalid' };
+  }
+
+  const normalized = normalizeRecoveryCode(code);
+  if (normalized.length !== RECOVERY_CODE_LENGTH) return { ok: false, reason: 'invalid' };
+  const hashes = parseRecoveryHashes(record.recoveryCodes);
+  for (let i = 0; i < hashes.length; i++) {
+    if (await bcrypt.compare(normalized, hashes[i])) {
+      const remaining = hashes.filter((_, j) => j !== i);
+      const result = await prisma.userTwoFactor.updateMany({
+        where: { userId: record.userId, recoveryCodes: record.recoveryCodes },
+        data: { recoveryCodes: JSON.stringify(remaining) },
+      });
+      return result.count === 1
+        ? { ok: true, method: 'recovery', remaining: remaining.length }
+        : { ok: false, reason: 'invalid' };
+    }
+  }
+  return { ok: false, reason: 'invalid' };
+}
+
+/** Mensagem de um segundo fator recusado. Sem a chave, só os códigos de recuperação funcionam. */
+function secondFactorError(reason) {
+  return reason === 'undecryptable'
+    ? 'Não foi possível validar o código do aplicativo neste servidor. Use um código de recuperação.'
+    : INVALID_SECOND_FACTOR;
+}
+
 app.post('/api/auth/login', authLimiter, async (req, res) => {
   const { password } = req.body;
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : req.body.email;
@@ -832,14 +1002,29 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   }
 
   try {
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email }, include: { twoFactor: true } });
     if (!user) return res.status(400).json({ error: 'Credenciais inválidas' });
 
     const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) return res.status(400).json({ error: 'Credenciais inválidas' });
 
+    // FIN-078 — com a verificação em duas etapas ativa, a senha certa não basta. Sem código, a
+    // resposta pede o segundo fator (sem token); com código, ele precisa conferir. Só chega
+    // aqui quem acertou a senha: a senha errada recebe a mesma mensagem de sempre, e nada
+    // revela se a conta usa 2FA. Uma configuração iniciada e não confirmada não conta.
+    let recoveryInfo = {};
+    if (user.twoFactor?.enabledAt) {
+      const code = typeof req.body.code === 'string' ? req.body.code.trim() : '';
+      if (!code) return res.json({ twoFactorRequired: true });
+      const check = await consumeSecondFactor(user.twoFactor, code);
+      if (!check.ok) return res.status(400).json({ error: secondFactorError(check.reason) });
+      if (check.method === 'recovery') {
+        recoveryInfo = { recoveryCodeUsed: true, recoveryCodesRemaining: check.remaining };
+      }
+    }
+
     const token = jwt.sign({ userId: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email }, ...recoveryInfo });
   } catch (error) {
     sendInternalError(res, error, 'Erro ao realizar login.');
   }
@@ -847,6 +1032,122 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 
 app.get('/api/auth/me', authenticateToken, async (req, res) => {
   res.json({ user: req.user });
+});
+
+// FIN-078 — estado da verificação em duas etapas do usuário: se o servidor tem a chave para
+// ativá-la (`available`), se está ativa e quantos códigos de recuperação restam.
+app.get('/api/auth/2fa', authenticateToken, async (req, res) => {
+  try {
+    const record = await prisma.userTwoFactor.findUnique({ where: { userId: req.user.userId } });
+    const enabled = Boolean(record?.enabledAt);
+    res.json({
+      available: twoFactorKey() !== null,
+      enabled,
+      enabledAt: enabled ? record.enabledAt : null,
+      recoveryCodesRemaining: enabled ? parseRecoveryHashes(record.recoveryCodes).length : null,
+    });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao consultar a verificação em duas etapas.');
+  }
+});
+
+// Passo 1 da ativação: gera um segredo novo e devolve o QR code. Nada muda no login ainda —
+// o registro nasce com `enabledAt` nulo e só vale depois de confirmado (passo 2).
+app.post('/api/auth/2fa/setup', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  const key = twoFactorKey();
+  if (!key) return res.status(503).json({ error: TWO_FACTOR_UNAVAILABLE });
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+
+    const secret = new OTPAuth.Secret({ size: 20 }).base32;
+    const data = { secret: encryptTwoFactorSecret(secret, userId, key), enabledAt: null, lastUsedStep: null, recoveryCodes: '[]' };
+    // Recomeçar uma configuração pendente troca o segredo; uma já ativa, nunca. O
+    // `enabledAt: null` no filtro vale também contra uma ativação feita em outra aba entre a
+    // leitura e a escrita: sem registro pendente, cai no `create`, que esbarra no registro ativo.
+    const updated = await prisma.userTwoFactor.updateMany({ where: { userId, enabledAt: null }, data });
+    if (updated.count === 0) {
+      try {
+        await prisma.userTwoFactor.create({ data: { userId, ...data } });
+      } catch (err) {
+        if (err.code === 'P2002') return res.status(409).json({ error: TWO_FACTOR_ALREADY_ENABLED });
+        throw err;
+      }
+    }
+
+    const otpauthUrl = buildTotp(secret, user.email).toString();
+    res.json({ secret, otpauthUrl, qrCode: qrCodeDataUrl(otpauthUrl) });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao iniciar a verificação em duas etapas.');
+  }
+});
+
+// Passo 2: confirma com a senha e um código do aplicativo, e devolve os códigos de recuperação
+// — a única vez em que aparecem em texto. A senha é exigida para que um token vazado não baste
+// para ativar o 2FA com o celular de outra pessoa e trancar o dono fora da conta.
+app.post('/api/auth/2fa/enable', authLimiter, authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  const { password } = req.body;
+  const code = typeof req.body.code === 'string' ? req.body.code.replace(/\s/g, '') : '';
+  if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Senha é obrigatória.' });
+  if (!TOTP_CODE_PATTERN.test(code)) return res.status(400).json({ error: 'Informe o código de 6 dígitos do aplicativo.' });
+  const key = twoFactorKey();
+  if (!key) return res.status(503).json({ error: TWO_FACTOR_UNAVAILABLE });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { twoFactor: true } });
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    if (!(await bcrypt.compare(password, user.passwordHash))) return res.status(400).json({ error: 'Senha incorreta.' });
+
+    const record = user.twoFactor;
+    if (record?.enabledAt) return res.status(409).json({ error: TWO_FACTOR_ALREADY_ENABLED });
+    if (!record) return res.status(400).json({ error: 'Gere o QR code antes de confirmar.' });
+    const secret = decryptTwoFactorSecret(record.secret, userId, key);
+    if (!secret) return res.status(400).json({ error: 'Esta configuração não vale mais. Gere um novo QR code.' });
+
+    const totp = buildTotp(secret);
+    const timestamp = Date.now();
+    const delta = totp.validate({ token: code, timestamp, window: TOTP_WINDOW });
+    if (delta === null) return res.status(400).json({ error: INVALID_SECOND_FACTOR });
+
+    const recoveryCodes = generateRecoveryCodes();
+    const hashes = await Promise.all(recoveryCodes.map(c => bcrypt.hash(normalizeRecoveryCode(c), 10)));
+    // `secret` no filtro: se outra aba gerou um QR code novo depois da leitura, o código
+    // conferido é de um segredo que já não vale, e a ativação não acontece.
+    const result = await prisma.userTwoFactor.updateMany({
+      where: { userId, enabledAt: null, secret: record.secret },
+      data: { enabledAt: new Date(), lastUsedStep: totp.counter({ timestamp }) + delta, recoveryCodes: JSON.stringify(hashes) },
+    });
+    if (result.count === 0) return res.status(409).json({ error: 'A configuração mudou em outra janela. Gere um novo QR code.' });
+    res.json({ enabled: true, recoveryCodes });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao ativar a verificação em duas etapas.');
+  }
+});
+
+// Desativa com a senha e um segundo fator (código do aplicativo ou de recuperação) — quem só
+// tem o token, ou só a senha, não consegue tirar a proteção.
+app.post('/api/auth/2fa/disable', authLimiter, authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  const { password, code } = req.body;
+  if (typeof password !== 'string' || !password) return res.status(400).json({ error: 'Senha é obrigatória.' });
+  if (typeof code !== 'string' || !code.trim()) {
+    return res.status(400).json({ error: 'Informe um código do aplicativo ou um código de recuperação.' });
+  }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { twoFactor: true } });
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    if (!(await bcrypt.compare(password, user.passwordHash))) return res.status(400).json({ error: 'Senha incorreta.' });
+    if (!user.twoFactor?.enabledAt) return res.status(409).json({ error: 'A verificação em duas etapas não está ativa.' });
+
+    const check = await consumeSecondFactor(user.twoFactor, code);
+    if (!check.ok) return res.status(400).json({ error: secondFactorError(check.reason) });
+    await prisma.userTwoFactor.deleteMany({ where: { userId } });
+    res.json({ enabled: false });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao desativar a verificação em duas etapas.');
+  }
 });
 
 /* -------------------------------------------------------------------------- */
@@ -1573,6 +1874,321 @@ app.put('/api/notifications/:id/read', authenticateToken, async (req, res) => {
 });
 
 /* -------------------------------------------------------------------------- */
+/*                   BACKUP E RESTAURAÇÃO (FIN-079/FIN-080)                   */
+/* -------------------------------------------------------------------------- */
+// Arquivo: { format, version, exportedAt, user: { name, email }, data: { accounts, transactions,
+// debts (com subItems), budgets, goals, recurring, investments } }, com os valores em centavos,
+// como no banco. Ficam de fora a senha, a verificação em duas etapas (segredos não saem do
+// servidor) e as notificações, que são derivadas dos dados e voltam a ser geradas. As linhas não
+// levam `userId`: o arquivo não carrega a identidade interna de ninguém.
+const BACKUP_FORMAT = 'finflow-backup';
+const BACKUP_VERSION = 1;
+// Limite do corpo da restauração — cerca de 100 mil transações cabem com folga.
+const BACKUP_BODY_LIMIT = '25mb';
+const MAX_BACKUP_ROWS = 100_000;
+// Seções do arquivo, com o nome de cada registro no singular e no plural (mensagens de erro).
+const BACKUP_SECTIONS = {
+  accounts: ['conta', 'contas'],
+  transactions: ['transação', 'transações'],
+  debts: ['dívida', 'dívidas'],
+  budgets: ['orçamento', 'orçamentos'],
+  goals: ['meta', 'metas'],
+  recurring: ['recorrência', 'recorrências'],
+  investments: ['investimento', 'investimentos'],
+};
+
+async function buildBackup(userId) {
+  // Numa única transação de leitura: o arquivo é um retrato consistente mesmo com um sync da
+  // Pluggy gravando ao mesmo tempo. O `id` no fim de cada ordenação desempata registros criados
+  // no mesmo milissegundo, para dois backups dos mesmos dados saírem idênticos.
+  const byCreation = [{ createdAt: 'asc' }, { id: 'asc' }];
+  const [user, accounts, transactions, debts, budgets, goals, recurring, investments] = await prisma.$transaction([
+    prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } }),
+    prisma.account.findMany({ where: { userId }, orderBy: byCreation }),
+    prisma.transaction.findMany({ where: { userId }, orderBy: [{ date: 'asc' }, ...byCreation] }),
+    prisma.debt.findMany({
+      where: { userId },
+      orderBy: byCreation,
+      include: { subItems: { orderBy: [{ date: 'asc' }, { name: 'asc' }, { amount: 'asc' }] } },
+    }),
+    prisma.budget.findMany({ where: { userId }, orderBy: byCreation }),
+    prisma.goal.findMany({ where: { userId }, orderBy: byCreation }),
+    prisma.recurringTransaction.findMany({ where: { userId }, orderBy: byCreation }),
+    prisma.investment.findMany({ where: { userId }, orderBy: byCreation }),
+  ]);
+  if (!user) return null;
+  const withoutUser = ({ userId: _userId, ...row }) => row;
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    user,
+    data: {
+      accounts: accounts.map(withoutUser),
+      transactions: transactions.map(withoutUser),
+      debts: debts.map(({ userId: _userId, subItems, ...debt }) => ({
+        ...debt,
+        subItems: subItems.map(({ name, amount, date }) => ({ name, amount, date })),
+      })),
+      budgets: budgets.map(withoutUser),
+      goals: goals.map(withoutUser),
+      recurring: recurring.map(withoutUser),
+      investments: investments.map(withoutUser),
+    },
+  };
+}
+
+app.get('/api/account/export', authenticateToken, async (req, res) => {
+  try {
+    const backup = await buildBackup(req.user.userId);
+    if (!backup) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    res.setHeader('Content-Disposition', `attachment; filename="finflow-backup-${todayISO()}.json"`);
+    // Dados financeiros completos: nenhum cache (navegador, proxy ou service worker) guarda a resposta.
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(backup);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao gerar o backup.');
+  }
+});
+
+// As linhas do arquivo reaproveitam os schemas das rotas (FIN-008), com três ajustes: o `id`
+// original (para refazer os vínculos entre contas e lançamentos), as datas de criação, e os campos
+// que o sync da Pluggy grava sem passar por aquelas regras — o nome de uma conta ou transação pode
+// vir vazio do banco, e a moeda de uma conta pode ser qualquer código ISO (`pluggyCurrency`).
+// Recusar esses valores tornaria impossível restaurar um backup legítimo.
+const backupIdField = z.string({ error: 'Identificador ausente.' }).regex(/^[A-Za-z0-9_-]{1,64}$/, 'Identificador inválido.');
+const backupAccountRef = z.preprocess(v => (v === '' ? null : v), backupIdField.nullable().optional());
+const backupDateField = z.iso.datetime({ message: 'Data inválida.' }).transform(value => new Date(value)).optional();
+const backupCurrencyField = z.string().regex(CURRENCY_CODE_PATTERN, 'Moeda deve ser um código ISO de 3 letras.').optional();
+const backupExternalKey = z.string().trim().min(1).max(200).nullable().optional();
+
+const backupAccountSchema = accountSchema.extend({
+  id: backupIdField,
+  pluggyId: backupExternalKey,
+  name: z.string().max(500),
+  currency: backupCurrencyField,
+  createdAt: backupDateField,
+});
+// Sem `currency`: como em toda gravação de transação, a moeda vem da conta (FIN-074).
+const backupTransactionSchema = transactionSchema.omit({ externalId: true }).extend({
+  id: backupIdField,
+  accountId: backupAccountRef,
+  pluggyId: backupExternalKey,
+  importHash: backupExternalKey,
+  name: z.string().max(500),
+  createdAt: backupDateField,
+});
+const backupDebtSchema = debtSchema.extend({ id: backupIdField, accountId: backupAccountRef, createdAt: backupDateField });
+const backupBudgetSchema = budgetSchema.extend({ id: backupIdField, createdAt: backupDateField });
+const backupGoalSchema = goalSchema.extend({ id: backupIdField, createdAt: backupDateField });
+const backupRecurringSchema = recurringSchema.extend({ id: backupIdField, accountId: backupAccountRef, createdAt: backupDateField });
+const backupInvestmentSchema = investmentSchema.extend({
+  id: backupIdField,
+  accountId: backupAccountRef,
+  currency: backupCurrencyField,
+  createdAt: backupDateField,
+  updatedAt: backupDateField,
+});
+
+const backupRows = schema => z.array(schema).max(MAX_BACKUP_ROWS, `mais de ${MAX_BACKUP_ROWS} registros.`);
+const backupSchema = z.object({
+  format: z.literal(BACKUP_FORMAT, { message: 'O arquivo não é um backup do FinFlow.' }),
+  version: z.literal(BACKUP_VERSION, { message: 'Versão de backup não suportada.' }),
+  data: z.object({
+    accounts: backupRows(backupAccountSchema),
+    transactions: backupRows(backupTransactionSchema),
+    debts: backupRows(backupDebtSchema),
+    budgets: backupRows(backupBudgetSchema),
+    goals: backupRows(backupGoalSchema),
+    recurring: backupRows(backupRecurringSchema),
+    investments: backupRows(backupInvestmentSchema),
+  }),
+});
+
+/** "transação nº 2" — posição de um registro no arquivo, para as mensagens de erro. */
+function backupRowLabel(section, index) {
+  return `${BACKUP_SECTIONS[section][0]} nº ${index + 1}`;
+}
+
+/** Mensagem legível dos três primeiros problemas de validação, com a posição de cada um no arquivo. */
+function backupIssueMessage(issues) {
+  const describe = issue => {
+    const [root, section, index, field] = issue.path;
+    const text = (issue.code === 'invalid_type' ? 'valor ausente ou com tipo errado' : issue.message).replace(/\.$/, '');
+    if (root !== 'data') return text;
+    if (section === undefined) return 'o arquivo não tem a seção de dados';
+    if (!Object.prototype.hasOwnProperty.call(BACKUP_SECTIONS, section)) return text;
+    if (typeof index !== 'number') return `seção de ${BACKUP_SECTIONS[section][1]}: ${text}`;
+    return `${backupRowLabel(section, index)}${field !== undefined ? ` (${String(field)})` : ''}: ${text}`;
+  };
+  const shown = issues.slice(0, 3).map(describe).join('; ');
+  const more = issues.length > 3 ? ` — e mais ${issues.length - 3} problema(s)` : '';
+  return `Backup inválido: ${shown}${more}.`;
+}
+
+/**
+ * Coerência interna do arquivo, conferida antes de apagar qualquer coisa: ids repetidos, vínculo
+ * com conta que não está no arquivo, investimento em cartão de crédito (a mesma regra de
+ * `investmentAccountError`) e as constraints únicas do banco — sem esta checagem, a violação só
+ * apareceria no meio da gravação. Devolve a mensagem do primeiro problema, ou `null`.
+ */
+function backupConsistencyError(data) {
+  for (const section of Object.keys(BACKUP_SECTIONS)) {
+    const seen = new Set();
+    for (const [index, row] of data[section].entries()) {
+      if (seen.has(row.id)) return `${backupRowLabel(section, index)}: identificador repetido no arquivo.`;
+      seen.add(row.id);
+    }
+  }
+  const accountTypes = new Map(data.accounts.map(account => [account.id, account.type]));
+  for (const section of ['transactions', 'debts', 'recurring', 'investments']) {
+    for (const [index, row] of data[section].entries()) {
+      if (row.accountId && !accountTypes.has(row.accountId)) {
+        return `${backupRowLabel(section, index)}: aponta para uma conta que não está no arquivo.`;
+      }
+    }
+  }
+  for (const [index, investment] of data.investments.entries()) {
+    if (investment.accountId && accountTypes.get(investment.accountId) === 'credit') {
+      return `${backupRowLabel('investments', index)}: vinculado a um cartão de crédito.`;
+    }
+  }
+  const uniqueKeys = [
+    ['budgets', 'category', 'categoria repetida'],
+    ['accounts', 'pluggyId', 'conta da Pluggy repetida'],
+    ['transactions', 'pluggyId', 'transação da Pluggy repetida'],
+    ['transactions', 'importHash', 'transação importada repetida'],
+  ];
+  for (const [section, key, problem] of uniqueKeys) {
+    const seen = new Set();
+    for (const [index, row] of data[section].entries()) {
+      const value = row[key];
+      if (value == null) continue;
+      if (seen.has(value)) return `${backupRowLabel(section, index)}: ${problem}.`;
+      seen.add(value);
+    }
+  }
+  return null;
+}
+
+/**
+ * Algum id do arquivo já pertence a outro usuário? Acontece quando o backup de uma pessoa é
+ * restaurado na conta de outra, no mesmo servidor. Consulta em lotes de 500 ids, abaixo do
+ * limite de parâmetros do SQLite.
+ */
+async function backupIdsTakenByOthers(userId, data) {
+  const models = {
+    accounts: prisma.account, transactions: prisma.transaction, debts: prisma.debt, budgets: prisma.budget,
+    goals: prisma.goal, recurring: prisma.recurringTransaction, investments: prisma.investment,
+  };
+  for (const [section, model] of Object.entries(models)) {
+    const ids = data[section].map(row => row.id);
+    for (let i = 0; i < ids.length; i += 500) {
+      const taken = await model.count({ where: { id: { in: ids.slice(i, i + 500) }, userId: { not: userId } } });
+      if (taken > 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Linhas a gravar para `userId`. Com `reuseIds`, os ids do arquivo são mantidos: a restauração
+ * devolve os dados exatamente como eram — inclusive a chave de deduplicação das importações de
+ * extrato, que inclui o id da conta. Sem, cada registro ganha um id novo e os vínculos com as
+ * contas são refeitos pelo mapa. O `userId` é sempre o de quem restaura, nunca o do arquivo.
+ */
+function buildRestoreRows(userId, data, reuseIds) {
+  const newId = id => (reuseIds ? id : crypto.randomUUID());
+  const accountIds = new Map(data.accounts.map(account => [account.id, newId(account.id)]));
+  const accountCurrency = new Map(data.accounts.map(account => [account.id, account.currency ?? BASE_CURRENCY]));
+  const accountRef = accountId => (accountId ? accountIds.get(accountId) : null);
+
+  const debtItems = [];
+  return {
+    accounts: data.accounts.map(({ id, ...account }) => ({
+      ...account, id: accountIds.get(id), userId, currency: account.currency ?? BASE_CURRENCY,
+    })),
+    transactions: data.transactions.map(({ id, accountId, ...tx }) => ({
+      paymentType: 'debit',
+      ...tx,
+      id: newId(id),
+      userId,
+      accountId: accountRef(accountId),
+      currency: accountId ? accountCurrency.get(accountId) : BASE_CURRENCY,
+    })),
+    debts: data.debts.map(({ id, accountId, subItems, ...debt }) => {
+      const debtId = newId(id);
+      for (const item of subItems ?? []) debtItems.push({ ...item, debtId });
+      return { paidAmount: 0, paidInstallments: 0, ...debt, id: debtId, userId, accountId: accountRef(accountId) };
+    }),
+    debtItems,
+    budgets: data.budgets.map(({ id, ...budget }) => ({ ...budget, id: newId(id), userId })),
+    goals: data.goals.map(({ id, ...goal }) => ({ currentAmount: 0, ...goal, id: newId(id), userId })),
+    recurring: data.recurring.map(({ id, accountId, ...rec }) => ({
+      active: true, ...rec, id: newId(id), userId, accountId: accountRef(accountId),
+    })),
+    investments: data.investments.map(({ id, accountId, ...investment }) => ({
+      ...investment, id: newId(id), userId, accountId: accountRef(accountId), currency: investment.currency ?? BASE_CURRENCY,
+    })),
+  };
+}
+
+// Restauração: SUBSTITUI todos os dados do usuário pelos do arquivo, numa única transação de banco
+// — ou tudo é trocado, ou nada muda. Por ser destrutiva, pede a senha, e o arquivo inteiro é
+// validado antes de qualquer exclusão. O corpo só é lido depois da autenticação, com limite
+// próprio (o parser global pula esta rota — ver `isBackupImportPath`).
+app.post(BACKUP_IMPORT_PATH, authLimiter, authenticateToken, express.json({ limit: BACKUP_BODY_LIMIT }), async (req, res) => {
+  const userId = req.user.userId;
+  const { password, backup } = req.body ?? {};
+  if (typeof password !== 'string' || !password) {
+    return res.status(400).json({ error: 'Confirme a restauração com a sua senha.' });
+  }
+  if (!backup || typeof backup !== 'object' || Array.isArray(backup)) {
+    return res.status(400).json({ error: 'Envie o conteúdo do arquivo de backup.' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    if (!(await bcrypt.compare(password, user.passwordHash))) return res.status(400).json({ error: 'Senha incorreta.' });
+
+    const parsed = backupSchema.safeParse(backup);
+    if (!parsed.success) return res.status(400).json({ error: backupIssueMessage(parsed.error.issues) });
+    const data = parsed.data.data;
+    const inconsistency = backupConsistencyError(data);
+    if (inconsistency) return res.status(400).json({ error: `Backup inválido: ${inconsistency}` });
+
+    const rows = buildRestoreRows(userId, data, !(await backupIdsTakenByOthers(userId, data)));
+    await prisma.$transaction([
+      // Filhos antes dos pais, por causa das chaves estrangeiras.
+      prisma.debtItem.deleteMany({ where: { debt: { userId } } }),
+      prisma.debt.deleteMany({ where: { userId } }),
+      prisma.transaction.deleteMany({ where: { userId } }),
+      prisma.recurringTransaction.deleteMany({ where: { userId } }),
+      prisma.investment.deleteMany({ where: { userId } }),
+      prisma.budget.deleteMany({ where: { userId } }),
+      prisma.goal.deleteMany({ where: { userId } }),
+      // Avisos derivados dos dados antigos; os dos restaurados são gerados na próxima carga do app.
+      prisma.notification.deleteMany({ where: { userId } }),
+      prisma.account.deleteMany({ where: { userId } }),
+      prisma.account.createMany({ data: rows.accounts }),
+      prisma.transaction.createMany({ data: rows.transactions }),
+      prisma.debt.createMany({ data: rows.debts }),
+      prisma.debtItem.createMany({ data: rows.debtItems }),
+      prisma.budget.createMany({ data: rows.budgets }),
+      prisma.goal.createMany({ data: rows.goals }),
+      prisma.recurringTransaction.createMany({ data: rows.recurring }),
+      prisma.investment.createMany({ data: rows.investments }),
+    ]);
+
+    const restored = Object.fromEntries(Object.keys(BACKUP_SECTIONS).map(section => [section, data[section].length]));
+    res.json({ success: true, restored });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao restaurar o backup. Nenhum dado foi alterado.');
+  }
+});
+
+/* -------------------------------------------------------------------------- */
 /*                           PLUGGY OPEN FINANCE                               */
 /* -------------------------------------------------------------------------- */
 
@@ -1813,6 +2429,27 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
   }
 });
 
+// Erros que escapam das rotas — em especial os do parser de JSON (corpo malformado ou grande
+// demais) — respondem em JSON, como o resto da API. Sem este tratador, iam para o padrão do
+// Express, que responde uma página HTML, com a pilha do erro fora de produção (ver FIN-011).
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: isBackupImportPath(req)
+        ? 'O arquivo de backup passa do tamanho máximo aceito (25 MB).'
+        : 'Os dados enviados passam do tamanho máximo aceito.',
+    });
+  }
+  const status = Number(err?.status ?? err?.statusCode);
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({
+      error: err?.type === 'entity.parse.failed' ? 'O corpo da requisição não é um JSON válido.' : 'Requisição inválida.',
+    });
+  }
+  sendInternalError(res, err);
+});
+
 // Só sobe o servidor de verdade quando este arquivo é executado diretamente (`node
 // server.js`/`nodemon server.js`) — não quando é importado por um teste (ver FIN-031 em
 // docs/BACKLOG_DETAIL.md). `app` é exportado para que os testes de integração (Supertest)
@@ -1831,4 +2468,5 @@ export {
   app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment,
   nextBillDueDate, pluggyBillDueDay, buildDueNotifications, detectUnusualSpending,
   pluggyCurrency, formatCents, SUPPORTED_CURRENCIES, parseProviderRates, createExchangeRateCache,
+  encryptTwoFactorSecret, decryptTwoFactorSecret,
 };

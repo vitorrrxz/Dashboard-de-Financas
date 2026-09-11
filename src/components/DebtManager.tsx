@@ -6,6 +6,7 @@ import { isDebtOverdue, isDebtPaid, computeNextInstallment } from '../utils/debt
 import { formatDateBR } from '../utils/dates';
 import { downloadCSV, exportDateSuffix, formatCurrencyCSV } from '../utils/export';
 import { FormField } from './shared/FormField';
+import { readableColor } from '../utils/theme';
 
 const CATEGORY_COLORS: Record<DebtCategory, string> = {
   'Empréstimo':        '#f59e0b',
@@ -265,11 +266,11 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
             style={{
               background: debts.length === 0
-                ? 'rgba(255,255,255,0.04)'
+                ? 'var(--fg-4)'
                 : 'linear-gradient(135deg, #f59e0b22, #ec489922)',
               backgroundColor: debts.length === 0 ? undefined : 'rgba(245,158,11,0.1)',
-              border: `1px solid ${debts.length === 0 ? 'rgba(255,255,255,0.06)' : 'rgba(245,158,11,0.3)'}`,
-              color: debts.length === 0 ? 'var(--color-textMuted)' : '#fbbf24',
+              border: `1px solid ${debts.length === 0 ? 'var(--fg-6)' : 'rgba(245,158,11,0.3)'}`,
+              color: debts.length === 0 ? 'var(--color-textMuted)' : 'var(--text-warning)',
               cursor: debts.length === 0 ? 'not-allowed' : 'pointer',
               opacity: debts.length === 0 ? 0.5 : 1,
             }}
@@ -323,7 +324,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="text-sm font-semibold text-white">{debt.name}</h4>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${color}20`, color }}>
+                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${color}20`, color: readableColor(color) }}>
                         {debt.category}
                       </span>
                       {isGroup && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400">Fatura Grupal</span>}
@@ -337,7 +338,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                       <button onClick={() => handlePayInstallment(debt)}
                         title={isGroup ? 'Registrar pagamento da fatura' : 'Marcar parcela como paga'}
                         className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                        style={{ backgroundColor: 'rgba(20,184,166,0.1)', color: '#14b8a6', border: '1px solid rgba(20,184,166,0.2)' }}>
+                        style={{ backgroundColor: 'rgba(20,184,166,0.1)', color: 'var(--color-accent)', border: '1px solid rgba(20,184,166,0.2)' }}>
                         {isGroup ? '✓ Pagar Fatura' : '+ Pagar parcela'}
                       </button>
                     )}
@@ -356,7 +357,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                     <span>{debt.paidInstallments}/{debt.totalInstallments} {isGroup ? 'fatura paga' : 'parcelas pagas'}</span>
                     <span>{pct.toFixed(0)}%</span>
                   </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.07)' }}>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-7)' }}>
                     <div className="h-full rounded-full transition-all duration-500"
                       style={{ width: `${pct}%`, backgroundColor: paid ? '#14b8a6' : color }} />
                   </div>
@@ -364,15 +365,15 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
                 {/* Financial Info */}
                 <div className="grid grid-cols-3 gap-3 text-center mb-1">
-                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
                     <p className="text-xs text-textMuted mb-0.5">Total</p>
                     <p className="text-sm font-bold text-white">R$ {remaining(debt).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                   </div>
-                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
                     <p className="text-xs text-textMuted mb-0.5">{isGroup ? 'Subtotal' : 'Parcela'}</p>
-                    <p className="text-sm font-bold" style={{ color }}>R$ {debt.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    <p className="text-sm font-bold" style={{ color: readableColor(color) }}>R$ {debt.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
                   </div>
-                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
                     <p className="text-xs text-textMuted mb-0.5">Vencimento</p>
                     <p className={`text-sm font-bold ${overdue ? 'text-red-400' : 'text-white'}`}>
                       {paid ? '—' : formatDateBR(debt.nextDueDate, { day: '2-digit', month: '2-digit' })}
@@ -503,7 +504,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors"
+              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
                 style={{ background: 'linear-gradient(135deg, #f59e0b, #ec4899)' }}>
                 {editing ? 'Salvar' : 'Adicionar'}
               </button>
@@ -567,7 +568,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
             <div className="flex gap-3 mt-8">
               <button onClick={() => setPendingGroup(null)} className="flex-1 py-2.5 text-sm text-textMuted hover:bg-white/5 rounded-xl border border-white/10 transition-colors">Cancelar</button>
-              <button onClick={finalizeGroupImport} className="flex-1 py-2.5 text-sm text-white font-bold rounded-xl shadow-lg transition-all hover:brightness-110 active:scale-95" style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}>
+              <button onClick={finalizeGroupImport} className="flex-1 py-2.5 text-sm text-on-accent font-bold rounded-xl shadow-lg transition-all hover:brightness-110 active:scale-95" style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}>
                 Salvar Fatura
               </button>
             </div>
