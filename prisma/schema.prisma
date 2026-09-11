@@ -20,6 +20,7 @@ model User {
   goals        Goal[]
   recurring    RecurringTransaction[]
   notifications Notification[]
+  investments  Investment[]
 }
 
 model Account {
@@ -34,6 +35,9 @@ model Account {
   dueDay      Int?
   closingDay  Int?
   pendingBill Int?     // centavos
+  // FIN-074 — moeda de balance/limit/pendingBill (ISO 4217). O padrão BRL mantém todas as
+  // contas existentes como estavam.
+  currency    String   @default("BRL")
   color       String
   createdAt   DateTime @default(now())
 
@@ -41,6 +45,7 @@ model Account {
   transactions Transaction[]
   debts       Debt[]
   recurring   RecurringTransaction[]
+  investments Investment[]
 
   // Toda listagem filtra por userId; o sync Pluggy busca por (userId, pluggyId) — ver FIN-019.
   @@index([userId])
@@ -61,6 +66,9 @@ model Transaction {
   category    String
   date        String
   amount      Int      // centavos — ver FIN-015
+  // FIN-074 — sempre a moeda da conta vinculada (real, sem conta): o servidor deriva, o
+  // cliente não escolhe. Assim uma transação nunca fica numa moeda diferente da própria conta.
+  currency    String   @default("BRL")
   paymentType String   @default("debit")
   createdAt   DateTime @default(now())
 
@@ -186,4 +194,29 @@ model Notification {
   // A central lista por usuário, com as não lidas primeiro, e conta as não lidas.
   @@index([userId, read])
   @@unique([userId, dedupeKey])
+}
+
+// FIN-070 — posição da carteira de investimentos (Fase 7). Valores em centavos, como o resto
+// do schema. `currentValue` é informado pelo usuário — não há cotação automática nesta fase —,
+// por isso `updatedAt`: a carteira mostra há quanto tempo cada valor não é atualizado.
+// `accountId` aponta a conta onde a aplicação está (corretora, banco); ao excluir a conta, o
+// vínculo vira NULL e a posição continua na carteira (ver FIN-073 para o efeito no patrimônio).
+model Investment {
+  id             String   @id @default(uuid())
+  userId         String
+  accountId      String?
+  name           String
+  type           String   // 'fixed_income' | 'stocks' | 'funds' | 'crypto' | 'other' — validado por Zod em server.js
+  amountInvested Int      // centavos — quanto foi aplicado
+  currentValue   Int      // centavos — quanto a posição vale hoje
+  // FIN-074 — moeda dos dois valores (ISO 4217). Independente da conta vinculada: uma
+  // corretora em real pode custodiar um ativo cotado em dólar.
+  currency       String   @default("BRL")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id])
+  account        Account? @relation(fields: [accountId], references: [id])
+
+  @@index([userId]) // ver FIN-019
 }

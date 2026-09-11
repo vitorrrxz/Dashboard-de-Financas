@@ -158,6 +158,38 @@ describe('computeNetWorth', () => {
   });
 });
 
+describe('computeNetWorth com carteira de investimentos (FIN-073)', () => {
+  it('posições da carteira entram nos ativos', () => {
+    const r = computeNetWorth([acc({ type: 'checking', balance: 1000 })], [], [{ currentValue: 4000 }]);
+    expect(r).toMatchObject({ liquid: 1000, investments: 4000, portfolio: 4000, investmentAccounts: 0, assets: 5000, total: 5000 });
+  });
+
+  it('conta de investimento com posições não é somada em dobro', () => {
+    const r = computeNetWorth(
+      [acc({ id: 'xp', type: 'investment', balance: 10000 })],
+      [],
+      [{ accountId: 'xp', currentValue: 9000 }]
+    );
+    // Saldo digitado (10.000) + posições (9.000) daria 19.000.
+    expect(r).toMatchObject({ investments: 9000, portfolio: 9000, investmentAccounts: 0, total: 9000 });
+  });
+
+  it('sem carteira, as contas de investimento continuam entrando pelo saldo (FIN-064 inalterado)', () => {
+    const r = computeNetWorth([acc({ type: 'investment', balance: 10000 })], []);
+    expect(r).toMatchObject({ investments: 10000, portfolio: 0, investmentAccounts: 10000, total: 10000 });
+  });
+
+  it('a conta de investimento continua fora do dinheiro líquido mesmo depois de ter posições', () => {
+    const r = computeNetWorth(
+      [acc({ id: 'xp', type: 'investment', balance: 10000 }), acc({ type: 'checking', balance: 500 })],
+      [],
+      [{ accountId: 'xp', currentValue: 9000 }]
+    );
+    expect(r.liquid).toBe(500);
+    expect(r.total).toBe(9500);
+  });
+});
+
 describe('transactionsPeriod', () => {
   it('devolve a menor e a maior data do conjunto', () => {
     const p = transactionsPeriod([

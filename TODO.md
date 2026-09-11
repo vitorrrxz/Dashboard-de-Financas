@@ -34,6 +34,7 @@
 - [x] Revisar expiracao/revogacao de token JWT (FIN-012)
 - [x] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
 - [x] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
+- [ ] Recusar `accountId` de conta de outro usuario em transacoes, dividas e recorrencias (FIN-096, achado ao implementar FIN-071)
 
 ### Integridade financeira
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
@@ -88,6 +89,7 @@
 
 ### Open Finance / Pluggy
 - [x] Tratar status de item Pluggy expirado / erro de login (FIN-041)
+- [x] Gravar compras em moeda estrangeira no cartao pelo valor na moeda da conta (FIN-095, achado ao implementar FIN-074)
 
 ### Infraestrutura / DX
 - [x] Documentar `sandbox-pluggy/` como prototipo isolado, nao integrado ao app principal (FIN-085)
@@ -147,15 +149,15 @@
 ## Fase 7 - Investimentos e Multi-moeda
 
 ### Investimentos
-- [ ] Criar model `Investment` no schema Prisma (FIN-070, depende de FIN-015, FIN-020)
-- [ ] Criar rotas CRUD `/api/investments` (FIN-071, depende de FIN-070, FIN-008)
-- [ ] Criar tela de carteira de investimentos (FIN-072, depende de FIN-071)
-- [ ] Integrar valor de investimentos ao patrimonio liquido (FIN-073, depende de FIN-064, FIN-072)
+- [x] Criar model `Investment` no schema Prisma (FIN-070, depende de FIN-015, FIN-020)
+- [x] Criar rotas CRUD `/api/investments` (FIN-071, depende de FIN-070, FIN-008)
+- [x] Criar tela de carteira de investimentos (FIN-072, depende de FIN-071)
+- [x] Integrar valor de investimentos ao patrimonio liquido (FIN-073, depende de FIN-064, FIN-072)
 
 ### Multi-moeda
-- [ ] Adicionar campo `currency` em Account e Transaction (FIN-074, depende de FIN-020)
-- [ ] Integrar API de cambio para conversao de exibicao (FIN-075, depende de FIN-074)
-- [ ] Atualizar UI para exibir/selecionar moeda por conta (FIN-076, depende de FIN-075)
+- [x] Adicionar campo `currency` em Account e Transaction (FIN-074, depende de FIN-020)
+- [x] Integrar API de cambio para conversao de exibicao (FIN-075, depende de FIN-074)
+- [x] Atualizar UI para exibir/selecionar moeda por conta (FIN-076, depende de FIN-075)
 
 ## Fase 8 - Colaboracao e PWA
 

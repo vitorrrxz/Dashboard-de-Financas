@@ -14,6 +14,7 @@ import { DebtManager } from './components/DebtManager';
 import { BudgetManager } from './components/BudgetManager';
 import { GoalsManager } from './components/GoalsManager';
 import { RecurringManager } from './components/RecurringManager';
+import { InvestmentsManager } from './components/InvestmentsManager';
 import { ReportsView } from './components/ReportsView';
 import { InstallmentsPanel } from './components/InstallmentsPanel';
 import { MonthNavigator, MonthTotal } from './components/MonthNavigator';
@@ -25,6 +26,7 @@ import { apiFetch } from './services/api';
 import { useFinancialStats } from './hooks/useFinancialStats';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
+import { computeInvestmentHoldings, describeHoldings } from './utils/investments';
 import { todayISO } from './utils/debts';
 import { formatDateBR, formatMonthLabel } from './utils/dates';
 import { downloadCSV, downloadPDFReport, exportDateSuffix, formatCurrencyCSV } from './utils/export';
@@ -34,12 +36,17 @@ import {
 } from './utils/transactions';
 import { isInstallmentTransaction } from './utils/installments';
 import { CATEGORY_COLORS } from './utils/categories';
+import {
+  BASE_CURRENCY, accountsInBase, currencyOf, currencySymbol, describeConversion, foreignCurrencies,
+  formatMoney, investmentsInBase, parseExchangeRates, recurringInBase, transactionsInBase,
+  type ExchangeRates,
+} from './utils/currency';
 import type {
-  Account, AppNotification, Budget, Debt, DebtCategory, Goal, NotificationType,
+  Account, AppNotification, Budget, Debt, DebtCategory, Goal, Investment, InvestmentInput, NotificationType,
   RecurringTransaction, Transaction, PaymentType,
 } from './types';
 
-type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'recurring' | 'reports';
+type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports';
 
 // FIN-066: aba para onde o clique numa notificação leva, por tipo.
 const NOTIFICATION_TAB: Record<NotificationType, Tab> = {
@@ -140,6 +147,27 @@ function recurringToApi<T extends Partial<RecurringTransaction>>(r: T): T {
   if (out.amount != null) out.amount = toCents(out.amount);
   return out;
 }
+/** Converte os valores do investimento de centavos (API) para reais (UI); `accountId` nulo vira ausente. */
+function investmentFromApi(i: Investment): Investment {
+  return {
+    ...i,
+    accountId: i.accountId ?? undefined,
+    amountInvested: toReais(i.amountInvested),
+    currentValue: toReais(i.currentValue),
+  };
+}
+/**
+ * Converte os valores do investimento de reais (UI) para centavos (API). "Sem conta" vai como
+ * `null` explícito, e não como campo ausente: na edição, ausente manteria o vínculo antigo.
+ */
+function investmentToApi(i: InvestmentInput) {
+  return {
+    ...i,
+    accountId: i.accountId || null,
+    amountInvested: toCents(i.amountInvested),
+    currentValue: toCents(i.currentValue),
+  };
+}
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
@@ -166,6 +194,10 @@ export default function App() {
   const [budgets, setBudgets]         = useState<Budget[]>([]);
   const [goals, setGoals]             = useState<Goal[]>([]);
   const [recurring, setRecurring]     = useState<RecurringTransaction[]>([]);
+  const [investments, setInvestments] = useState<Investment[]>([]); // FIN-072
+  // FIN-075: cotações para os totais em real — só buscadas quando há moeda estrangeira em uso.
+  const [rates, setRates] = useState<ExchangeRates | null>(null);
+  const [ratesFailed, setRatesFailed] = useState(false);
   // FIN-023: a carga inicial busca até 2000 transações (comportamento original,
   // preservado). Se bater exatamente nesse limite, pode haver mais — `txHasMore` habilita
   // o botão "Carregar mais", que busca o restante via paginação real da API.
@@ -191,6 +223,9 @@ export default function App() {
     setBudgets([]);
     setGoals([]);
     setRecurring([]);
+    setInvestments([]);
+    setRates(null);
+    setRatesFailed(false);
     localStorage.removeItem('finflow_token');
   };
 
@@ -211,7 +246,8 @@ export default function App() {
           fetchAPI('/api/budgets'),
           fetchAPI('/api/goals'),
           fetchAPI('/api/recurring-transactions'),
-        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData]) => {
+          fetchAPI('/api/investments'),
+        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData, investmentsData]) => {
         setUser(meData.user);
         setAccounts((accsData as Account[]).map(accountFromApi));
         setTxs((txsData as Transaction[]).map(txFromApi));
@@ -220,6 +256,7 @@ export default function App() {
         setBudgets((budgetsData as Budget[]).map(budgetFromApi));
         setGoals((goalsData as Goal[]).map(goalFromApi));
         setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
+        setInvestments((investmentsData as Investment[]).map(investmentFromApi));
       }).catch(err => {
         console.error('Sessão expirada ou erro:', err);
         handleLogout();
@@ -253,6 +290,34 @@ export default function App() {
     return () => { cancelled = true; };
   }, [token, loading, debts, accounts, transactions]);
 
+  // FIN-075: moedas estrangeiras em uso — as cotações que o app precisa. Quem só usa real não
+  // faz requisição nenhuma ao câmbio. A chave em texto evita buscar de novo quando as listas
+  // mudam sem mudar as moedas.
+  const foreignKey = useMemo(
+    () => foreignCurrencies(accounts, transactions, investments).join(','),
+    [accounts, transactions, investments]
+  );
+
+  useEffect(() => {
+    if (!token || !foreignKey) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiFetch<unknown>(`/api/exchange-rates?symbols=${encodeURIComponent(foreignKey)}`, { token });
+        if (cancelled) return;
+        // Normaliza a resposta: um corpo inesperado vira "sem cotação", nunca uma exceção na tela.
+        const parsed = parseExchangeRates(data);
+        if (parsed) setRates(parsed);
+        setRatesFailed(parsed === null);
+      } catch (err) {
+        console.error('Falha ao obter cotações:', err);
+        // Mantém a última cotação conhecida, se houver; a tela avisa o que ficou sem cotação.
+        if (!cancelled) setRatesFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, foreignKey]);
+
   const handleLogin = (newToken: string, newUser: { id: string; name: string; email: string }) => {
     localStorage.setItem('finflow_token', newToken);
     setToken(newToken);
@@ -276,7 +341,14 @@ export default function App() {
         // Auto-create debt for credit or pix_installment payments
         // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
         // já existia (res.count === 0), reimportar o mesmo extrato não deve gerar dívida.
-        if ((paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0) {
+        // FIN-076: dívidas são registradas em real — a fatura de uma conta em outra moeda não
+        // vira dívida automática, porque o valor seria gravado como se fosse real.
+        const importAccount = accounts.find(a => a.id === txsWithType[0]?.accountId);
+        const importCurrency = importAccount ? currencyOf(importAccount) : BASE_CURRENCY;
+        const wantsDebt = (paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0;
+        if (wantsDebt && importCurrency !== BASE_CURRENCY) {
+          alert(`Transações importadas. A conta está em ${importCurrency} e dívidas são registradas em real, então nenhuma dívida automática foi criada — cadastre-a na aba Dívidas, se quiser.`);
+        } else if (wantsDebt) {
           // Usa apenas as transações que a API de fato aceitou (res.acceptedIndices,
           // posições no array original) — não todas as `txsWithType`. Numa reimportação
           // parcial (algumas linhas já existiam, outras são novas), incluir as duplicatas
@@ -343,7 +415,11 @@ export default function App() {
   const updateTransaction = async (id: string, tx: Partial<Transaction>) => {
     try {
       await fetchAPI(`/api/transactions/${id}`, 'PUT', txToApi(tx));
-      setTxs(prev => prev.map(t => t.id === id ? { ...t, ...tx } : t));
+      // FIN-074: trocar a conta troca a moeda — a mesma regra que o servidor acabou de aplicar.
+      const currency = tx.accountId !== undefined
+        ? currencyOf(accounts.find(a => a.id === tx.accountId) ?? {})
+        : undefined;
+      setTxs(prev => prev.map(t => t.id === id ? { ...t, ...tx, ...(currency ? { currency } : {}) } : t));
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const deleteTransaction = async (id: string) => {
@@ -381,12 +457,19 @@ export default function App() {
     try {
       await fetchAPI(`/api/accounts/${id}`, 'PUT', accountToApi(acc));
       setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...acc } : a));
+      // FIN-074: o servidor leva as transações da conta para a moeda nova; o estado local também.
+      if (acc.currency) {
+        setTxs(prev => prev.map(t => (t.accountId === id ? { ...t, currency: acc.currency } : t)));
+      }
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const deleteAccount = async (id: string) => {
     try {
       await fetchAPI(`/api/accounts/${id}`, 'DELETE');
       setAccounts(prev => prev.filter(a => a.id !== id));
+      // FIN-072: o banco desfaz o vínculo das posições com a conta excluída (ON DELETE SET
+      // NULL); o estado local acompanha, para a carteira não citar uma conta que não existe.
+      setInvestments(prev => prev.map(i => (i.accountId === id ? { ...i, accountId: undefined } : i)));
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
@@ -485,27 +568,73 @@ export default function App() {
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
+  // CRUD INVESTMENTS (FIN-072)
+  /** Cadastra uma posição via `POST /api/investments` e adiciona o resultado (em reais) ao estado. */
+  const addInvestment = async (inv: InvestmentInput) => {
+    try {
+      const created = await fetchAPI('/api/investments', 'POST', investmentToApi(inv));
+      setInvestments(prev => [...prev, investmentFromApi(created)]);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  /** Atualiza uma posição e usa o registro devolvido pela API, que traz o `updatedAt` novo. */
+  const updateInvestment = async (id: string, inv: InvestmentInput) => {
+    try {
+      const updated = await fetchAPI(`/api/investments/${id}`, 'PUT', investmentToApi(inv));
+      setInvestments(prev => prev.map(i => (i.id === id ? investmentFromApi(updated) : i)));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  /** Exclui uma posição via `DELETE /api/investments/:id` e remove do estado local. */
+  const deleteInvestment = async (id: string) => {
+    try {
+      await fetchAPI(`/api/investments/${id}`, 'DELETE');
+      setInvestments(prev => prev.filter(i => i.id !== id));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+
   // ---------- Derived stats ----------
   // Lógica extraída para src/hooks/useFinancialStats.ts (ver FIN-086 em
   // docs/BACKLOG_DETAIL.md) — separa a regra de negócio da camada de UI e permite
   // testá-la sem renderizar componentes (ver FIN-034).
-  const stats = useFinancialStats(transactions, accounts, debts, dashboardAccountId);
+  // FIN-075/FIN-076: os totais do app são em real. Contas, transações, posições e recorrências em
+  // outra moeda entram neles convertidas pela cotação; sem cotação, ficam de fora — e a tela
+  // avisa —, em vez de somar dólar como se fosse real. As listas originais continuam valendo
+  // para a exibição item a item, que mostra cada valor na própria moeda.
+  const accountsBase = useMemo(() => accountsInBase(accounts, rates), [accounts, rates]);
+  const transactionsBase = useMemo(() => transactionsInBase(transactions, rates), [transactions, rates]);
+  const investmentsBase = useMemo(() => investmentsInBase(investments, rates), [investments, rates]);
+  const recurringBase = useMemo(() => recurringInBase(recurring, accounts, rates), [recurring, accounts, rates]);
+  const missingCurrencies = useMemo(
+    () => foreignCurrencies(accountsBase.missing, transactionsBase.missing, investmentsBase.missing),
+    [accountsBase, transactionsBase, investmentsBase]
+  );
+  const usedCurrencies = foreignKey ? foreignKey.split(',') : [];
+  const conversionIssue = missingCurrencies.length > 0 || rates?.stale === true;
+
+  const stats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items);
+
+  // FIN-073: o card de Investimentos aparece com conta de investimento OU posição na carteira;
+  // a legenda diz de onde vem o total (posições, contas sem posições, ou os dois).
+  const hasInvestments = investments.length > 0 || accounts.some(a => a.type === 'investment');
+  const investmentHoldings = useMemo(
+    () => computeInvestmentHoldings(accountsBase.items, investmentsBase.items),
+    [accountsBase, investmentsBase]
+  );
 
   // FIN-044/FIN-046: progresso de orçamento do mês corrente, calculado sobre TODAS as
   // transações (não filtradas por `dashboardAccountId`) — orçamento é por categoria, não
   // por conta, então não faz sentido restringir a uma conta específica.
   const currentMonth = todayISO().slice(0, 7);
   const budgetProgress = useMemo(
-    () => computeBudgetProgress(transactions, budgets, currentMonth),
-    [transactions, budgets, currentMonth]
+    () => computeBudgetProgress(transactionsBase.items, budgets, currentMonth),
+    [transactionsBase, budgets, currentMonth]
   );
   const overBudget = budgetProgress.filter(b => b.isOverLimit); // FIN-047
 
   // FIN-058: projeção dos próximos 6 meses a partir do saldo real (contas líquidas),
   // somando as recorrências previstas e descontando as parcelas de dívida previstas.
   const projection = useMemo(
-    () => computeBalanceProjection(stats.realBalance, recurring, debts, { months: 6 }),
-    [stats.realBalance, recurring, debts]
+    () => computeBalanceProjection(stats.realBalance, recurringBase.items, debts, { months: 6 }),
+    [stats.realBalance, recurringBase, debts]
   );
 
   // Categorias que já aparecem nas transações do usuário, além das curadas em
@@ -534,7 +663,16 @@ export default function App() {
     () => filterByMonthAndSearch(regularTransactions, txMonth, search),
     [regularTransactions, txMonth, search]
   );
-  const monthTotals = useMemo(() => summarizeTransactions(monthScoped), [monthScoped]);
+  // FIN-076: os totais do mês em real — a lista continua mostrando cada transação na própria moeda.
+  const regularTransactionsBase = useMemo(
+    () => transactionsBase.items.filter(t => !isInstallmentTransaction(t)),
+    [transactionsBase]
+  );
+  const monthScopedBase = useMemo(
+    () => filterByMonthAndSearch(regularTransactionsBase, txMonth, search),
+    [regularTransactionsBase, txMonth, search]
+  );
+  const monthTotals = useMemo(() => summarizeTransactions(monthScopedBase), [monthScopedBase]);
   const filtered = useMemo(() => filterByKind(monthScoped, txFilter), [monthScoped, txFilter]);
 
   // FIN-094: quantos parcelados o recorte de mês deixou de fora — a aba mostra um aviso com
@@ -561,8 +699,19 @@ export default function App() {
     t.category,
     accounts.find(a => a.id === t.accountId)?.name ?? 'Sem conta',
     PAYMENT_TYPE_META[t.paymentType ?? 'debit']?.label ?? 'Débito',
+    currencyOf(t),
     formatCurrencyCSV(t.amount),
   ]);
+
+  /**
+   * Nota do PDF quando o recorte tem transações em outra moeda (FIN-076): cada linha sai na moeda
+   * da conta, e os totais em real — pela cotação do dia, sem as linhas que ficaram sem cotação.
+   */
+  const currencyReportNote = (codes: string[]) =>
+    `Linhas em ${codes.join(', ')} na moeda da conta; totais em real` +
+    (rates ? ` pela cotação de ${formatDateBR(rates.date)}` : '') +
+    (codes.some(code => missingCurrencies.includes(code)) ? ' (linhas sem cotação ficaram fora dos totais)' : '') +
+    '.';
 
   /** FIN-060: exporta as transações filtradas em CSV. */
   const exportTransactionsCSV = () => {
@@ -580,14 +729,18 @@ export default function App() {
     setExportingPDF(true);
     try {
       const periodo = transactionsPeriod(filtered);
-      const receitas = filtered.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-      const despesas = filtered.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+      // FIN-076: totais do relatório em real, a partir do mesmo recorte já convertido.
+      const filteredBase = filterByKind(monthScopedBase, txFilter);
+      const receitas = filteredBase.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+      const despesas = filteredBase.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+      const foreignInReport = foreignCurrencies(filtered);
       await downloadPDFReport({
         title: 'FinFlow — Relatório de Transações',
         subtitles: [
           `Mês de referência: ${referenceLabel()}`,
           `Período: ${formatDateBR(periodo.from)} a ${formatDateBR(periodo.to)}  ·  ${filtered.length} transação(ões)`,
           `Receitas: ${fmt(receitas)}  ·  Despesas: ${fmt(despesas)}  ·  Saldo: ${fmt(receitas - despesas)}`,
+          ...(foreignInReport.length > 0 ? [currencyReportNote(foreignInReport)] : []),
         ],
         headers: TRANSACTION_REPORT_HEADERS,
         rows: buildTransactionRows(),
@@ -688,6 +841,11 @@ export default function App() {
             {/* FIN-051 */}
             <NavItem icon={<Target size={18}/>} label="Metas" active={activeTab==='goals'} onClick={() => { setActiveTab('goals'); setMobileNavOpen(false); }}
               badge={goals.length > 0 ? goals.length : undefined}
+            />
+
+            {/* FIN-072 */}
+            <NavItem icon={<TrendingUp size={18}/>} label="Investimentos" active={activeTab==='investments'} onClick={() => { setActiveTab('investments'); setMobileNavOpen(false); }}
+              badge={investments.length > 0 ? investments.length : undefined}
             />
 
             {/* FIN-056 */}
@@ -822,16 +980,30 @@ export default function App() {
                 </div>
               )}
 
+              {/* FIN-076: com moeda estrangeira em uso, os totais são convertidos para real. Uma linha
+                  discreta diz de que cotação; o aviso âmbar aparece quando algo ficou de fora (moeda
+                  sem cotação) ou a cotação é antiga. Antes da primeira resposta, nada é exibido. */}
+              {usedCurrencies.length > 0 && (rates !== null || ratesFailed) && (
+                conversionIssue ? (
+                  <div role="status" className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)' }}>
+                    <AlertCircle size={18} className="text-amber-400 shrink-0"/>
+                    <p className="text-sm text-amber-200">{describeConversion(usedCurrencies, missingCurrencies, rates)}</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-textMuted -mt-4 mb-6">{describeConversion(usedCurrencies, missingCurrencies, rates)}</p>
+                )
+              )}
+
               {/* Summary Cards Row 1 — Real Accounts */}
-              {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem
-                  contas de investimento, mostramos o total delas separadamente ao lado. */}
-              <div className={`grid grid-cols-1 md:grid-cols-3 ${accounts.some(a => a.type === 'investment') ? 'lg:grid-cols-4' : ''} gap-5 mb-5`}>
+              {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem conta de
+                  investimento ou posição na carteira (FIN-073), o total aparece separado ao lado. */}
+              <div className={`grid grid-cols-1 md:grid-cols-3 ${hasInvestments ? 'lg:grid-cols-4' : ''} gap-5 mb-5`}>
                 <SummaryCard title="Saldo Real (Contas)" amount={fmt(stats.realBalance)} isPositive={stats.realBalance >= 0}
                   icon={<Wallet size={22} style={{ color:'var(--color-primary)' }}/>} badge="Saldo atual" />
-                {accounts.some(a => a.type === 'investment') && (
+                {hasInvestments && (
                   <SummaryCard title="Investimentos" amount={fmt(stats.investmentBalance)} isPositive={stats.investmentBalance >= 0}
                     icon={<TrendingUp size={22} className="text-teal-400"/>}
-                    badge={`${accounts.filter(a=>a.type==='investment').length} conta(s)`} />
+                    badge={describeHoldings(investmentHoldings)} />
                 )}
                 <SummaryCard title="Fatura Pendente" amount={fmt(stats.pendingBills)} isPositive={false}
                   icon={<CreditCard size={22} className="text-pink-400"/>} badge={`${accounts.filter(a=>a.type==='credit').length} cartão(ões)`} />
@@ -1123,6 +1295,7 @@ export default function App() {
                 onAdd={addAccount}
                 onUpdate={updateAccount}
                 onDelete={deleteAccount}
+                rates={rates}
               />
             </>
           )}
@@ -1135,7 +1308,7 @@ export default function App() {
                 <p className="text-textMuted text-sm">Compras parceladas no cartão, dívidas cadastradas e o que vence em cada mês</p>
               </div>
               {/* FIN-094: mês de referência, vencimentos do mês e compras parceladas no cartão. */}
-              <InstallmentsPanel transactions={transactions} debts={debts} accounts={accounts}/>
+              <InstallmentsPanel transactions={transactionsBase.items} debts={debts} accounts={accounts}/>
               <DebtManager
                 debts={debts}
                 onAdd={addDebt}
@@ -1180,6 +1353,24 @@ export default function App() {
             </>
           )}
 
+          {/* ══════════ INVESTMENTS TAB (FIN-072) ══════════ */}
+          {activeTab === 'investments' && (
+            <>
+              <div className="mb-6">
+                <h1 className="text-3xl font-bold text-white mb-1">Investimentos</h1>
+                <p className="text-textMuted text-sm">Quanto você aplicou, quanto vale hoje e como a carteira está distribuída</p>
+              </div>
+              <InvestmentsManager
+                investments={investments}
+                accounts={accounts}
+                onAdd={addInvestment}
+                onUpdate={updateInvestment}
+                onDelete={deleteInvestment}
+                rates={rates}
+              />
+            </>
+          )}
+
           {/* ══════════ RECURRING TAB (FIN-056) ══════════ */}
           {activeTab === 'recurring' && (
             <>
@@ -1206,9 +1397,10 @@ export default function App() {
                 <p className="text-textMuted text-sm">Patrimônio líquido e comparativos de receitas e despesas</p>
               </div>
               <ReportsView
-                transactions={transactions}
-                accounts={accounts}
+                transactions={transactionsBase.items}
+                accounts={accountsBase.items}
                 debts={debts}
+                investments={investmentsBase.items}
               />
             </>
           )}
@@ -1237,6 +1429,18 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { titl
       </h3>
     </div>
   );
+}
+
+/**
+ * Valor de uma transação na lista (FIN-076): em real, como sempre ("-35,49"); em outra moeda,
+ * com o símbolo dela ("-US$ 12,00"), para um dólar nunca parecer um real.
+ */
+function formatTxAmount(t: Transaction): string {
+  const currency = currencyOf(t);
+  if (currency === BASE_CURRENCY) {
+    return `${t.amount >= 0 ? '+' : ''}${t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+  }
+  return `${t.amount < 0 ? '-' : '+'}${formatMoney(t.amount, currency)}`;
 }
 
 const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
@@ -1321,7 +1525,7 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
                   </span>
                 </td>
                 <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
-                  {t.amount >= 0 ? '+' : ''}{t.amount.toLocaleString('pt-BR', { minimumFractionDigits:2 })}
+                  {formatTxAmount(t)}
                 </td>
                 <td className="py-4">
                   <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1360,7 +1564,9 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
                   <input type="date" value={form.date ?? ''} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="input-field" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Valor (R$)</label>
+                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">
+                    Valor ({currencySymbol(currencyOf(accounts.find(a => a.id === form.accountId) ?? {}))})
+                  </label>
                   <input type="number" step="0.01" value={form.amount ?? 0} onChange={e => setForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className="input-field" />
                 </div>
               </div>

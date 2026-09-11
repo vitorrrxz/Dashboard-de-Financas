@@ -657,6 +657,32 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
+- [ ] **P2 — MEDIUM — FIN-096 — `accountId` de outro usuário aceito em transações, dívidas e recorrências** (achado ao implementar FIN-071, 10/09/2026)
+
+  **Objetivo**
+  Garantir que um registro só possa ser vinculado a uma conta do próprio usuário.
+
+  **Problema**
+  As rotas de criação e edição de transações (inclusive a importação em lote), dívidas e recorrências gravam o `accountId` recebido sem conferir a quem a conta pertence — a chave estrangeira só garante que a conta existe. Assim, um usuário consegue vincular os próprios registros ao id de uma conta de outra pessoa. Não há vazamento direto, porque as respostas não incluem dados da conta, mas os registros ficam amarrados a um dado alheio: se o dono excluir a conta, o vínculo é desfeito (`ON DELETE SET NULL`) nos registros do outro usuário, e a conta passa a ter registros que não são do dono. As rotas de investimentos (FIN-071) já fazem essa checagem (`investmentAccountError`), e a derivação de moeda de FIN-074 já ignora contas de outro usuário.
+
+  **Arquivos envolvidos**
+  - `server.js` (rotas `POST/PUT /api/transactions`, `POST/PUT /api/debts`, `POST/PUT /api/recurring-transactions`)
+
+  **Alterações necessárias**
+  - Conferir a posse do `accountId`, quando informado, antes de gravar — reaproveitando o padrão de `investmentAccountError` —, com 400 e mensagem clara.
+  - Na importação em lote, uma única consulta para todos os `accountId` do lote.
+
+  **Dependências**
+  FIN-008, FIN-032.
+
+  **Validação**
+  - Testes de isolamento (FIN-032): vincular a uma conta de outro usuário recebe 400 nas três rotas, sem gravar nada.
+
+  **Critérios de aceite**
+  - [ ] Nenhuma rota aceita `accountId` de conta de outro usuário.
+
+---
+
 ## 2. 💰 Integridade Financeira
 
 - [x] **P1 — FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)** ✅ Concluída
@@ -1680,6 +1706,22 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
+- [x] **P1 — FIN-095 — Compras em moeda estrangeira no cartão gravadas pelo valor na moeda da compra** ✅ Concluída (achado ao implementar FIN-074, 10/09/2026)
+
+  **Problema**
+  Numa compra internacional no cartão, a Pluggy devolve `amount` na moeda da **compra** (ex.: US$ 10) e `amountInAccountCurrency` no valor que entrou na fatura, na moeda da **conta** (ex.: R$ 54,30). O sync gravava `amount`, então a compra de US$ 10 aparecia como R$ 10,00 — um valor errado, e para menos, em toda compra internacional. O campo está nos tipos do SDK (`node_modules/pluggy-sdk/dist/types/transaction.d.ts`: "Amount of the transaction in account's currency").
+
+  **Correção**
+  `pluggyAmountToCents` usa `amountInAccountCurrency` quando ele vem como número finito, e `amount` nos demais casos (compra na moeda da própria conta, em que o campo vem `null`). Do campo novo só se usa o módulo: o sinal continua vindo de `amount`, cuja convenção foi conferida contra dados reais em FIN-092. A do outro campo não pôde ser conferida, e um engano ali inverteria as compras internacionais.
+
+  **Dados já gravados**
+  O laço de refresh do sync já compara e atualiza o valor das transações existentes, então as compras internacionais do último mês (a janela que o sync consulta) são corrigidas na próxima sincronização. As mais antigas não: o banco local não guardava a moeda da compra, e não há como identificá-las. Não foi possível estimar quantas são sem uma sincronização real.
+
+  **Validação executada**
+  `server.pluggy-credit.test.js`: a compra de US$ 10 que entrou como R$ 54,30 grava −5.430 centavos; o sinal vem de `amount` mesmo com o outro campo de sinal trocado (três combinações); campo `null` ou ausente usa `amount`; valor não numérico (texto, `NaN`) é ignorado.
+
+---
+
 ## 14. 📅 Planejamento Financeiro (Roadmap)
 
 > Estas tarefas implementam funcionalidades **novas**, sugeridas no roadmap do README. Devem ser priorizadas **depois** de todas as tarefas P0/P1 das seções anteriores.
@@ -1898,30 +1940,73 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 17. 📊 Investimentos (Roadmap)
 
-- [ ] **P3 — FIN-070 — Criar model `Investment` no schema Prisma**
+- [x] **P3 — FIN-070 — Criar model `Investment` no schema Prisma** ✅ Concluída (10/09/2026)
   Campos: `id`, `userId`, `accountId?`, `name`, `type` (renda fixa/ações/cripto), `amountInvested`, `currentValue`, `createdAt`. **Dependências:** FIN-015, FIN-020.
 
-- [ ] **P3 — FIN-071 — Criar rotas CRUD `/api/investments`**
+  **Nota de implementação (10/09/2026):** campos do card, com valores em centavos (`Int`, FIN-015), mais `updatedAt` (`@updatedAt`): o valor atual é digitado pelo usuário — não há cotação automática —, e a carteira mostra há quanto tempo cada posição não é atualizada. Tipos: `fixed_income`, `stocks`, `funds`, `crypto` e `other`. Fundos e "Outros" foram acrescentados à lista do card porque, sem eles, um FII ou uma previdência teriam de ser cadastrados num tipo errado, distorcendo a alocação. A validação do tipo é do Zod, não do banco (mesmo padrão de `Account.type`). `accountId` é opcional, com `ON DELETE SET NULL`: excluir a conta desfaz o vínculo e a posição continua na carteira. Migração `20260910231101_add_investments`, apenas aditiva (tabela + índice em `userId`), conferida com `--create-only` antes de ser aplicada; `npx prisma generate` rodado à parte.
+
+  Conferido de passagem: valores acima de R$ 21.474.836,47 (o teto de um inteiro de 32 bits) são gravados sem erro nesta combinação de Prisma 7 + SQLite, que usa inteiro de 64 bits — não foi preciso limitar os valores no schema.
+
+- [x] **P3 — FIN-071 — Criar rotas CRUD `/api/investments`** ✅ Concluída (10/09/2026)
   **Dependências:** FIN-070, FIN-008.
 
-- [ ] **P3 — FIN-072 — Criar tela de carteira de investimentos**
+  **Nota de implementação (10/09/2026):** `GET` (em ordem de cadastro), `POST`, `PUT /:id` e `DELETE /:id`, todas filtradas por `userId`. Validação Zod: nome obrigatório, tipo da lista, valores inteiros em centavos e **não negativos** — zero é aceito nos dois, porque uma bonificação não tem custo e uma posição pode perder tudo. O vínculo com a conta é conferido no banco (`investmentAccountError`): a conta precisa existir, ser do próprio usuário e não ser cartão de crédito. A chave estrangeira sozinha só garante que a conta existe, e aceitaria o id de uma conta de outro usuário. O `PUT` usa `update` com `userId` no `where` (e não `updateMany`) para devolver o registro com o `updatedAt` novo; id inexistente ou de outro usuário vira 404, como em `/api/debts/:id`. `accountId: ''` ou `null` desfaz o vínculo.
+
+- [x] **P3 — FIN-072 — Criar tela de carteira de investimentos** ✅ Concluída (10/09/2026)
   Novo componente seguindo o padrão dos demais managers. **Dependências:** FIN-071.
 
-- [ ] **P3 — FIN-073 — Integrar valor de investimentos ao patrimônio líquido**
+  **Nota de implementação (10/09/2026):** nova aba "Investimentos" (`InvestmentsManager.tsx`), com as regras em `src/utils/investments.ts`. Resumo (valor atual, total aplicado, resultado em reais e em %), alocação por tipo (barra + lista com a participação de cada tipo) e a lista de posições, das maiores para as menores, cada uma com o resultado e "atualizado há…". Sem valor aplicado não há percentual — mostrar `Infinity%` seria pior que omitir. O formulário guarda os valores como texto, para distinguir campo vazio de um 0 digitado: valor atual em branco usa o valor aplicado (o caso comum ao cadastrar), e um 0 digitado continua 0. Cartão de crédito não é oferecido como conta; uma posição cujo vínculo deixou de ser válido abre sem conta, e salvar desfaz o vínculo em vez de o servidor recusar a edição. Acessibilidade: rótulos associados por `htmlFor`/`id`, descrição do campo de valor atual via `aria-describedby`, botões de ícone com nome ("Editar CDB Inter"), modal com `role="dialog"`, erro de validação com `role="alert"`, Esc fecha. Um tipo desconhecido vindo da API cai em "Outros" — a checagem usa `hasOwnProperty`, e não `in`, que aceitaria "constructor" como tipo válido.
+
+- [x] **P3 — FIN-073 — Integrar valor de investimentos ao patrimônio líquido** ✅ Concluída (10/09/2026)
   **Dependências:** FIN-064, FIN-072.
+
+  **Nota de implementação (10/09/2026):** o risco aqui era contar o mesmo dinheiro duas vezes: desde FIN-018 as contas do tipo investimento entram pelo saldo digitado, e agora as posições da carteira podem estar vinculadas a essas mesmas contas. A regra, em `computeInvestmentHoldings`: **uma conta de investimento com posições vinculadas passa a ser representada por elas** — o saldo da conta sai do total. Uma conta de investimento sem posições continua entrando pelo saldo, então quem ainda não montou a carteira não vê o patrimônio encolher. Posições sem conta, ou vinculadas a uma conta corrente (onde a aplicação não faz parte do saldo), entram pelo valor atual. A mesma função alimenta o patrimônio (`computeNetWorth`, que ganhou a composição `portfolio` + `investmentAccounts`) e o card "Investimentos" do Dashboard (`useFinancialStats`, respeitando o filtro por conta), para os dois números nunca divergirem. Com isso, a ressalva de escopo de FIN-064 fica resolvida.
+
+  Na tela: o card do Dashboard aparece com conta de investimento **ou** com posição, e a legenda diz de onde vem o total ("3 ativo(s) · 1 conta(s)"). No card de Relatórios, uma linha mostra a composição ("Carteira R$ X + contas R$ Y"). Na carteira, um quadro explica, conta a conta, se ela entra pelas posições ou pelo saldo — sem isso, o saldo da conta "sumir" do total ao cadastrar a primeira posição pareceria erro.
+
+  **Conferência com a base real (somente leitura):** o usuário real tem uma conta corrente e um cartão, os dois via Pluggy, e nenhuma conta de investimento — o sync não cria contas desse tipo. O patrimônio de hoje não muda; passa a incluir a carteira conforme as posições forem cadastradas.
+
+  **Validação executada (Investimentos):** `server.investments.test.js` — 22 testes: autenticação; criação em centavos sem conta; zero aceito nos dois valores; vínculo com conta própria; rejeição de valor negativo, valor em reais, valor atual ausente, tipo fora da lista e nome em branco; vínculo com cartão recusado na criação e na edição (mantendo o vínculo anterior); vínculo com conta de outro usuário recusado sem criar nada; atualização parcial com `updatedAt` novo; desvínculo com `accountId: ''`; 404 para id inexistente; exclusão da conta desfazendo o vínculo sem apagar a posição; exclusão; ordem de cadastro; isolamento entre usuários (listagem, edição com 404, exclusão). `investments.test.ts` — 26 testes, com as fronteiras montadas para falhar se a regra oposta fosse aplicada (por exemplo, somando saldo + posições). `InvestmentsManager.test.tsx` — 16 testes (estado vazio, resultado com e sem percentual, prejuízo, alocação, quadro das contas, rótulos associados, cartão fora da lista, valor atual em branco × 0 digitado, validação com `role="alert"`, edição, vínculo inválido desfeito, modal que continua aberto se a gravação falhar, confirmação da exclusão, Esc, tipo desconhecido). `reports.test.ts` — +4 e `useFinancialStats.test.ts` — +2 (patrimônio e card com carteira, inclusive o filtro por conta). `npm run lint`, `npm run typecheck`, `npx vitest run` (26 arquivos, 399 testes) e `npm run build` limpos.
 
 ---
 
 ## 18. 🌎 Multi-moeda (Roadmap)
 
-- [ ] **P3 — FIN-074 — Adicionar campo `currency` em `Account` e `Transaction`**
+- [x] **P3 — FIN-074 — Adicionar campo `currency` em `Account` e `Transaction`** ✅ Concluída (10/09/2026)
   Default `"BRL"`, para manter compatibilidade retroativa com todos os dados existentes. **Dependências:** FIN-020.
 
-- [ ] **P3 — FIN-075 — Integrar API de câmbio para conversão de exibição**
+  **Nota de implementação (10/09/2026):** `currency String @default("BRL")` (código ISO 4217) em `Account`, `Transaction` e também em `Investment` — a carteira nasceu nesta mesma fase (FIN-070), e sem o campo uma posição numa corretora em dólar seria somada como real. Moedas aceitas nos cadastros: BRL, USD, EUR, GBP, CHF, CAD e AUD, todas cotadas pelo provedor de FIN-075. A lista do servidor e a do frontend são conferidas por um teste, para não divergirem.
+
+  **Regra central: a moeda de uma transação é sempre a da conta** (real, quando não há conta). O servidor deriva, e o cliente não escolhe — um `currency` enviado é descartado pelo Zod — na importação, na criação avulsa, na edição que troca a conta (desvincular volta para real), nas ocorrências das recorrências e no sync da Pluggy. Trocar a moeda de uma conta (em geral, para corrigir um cadastro errado) leva as transações dela junto, na mesma transação de banco e sem converter valores; a posse da conta é conferida antes. Com essa invariante, nenhuma transação fica numa moeda diferente da própria conta. Na Pluggy, a moeda da conta vem de `currencyCode`; um código fora do padrão ISO cai em real.
+
+  Onde o servidor soma ou formata valores: o aviso de fatura sai na moeda do cartão ("A fatura de US$ 100,00 vence em 15/09."), e o alerta de gasto incomum (FIN-069) passa a considerar só transações em real, porque somar dólares e reais na mesma categoria distorceria a média. Gasto em moeda estrangeira fica fora desse alerta — limitação registrada.
+
+  **Migração `20260910234711_add_currency`:** no SQLite, o Prisma recria as três tabelas (cria a nova, copia os dados, apaga a antiga e renomeia) em vez de usar `ADD COLUMN`. O SQL foi conferido antes de aplicar: copia todas as colunas e recria todos os índices. No banco real, a aplicação teve backup consistente antes (`dev.db.bak-pre-fin074-…`, feito pela API de backup do SQLite) e comparação antes/depois: mesma contagem de linhas em todas as tabelas, mesma assinatura (sha256) dos dados de contas e transações, mesmas somas de valores e `PRAGMA foreign_key_check` sem erros. As 2 contas e as 88 transações ficaram em BRL.
+
+- [x] **P3 — FIN-075 — Integrar API de câmbio para conversão de exibição** ✅ Concluída (10/09/2026)
   Avaliar provedor (ex. exchangerate.host) — atenção a limites de uso gratuito. **Dependências:** FIN-074.
 
-- [ ] **P3 — FIN-076 — Atualizar UI para exibir/selecionar moeda por conta**
+  **Avaliação de provedores (10/09/2026):**
+  - *exchangerate.host* (o sugerido no card): hoje pertence à APILayer e exige chave de acesso — a chamada sem chave responde `missing_access_key` (conferido) —, com cota mensal no plano gratuito. Descartado: exigiria cadastro, um segredo no `.env` e controle de cota.
+  - *Frankfurter* (escolhido): cotações de referência do Banco Central Europeu, gratuito, **sem chave**, de código aberto e hospedável por conta própria; cobre cerca de 30 moedas, entre elas o real. Atualiza uma vez por dia útil, o que basta para conversão de exibição — não é cotação em tempo real.
+  - *AwesomeAPI* (brasileira, sem chave) e *PTAX do Banco Central* (oficial, mas com cerca de 10 moedas, só em dias úteis e com consulta mais trabalhosa) ficaram como alternativas.
+
+  **Implementação:** a consulta ao provedor é feita pelo servidor, e não pelo navegador — assim um único cache atende todos os usuários e o provedor não recebe requisições de cada cliente. `GET /api/exchange-rates?symbols=USD,EUR`, autenticada para não virar um proxy aberto, devolve quantos reais vale 1 unidade de cada moeda pedida; uma moeda que o provedor não cota simplesmente não vem na resposta. Cache em memória de 12 h — no máximo duas consultas por dia ao provedor, qualquer que seja o número de usuários —, uma única consulta em andamento por vez, timeout de 5 s e espera de 5 min depois de uma falha (sem ela, com o provedor fora do ar, cada abertura do app esperaria o timeout inteiro). Se a atualização falha e existe cotação anterior, ela é servida com `stale: true` e a tela avisa que é a última disponível; sem cotação nenhuma, a rota responde 502 com mensagem genérica, e o erro do provedor fica só no log (FIN-011). A resposta do provedor é validada: base, data e cada cotação, que precisa ser um número positivo (um 0 viraria divisão por zero). `EXCHANGE_RATES_URL`, documentada no `.env.example`, aponta para outra instância sem mudar código.
+
+  No frontend, as cotações só são pedidas quando há moeda estrangeira em uso — quem só usa real não faz requisição nenhuma —, e a resposta é normalizada antes de ser usada (`parseExchangeRates`).
+
+- [x] **P3 — FIN-076 — Atualizar UI para exibir/selecionar moeda por conta** ✅ Concluída (10/09/2026)
   Ajustar `AccountsManager.tsx` e formatação monetária (`fmt`, em `App.tsx`) para respeitar a moeda da conta. **Dependências:** FIN-075.
+
+  **Nota de implementação (10/09/2026):** **cada item aparece na própria moeda; os totais, em real.** A conversão acontece numa camada só (`src/utils/currency.ts`): o App deriva versões em real das contas, transações, posições e recorrências e as entrega a todo cálculo que soma valores — Dashboard, orçamento, projeção, Relatórios, parcelados, totais do mês na aba Transações e carteira. Nenhuma dessas funções precisou mudar, e itens em real passam intactos (mesma referência), sem custo para quem não usa outra moeda. Um item numa moeda **sem cotação** fica fora dos totais — nunca é somado como se fosse real — e a tela avisa: na aba Contas, na carteira e no Dashboard, que também diz de que cotação vieram os valores convertidos e se ela é antiga. A conversão é feita em centavos inteiros, com o meio centavo se afastando do zero: com `Math.round` direto, uma despesa de US$ 10 e o estorno dela deixariam um centavo de diferença no saldo.
+
+  Na tela: seletor de moeda, com rótulo associado, nos formulários de conta e de posição (o da posição sugere a moeda da conta escolhida, mas pode ser trocado — uma corretora em real pode custodiar um ativo em dólar); rótulos dos campos de valor com o símbolo da moeda; aviso, ao trocar a moeda de uma conta existente, de que as transações acompanham sem conversão; selo da moeda nos cards de contas estrangeiras; lista de transações com o símbolo quando a moeda não é real (as em real aparecem exatamente como antes). Uma moeda fora da lista vinda da Pluggy aparece no seletor e não é reenviada ao salvar. O modal de importação mostra a prévia na moeda da conta de destino, e o rótulo "Importar para" ganhou `htmlFor`. CSV e PDF ganharam a coluna "Moeda" — o cabeçalho "Valor (R$)" rotularia um dólar como real —, e o PDF explica quando há linhas em outra moeda. Dívidas continuam só em real: importar a fatura de uma conta estrangeira não cria dívida automática (o valor seria gravado como real), e o usuário é avisado. De passagem, os botões de ícone da aba Contas ganharam nome acessível ("Editar Itaú", "Cor #6366f1").
+
+  `fmt`, em `App.tsx`, ficou como estava: ele formata os totais, que são sempre em real; a exibição por moeda usa `formatMoney`.
+
+  **Conferência com a base real:** todas as contas e transações do usuário real estão em real, então nada muda na tela e nenhuma cotação é pedida. As contas da Pluggy recebem a moeda informada pelo banco na próxima sincronização.
+
+  **Validação executada (Multi-moeda):** `server.currency.test.js` — 33 testes: listas de moedas iguais no front e no back; conta nova em real, moeda da lista aceita e moeda fora dela recusada; troca de moeda da conta levando as transações sem converter valores, e sem efeito quando quem pede não é o dono; transação herdando a moeda da conta mesmo com outra moeda no payload, avulsa sem conta em real, troca de conta mudando a moeda e desvínculo voltando para real, edição de nome preservando a moeda, conta de outro usuário não emprestando a moeda; ocorrência de recorrência na moeda da conta; aviso de fatura em US$; gasto incomum — o mesmo cenário gera alerta em real e não gera em dólar (a versão em real prova que o cenário dispara); validação da resposta do provedor; cache (validade, consulta compartilhada, falha sem cotação, espera após falha, cotação antiga, exceção síncrona); e a rota (autenticação, pedidos inválidos rejeitados sem consultar o provedor, 502 sem repassar o erro do provedor, conversão, moeda sem cotação ausente da resposta, uso do cache). `server.pluggy-credit.test.js` — +7 (FIN-095 e `pluggyCurrency`). `currency.test.ts` — 29 testes. `AccountsManager.test.tsx` — 7 testes. `InvestmentsManager.test.tsx` — +3. `npm run lint`, `npm run typecheck`, `npx vitest run` (29 arquivos, 478 testes) e `npm run build` limpos.
 
 ---
 

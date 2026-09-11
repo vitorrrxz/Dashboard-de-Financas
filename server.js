@@ -199,10 +199,24 @@ function toCents(reais) {
 // de cartão contra dados reais, e um engano ali inverteria também as contas correntes, que
 // hoje estão corretas. O tipo da conta foi conferido contra o extrato real de um cartão.
 function pluggyAmountToCents(pluggyTx, accountType) {
-  const cents = toCents(pluggyTx.amount);
+  const cents = toCents(pluggyAmountInAccountCurrency(pluggyTx));
   // O teste de zero evita gravar -0: inofensivo em SQLite, mas confuso ao depurar.
   if (accountType !== 'credit' || cents === 0) return cents;
   return -cents;
+}
+
+// FIN-095 — Valor de uma compra em moeda estrangeira.
+//
+// Numa compra internacional no cartão, `amount` vem na moeda da COMPRA (dólares, por exemplo)
+// e `amountInAccountCurrency` no valor que entra na fatura, na moeda da CONTA. Gravar
+// `amount` registrava US$ 10 como R$ 10. O app guarda o valor na moeda da conta — é o que o
+// usuário paga e o que soma com o resto do extrato. Do campo novo só se usa o módulo: o sinal
+// continua vindo de `amount`, cuja convenção foi conferida contra dados reais em FIN-092.
+function pluggyAmountInAccountCurrency(pluggyTx) {
+  const inAccount = pluggyTx.amountInAccountCurrency;
+  if (typeof inAccount !== 'number' || !Number.isFinite(inAccount)) return pluggyTx.amount;
+  const sign = pluggyTx.amount < 0 ? -1 : pluggyTx.amount > 0 ? 1 : Math.sign(inAccount);
+  return sign * Math.abs(inAccount);
 }
 
 // Marcadores com que a Pluggy identifica o pagamento da própria fatura do cartão. A
@@ -220,6 +234,14 @@ const CREDIT_CARD_PAYMENT_MARKERS = ['credit card payment', 'pagamento de fatura
 function isCreditCardBillPayment(pluggyTx) {
   const haystack = ((pluggyTx.category ?? '') + ' ' + (pluggyTx.description ?? '')).toLowerCase();
   return CREDIT_CARD_PAYMENT_MARKERS.some(marker => haystack.includes(marker));
+}
+
+// FIN-074 — moeda de uma conta vinda da Pluggy (`currencyCode`, ISO 4217). Código ausente ou
+// fora do padrão cai em real — a moeda de todas as contas antes de FIN-074 —, porque um valor
+// inválido gravado aqui impediria a conversão de todos os totais da conta. Um código válido
+// fora da lista do app é gravado como veio: a tela mostra o código e avisa se faltar cotação.
+function pluggyCurrency(currencyCode) {
+  return typeof currencyCode === 'string' && CURRENCY_CODE_PATTERN.test(currencyCode) ? currencyCode : BASE_CURRENCY;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -281,10 +303,24 @@ function monthLabelPtBR(month) {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
+// FIN-074 — símbolo de cada moeda aceita pelo app. Espelha `CURRENCY_SYMBOLS` de
+// src/utils/currency.ts, pelo mesmo motivo das outras duplicações deste arquivo: backend e
+// frontend não compartilham módulos. As chaves são a lista de moedas aceitas nos cadastros.
+const CURRENCY_SYMBOLS = { BRL: 'R$', USD: 'US$', EUR: '€', GBP: '£', CHF: 'CHF', CAD: 'C$', AUD: 'A$' };
+
+/**
+ * "US$ 1.234,56" a partir de centavos — mesmo formato de `formatMoney` no frontend. Moeda
+ * fora da lista aparece pelo código ISO.
+ */
+function formatCents(cents, currency = 'BRL') {
+  const symbol = Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOLS, currency) ? CURRENCY_SYMBOLS[currency] : currency;
+  const value = (Math.abs(cents) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${symbol} ${value}`;
+}
+
 /** "R$ 1.234,56" a partir de centavos — mesmo formato de `formatBRL` no frontend. */
 function formatCentsBRL(cents) {
-  const value = (Math.abs(cents) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `R$ ${value}`;
+  return formatCents(cents, 'BRL');
 }
 
 /** "15/09" a partir de uma data ISO, sem passar por `Date` (imune a fuso). */
@@ -380,7 +416,8 @@ function buildDueNotifications(debts, accounts, today, dueSoonDays) {
       type: 'bill_due',
       dedupeKey: `bill_due:${account.id}:${due}`,
       title: `Fatura ${account.name}`,
-      message: `A fatura de ${formatCentsBRL(account.pendingBill)} vence em ${formatDayMonth(due)}.`,
+      // FIN-074: a fatura na moeda do cartão ("US$ 100,00" num cartão em dólar).
+      message: `A fatura de ${formatCents(account.pendingBill, account.currency || 'BRL')} vence em ${formatDayMonth(due)}.`,
     });
   }
 
@@ -452,6 +489,110 @@ function detectUnusualSpending(transactions, today, { months, threshold, minCent
   return candidates.sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey));
 }
 
+/* -------------------------------------------------------------------------- */
+/*                      CÂMBIO PARA EXIBIÇÃO (FIN-075)                        */
+/* -------------------------------------------------------------------------- */
+// Os totais do app são exibidos em real; contas e posições em outra moeda entram neles
+// convertidas pela cotação do dia. Provedor: Frankfurter (cotações de referência do Banco
+// Central Europeu) — gratuito, sem chave de acesso, de código aberto e hospedável por conta
+// própria. A avaliação dos provedores está em FIN-075 (docs/BACKLOG_DETAIL.md);
+// `EXCHANGE_RATES_URL` aponta para outra instância sem mudar código.
+const BASE_CURRENCY = 'BRL';
+const EXCHANGE_RATES_URL = (process.env.EXCHANGE_RATES_URL || 'https://api.frankfurter.dev/v1').replace(/\/+$/, '');
+// O BCE publica uma cotação por dia útil: com 12 h de cache, o servidor consulta o provedor no
+// máximo duas vezes por dia, não importa quantos usuários abram o app.
+const EXCHANGE_RATES_TTL_MS = 12 * 60 * 60 * 1000;
+// Depois de uma falha, espera antes de tentar de novo — com o provedor fora do ar, cada
+// carregamento do app esperaria o timeout inteiro.
+const EXCHANGE_RATES_RETRY_MS = 5 * 60 * 1000;
+const EXCHANGE_RATES_TIMEOUT_MS = 5000;
+const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
+
+/**
+ * Valida a resposta do provedor (`{ base, date, rates }`) e a inverte para "quantos reais vale
+ * 1 unidade de cada moeda" — o provedor responde quantas unidades de cada moeda valem 1 real.
+ * Cada cotação que não seja um número positivo é descartada (um 0 viraria divisão por zero).
+ * Devolve `null` quando a resposta não tem o formato esperado.
+ */
+function parseProviderRates(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const { base, date, rates } = body;
+  if (base !== BASE_CURRENCY || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (!rates || typeof rates !== 'object' || Array.isArray(rates)) return null;
+  const perUnit = {};
+  for (const [code, perReal] of Object.entries(rates)) {
+    if (CURRENCY_CODE_PATTERN.test(code) && typeof perReal === 'number' && Number.isFinite(perReal) && perReal > 0) {
+      perUnit[code] = 1 / perReal;
+    }
+  }
+  return { date, rates: perUnit };
+}
+
+/**
+ * Cache das cotações: validade de `ttlMs`, uma única consulta em andamento por vez e espera
+ * de `retryMs` depois de uma falha. Se a atualização falha e há cotação anterior, serve a
+ * anterior marcada como `stale` — o app continua convertendo e a tela avisa que a cotação é
+ * antiga. Sem cotação nenhuma, a falha sobe para quem chamou. `now` é injetável nos testes.
+ */
+function createExchangeRateCache({ fetchRates, ttlMs, retryMs, now = () => Date.now() }) {
+  let cached = null; // { date, rates, fetchedAt }
+  let lastFailureAt = -Infinity;
+  let inflight = null;
+
+  const serve = (entry, stale) => ({ date: entry.date, rates: entry.rates, stale });
+
+  return async function getRates() {
+    if (cached && now() - cached.fetchedAt < ttlMs) return serve(cached, false);
+    if (now() - lastFailureAt < retryMs) {
+      if (cached) return serve(cached, true);
+      throw new Error('Cotações indisponíveis; nova tentativa em instantes.');
+    }
+    if (!inflight) {
+      // `Promise.resolve().then` torna assíncrona até uma exceção síncrona de `fetchRates`,
+      // para ela passar pelo mesmo caminho de falha.
+      const attempt = Promise.resolve()
+        .then(() => fetchRates())
+        .then(
+          fresh => {
+            cached = { date: fresh.date, rates: fresh.rates, fetchedAt: now() };
+            return cached;
+          },
+          err => {
+            lastFailureAt = now();
+            throw err;
+          }
+        );
+      inflight = attempt;
+      // Libera a vaga só depois de a tentativa terminar, e só se ela ainda for a atual.
+      attempt.finally(() => { if (inflight === attempt) inflight = null; }).catch(() => {});
+    }
+    try {
+      return serve(await inflight, false);
+    } catch (err) {
+      if (cached) return serve(cached, true);
+      throw err;
+    }
+  };
+}
+
+/** Consulta o provedor de câmbio (com timeout) e devolve as cotações já validadas. */
+async function fetchProviderRates() {
+  const res = await fetch(`${EXCHANGE_RATES_URL}/latest?base=${BASE_CURRENCY}`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(EXCHANGE_RATES_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`Provedor de câmbio respondeu HTTP ${res.status}.`);
+  const parsed = parseProviderRates(await res.json().catch(() => null));
+  if (!parsed) throw new Error('Provedor de câmbio respondeu num formato inesperado.');
+  return parsed;
+}
+
+const getExchangeRates = createExchangeRateCache({
+  fetchRates: fetchProviderRates,
+  ttlMs: EXCHANGE_RATES_TTL_MS,
+  retryMs: EXCHANGE_RATES_RETRY_MS,
+});
+
 // Loga o erro completo no servidor e retorna uma mensagem genérica ao cliente — nunca
 // `error.message`/detalhes internos do Prisma/Node, que podem vazar schema, nomes de
 // coluna etc. (ver FIN-011 em docs/BACKLOG_DETAIL.md).
@@ -493,6 +634,14 @@ function validateBody(schema, body) {
 // Campos monetários trafegam em CENTAVOS (inteiro) entre API e frontend — ver FIN-015
 // em docs/BACKLOG_DETAIL.md. `interestRate` é a única exceção: é uma taxa percentual
 // (% ao mês), não um valor monetário, e permanece decimal.
+// FIN-074 — moedas aceitas nos cadastros: as chaves de `CURRENCY_SYMBOLS`, as mesmas do
+// frontend (`SUPPORTED_CURRENCIES` em src/utils/currency.ts — um teste garante que as listas
+// não divergem) e todas cotadas pelo provedor de câmbio (FIN-075).
+const SUPPORTED_CURRENCIES = Object.keys(CURRENCY_SYMBOLS);
+const currencyField = z.enum(SUPPORTED_CURRENCIES, {
+  message: `Moeda deve ser uma de: ${SUPPORTED_CURRENCIES.join(', ')}.`,
+}).optional();
+
 const ACCOUNT_TYPES = ['checking', 'savings', 'credit', 'investment', 'cash'];
 const accountSchema = z.object({
   name: z.string({ error: 'Nome da conta é obrigatório.' }).trim().min(1, 'Nome da conta é obrigatório.'),
@@ -503,6 +652,7 @@ const accountSchema = z.object({
   dueDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
   closingDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
   pendingBill: z.coerce.number().int('Fatura deve ser um valor inteiro em centavos.').nullable().optional(),
+  currency: currencyField, // FIN-074 — ausente no cadastro = real (padrão do banco)
   color: z.string({ error: 'Cor é obrigatória.' }).trim().min(1, 'Cor é obrigatória.'),
 });
 const accountUpdateSchema = accountSchema.partial();
@@ -525,6 +675,8 @@ const transactionSchema = z.object({
   accountId: accountIdField,
   paymentType: z.enum(PAYMENT_TYPES).optional(),
   externalId: z.string().trim().min(1).optional(), // FITID do OFX — ver computeImportHash
+  // Sem `currency`: a moeda de uma transação é sempre a da conta, derivada pelo servidor
+  // (FIN-074). Um `currency` enviado pelo cliente é descartado pelo Zod, como todo campo extra.
 });
 const transactionBatchSchema = z.object({
   transactions: z.array(transactionSchema).min(1, 'Nenhuma transação enviada.'),
@@ -591,6 +743,21 @@ const recurringSchema = z.object({
   active: z.boolean().optional(),
 });
 const recurringUpdateSchema = recurringSchema.partial();
+
+// FIN-070/FIN-071 — carteira de investimentos (Fase 7). Os dois valores aceitam 0: uma posição
+// recebida sem custo (bonificação em ações, cripto de presente) não tem valor aplicado, e uma
+// que perdeu tudo vale 0 — são estados reais, não erro de digitação. Negativo não existe.
+// O vínculo com a conta é conferido na rota (`investmentAccountError`), porque depende do banco.
+const INVESTMENT_TYPES = ['fixed_income', 'stocks', 'funds', 'crypto', 'other'];
+const investmentSchema = z.object({
+  name: z.string({ error: 'Nome do investimento é obrigatório.' }).trim().min(1, 'Nome do investimento é obrigatório.'),
+  type: z.enum(INVESTMENT_TYPES, { message: `Tipo de investimento deve ser um de: ${INVESTMENT_TYPES.join(', ')}.` }),
+  amountInvested: z.coerce.number().int('Valor aplicado deve ser um inteiro em centavos.').min(0, 'Valor aplicado não pode ser negativo.'),
+  currentValue: z.coerce.number().int('Valor atual deve ser um inteiro em centavos.').min(0, 'Valor atual não pode ser negativo.'),
+  accountId: accountIdField,
+  currency: currencyField, // FIN-074 — ausente no cadastro = real (padrão do banco)
+});
+const investmentUpdateSchema = investmentSchema.partial();
 
 
 // Middleware de autenticação
@@ -713,10 +880,20 @@ app.put('/api/accounts/:id', authenticateToken, async (req, res) => {
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
     const { id } = req.params;
-    const acc = await prisma.account.updateMany({
-      where: { id, userId: req.user.userId },
-      data: validation.data,
-    });
+    const userId = req.user.userId;
+    const { currency } = validation.data;
+    // FIN-074: as transações de uma conta estão sempre na moeda dela, então trocar a moeda da
+    // conta (em geral, corrigir um cadastro errado) leva as transações junto — na mesma
+    // transação de banco, para nunca ficar metade numa moeda e metade na outra. Os valores não
+    // são convertidos: a troca corrige o rótulo, não faz câmbio. A posse da conta é conferida
+    // antes, para não mexer em transações do usuário apontadas para a conta de outra pessoa.
+    const owned = currency
+      ? await prisma.account.findFirst({ where: { id, userId }, select: { id: true } })
+      : null;
+    const [acc] = await prisma.$transaction([
+      prisma.account.updateMany({ where: { id, userId }, data: validation.data }),
+      ...(owned ? [prisma.transaction.updateMany({ where: { userId, accountId: id }, data: { currency } })] : []),
+    ]);
     res.json({ success: true, changes: acc.count });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao atualizar conta.');
@@ -768,6 +945,27 @@ app.get('/api/transactions', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * FIN-074 — moeda de cada conta do usuário entre `accountIds`, para derivar a moeda das
+ * transações: uma transação fica sempre na moeda da conta vinculada (em real, sem conta). Uma
+ * conta que não é do usuário não entra no mapa, e a transação fica em real — conferir a posse do
+ * `accountId` nas rotas de transação é assunto de FIN-096.
+ */
+async function accountCurrencies(userId, accountIds) {
+  const ids = [...new Set(accountIds.filter(Boolean))];
+  if (ids.length === 0) return new Map();
+  const accounts = await prisma.account.findMany({
+    where: { userId, id: { in: ids } },
+    select: { id: true, currency: true },
+  });
+  return new Map(accounts.map(a => [a.id, a.currency]));
+}
+
+/** Moeda de uma transação ligada a `accountId`, a partir do mapa de `accountCurrencies`. */
+function currencyForAccount(currencies, accountId) {
+  return (accountId && currencies.get(accountId)) || BASE_CURRENCY;
+}
+
 app.post('/api/transactions', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
   // Supports batch insert
@@ -788,9 +986,11 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
       // exatamente quais transações entraram, sem reimplementar o hash (ver FIN-004).
       const acceptedIndices = [];
       let skipped = 0;
+      // FIN-074: cada transação fica na moeda da conta em que é importada.
+      const currencies = await accountCurrencies(userId, validation.data.transactions.map(t => t.accountId));
       for (let i = 0; i < validation.data.transactions.length; i++) {
         const { externalId, ...t } = validation.data.transactions[i];
-        const data = { ...t, userId };
+        const data = { ...t, userId, currency: currencyForAccount(currencies, t.accountId) };
         data.importHash = computeImportHash(userId, { ...t, externalId });
         try {
           await prisma.transaction.create({ data });
@@ -809,7 +1009,8 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     if (!validation.ok) return res.status(400).json({ error: validation.message });
     try {
       const { externalId: _externalId, ...rest } = validation.data;
-      const data = { ...rest, userId };
+      const currencies = await accountCurrencies(userId, [rest.accountId]);
+      const data = { ...rest, userId, currency: currencyForAccount(currencies, rest.accountId) };
       const tx = await prisma.transaction.create({ data });
       res.json(tx);
     } catch (err) {
@@ -834,6 +1035,12 @@ app.put('/api/transactions/:id', authenticateToken, async (req, res) => {
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
     const { externalId: _externalId, ...data } = validation.data;
+    // FIN-074: trocar a conta troca a moeda junto — a transação segue na moeda da conta, e em
+    // real quando desvinculada (`accountId` nulo).
+    if (data.accountId !== undefined) {
+      const currencies = await accountCurrencies(req.user.userId, [data.accountId]);
+      data.currency = currencyForAccount(currencies, data.accountId);
+    }
     const result = await prisma.transaction.updateMany({
       where: { id: req.params.id, userId: req.user.userId },
       data,
@@ -1022,6 +1229,109 @@ app.delete('/api/goals/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// --- INVESTMENTS (FIN-071) ---
+/**
+ * Confere o `accountId` informado para um investimento: a conta precisa existir, ser do
+ * próprio usuário e não ser um cartão de crédito. A chave estrangeira só garante que a conta
+ * existe — sem esta checagem, o id de uma conta de outro usuário seria aceito e o investimento
+ * ficaria vinculado a ela. E cartão não guarda aplicação: o saldo dele é uma fatura.
+ * Devolve a mensagem de erro, ou `null` quando o vínculo é válido ou não foi informado.
+ */
+async function investmentAccountError(userId, accountId) {
+  if (!accountId) return null;
+  const account = await prisma.account.findFirst({ where: { id: accountId, userId }, select: { type: true } });
+  if (!account) return 'Conta vinculada não encontrada.';
+  if (account.type === 'credit') return 'Um investimento não pode ser vinculado a um cartão de crédito.';
+  return null;
+}
+
+app.get('/api/investments', authenticateToken, async (req, res) => {
+  try {
+    const investments = await prisma.investment.findMany({
+      where: { userId: req.user.userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(investments);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar investimentos.');
+  }
+});
+
+app.post('/api/investments', authenticateToken, async (req, res) => {
+  const validation = validateBody(investmentSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
+  try {
+    const accountError = await investmentAccountError(userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
+    const investment = await prisma.investment.create({ data: { ...validation.data, userId } });
+    res.json(investment);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao criar investimento.');
+  }
+});
+
+app.put('/api/investments/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(investmentUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
+  try {
+    const accountError = await investmentAccountError(userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
+    // `update`, e não `updateMany`, para devolver o registro com o `updatedAt` novo — a
+    // carteira mostra há quanto tempo cada valor foi atualizado. O `userId` no `where`
+    // garante o isolamento: id inexistente ou de outro usuário cai no P2025 (404), como em
+    // /api/debts/:id.
+    const investment = await prisma.investment.update({
+      where: { id: req.params.id, userId },
+      data: validation.data,
+    });
+    res.json(investment);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Investimento não encontrado.' });
+    sendInternalError(res, err, 'Erro ao atualizar investimento.');
+  }
+});
+
+app.delete('/api/investments/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.investment.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir investimento.');
+  }
+});
+
+// --- EXCHANGE RATES (FIN-075) ---
+// O frontend pede só as moedas em uso (`?symbols=USD,EUR`) e recebe quantos reais vale 1
+// unidade de cada. Moeda que o provedor não cota simplesmente não vem na resposta — o frontend
+// deixa os itens dela fora dos totais e avisa. `stale: true` = cotação antiga, servida porque a
+// atualização falhou. Autenticada para não virar um proxy aberto do provedor.
+const MAX_EXCHANGE_SYMBOLS = 20;
+
+app.get('/api/exchange-rates', authenticateToken, async (req, res) => {
+  const raw = typeof req.query.symbols === 'string' ? req.query.symbols : '';
+  const symbols = [...new Set(raw.split(',').map(code => code.trim().toUpperCase()).filter(Boolean))];
+  if (symbols.length === 0 || symbols.length > MAX_EXCHANGE_SYMBOLS || !symbols.every(code => CURRENCY_CODE_PATTERN.test(code))) {
+    return res.status(400).json({
+      error: `Informe em "symbols" até ${MAX_EXCHANGE_SYMBOLS} códigos de moeda ISO, separados por vírgula (ex.: USD,EUR).`,
+    });
+  }
+  try {
+    const { date, rates, stale } = await getExchangeRates();
+    const picked = {};
+    for (const code of symbols) {
+      if (code === BASE_CURRENCY) picked[code] = 1;
+      else if (Object.prototype.hasOwnProperty.call(rates, code)) picked[code] = rates[code];
+    }
+    res.json({ base: BASE_CURRENCY, date, rates: picked, stale });
+  } catch (err) {
+    // O detalhe fica no log: a resposta não repete a mensagem do provedor (FIN-011).
+    console.error('Falha ao obter cotações de câmbio:', err);
+    res.status(502).json({ error: 'Cotações indisponíveis no momento. Tente novamente mais tarde.' });
+  }
+});
+
 // --- RECURRING TRANSACTIONS (FIN-054) ---
 app.get('/api/recurring-transactions', authenticateToken, async (req, res) => {
   try {
@@ -1063,6 +1373,8 @@ app.post('/api/recurring-transactions/process', authenticateToken, async (req, r
     // convenção usada em `isDebtOverdue` no frontend.
     const dueRecurrences = await prisma.recurringTransaction.findMany({
       where: { userId, active: true, nextOccurrence: { lte: today } },
+      // FIN-074: a ocorrência nasce na moeda da conta da recorrência (real, sem conta).
+      include: { account: { select: { currency: true } } },
     });
 
     let processed = 0;
@@ -1081,6 +1393,7 @@ app.post('/api/recurring-transactions/process', authenticateToken, async (req, r
             category: rec.category,
             date: occurrence,
             amount: rec.amount,
+            currency: rec.account?.currency ?? BASE_CURRENCY,
             importHash,
           },
           // Ocorrência já lançada por uma execução anterior/concorrente: nada a fazer.
@@ -1184,8 +1497,10 @@ app.post('/api/notifications/generate', authenticateToken, async (req, res) => {
     const [debts, creditAccounts, recentTransactions, firstTransaction] = await Promise.all([
       prisma.debt.findMany({ where: { userId } }),
       prisma.account.findMany({ where: { userId, type: 'credit' } }),
+      // FIN-074: só transações em real — somar dólares e reais na mesma categoria distorceria a
+      // média e o gasto do mês. Gasto em moeda estrangeira fica fora deste alerta.
       prisma.transaction.findMany({
-        where: { userId, date: { gte: baselineStart, lte: today } },
+        where: { userId, currency: BASE_CURRENCY, date: { gte: baselineStart, lte: today } },
         select: { date: true, amount: true, category: true },
       }),
       // O início do histórico decide quais meses da média estão completos — ver
@@ -1336,6 +1651,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
 
     for (const pluggyAcc of accountsRes.results) {
       const accountType = mapPluggyAccountType(pluggyAcc);
+      const accountCurrency = pluggyCurrency(pluggyAcc.currencyCode); // FIN-074
       // Upsert atômico via constraint (userId, pluggyId) — ver FIN-021.
       const localAccount = await prisma.account.upsert({
         where: { userId_pluggyId: { userId, pluggyId: pluggyAcc.id } },
@@ -1346,9 +1662,16 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           bank: pluggyAcc.marketingName || 'Banco Conectado',
           type: accountType,
           balance: toCents(pluggyAcc.balance),
+          currency: accountCurrency,
           color: '#6366f1',
         },
-        update: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name },
+        update: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name, currency: accountCurrency },
+      });
+      // FIN-074: as transações da conta ficam na moeda dela. Só grava se alguma estiver em
+      // outra moeda — na prática, nunca depois da primeira sincronização.
+      await prisma.transaction.updateMany({
+        where: { userId, accountId: localAccount.id, currency: { not: accountCurrency } },
+        data: { currency: accountCurrency },
       });
 
       // Para cartões de crédito, busca a fatura real via endpoint dedicado da Pluggy
@@ -1448,6 +1771,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           category: tx.category || 'Outros',
           date: tx.date.toISOString().split('T')[0],
           amount: pluggyAmountToCents(tx, accountType),
+          currency: accountCurrency, // FIN-074
           // Deixa explícito na transação que ela veio de um cartão — é o que o app já
           // exibe na lista, e serve de marca de que o sinal foi normalizado (FIN-092).
           paymentType: accountType === 'credit' ? 'credit' : 'debit',
@@ -1466,7 +1790,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               await prisma.transaction.upsert({
                 where: { userId_pluggyId: { userId, pluggyId: t.pluggyId } },
                 create: t,
-                update: { name: t.name, category: t.category, date: t.date, amount: t.amount, paymentType: t.paymentType },
+                update: { name: t.name, category: t.category, date: t.date, amount: t.amount, paymentType: t.paymentType, currency: t.currency },
               });
             }
           } else {
@@ -1506,4 +1830,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 export {
   app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment,
   nextBillDueDate, pluggyBillDueDay, buildDueNotifications, detectUnusualSpending,
+  pluggyCurrency, formatCents, SUPPORTED_CURRENCIES, parseProviderRates, createExchangeRateCache,
 };

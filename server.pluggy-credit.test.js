@@ -1,17 +1,20 @@
 // @vitest-environment node
 // FIN-092 — normalização do sinal das transações de cartão vindas da Pluggy.
+// FIN-095 — compras em moeda estrangeira: valor na moeda da conta.
+// FIN-074 — moeda da conta vinda da Pluggy.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestApp } from './test/backend-test-utils.js';
 
 describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
   let pluggyAmountToCents;
   let isCreditCardBillPayment;
+  let pluggyCurrency;
   let cleanup;
 
   beforeAll(async () => {
     const app = await createTestApp('pluggy_credit');
     cleanup = app.cleanup;
-    ({ pluggyAmountToCents, isCreditCardBillPayment } = await import('./server.js'));
+    ({ pluggyAmountToCents, isCreditCardBillPayment, pluggyCurrency } = await import('./server.js'));
   });
 
   afterAll(() => cleanup());
@@ -47,6 +50,48 @@ describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
 
   it('zero não ganha sinal negativo', () => {
     expect(Object.is(pluggyAmountToCents({ amount: 0 }, 'credit'), -0)).toBe(false);
+  });
+
+  describe('compra em moeda estrangeira (FIN-095)', () => {
+    it('grava o valor da fatura (moeda da conta), e não o da compra em dólar', () => {
+      // US$ 10 que entraram na fatura como R$ 54,30: antes, o app gravava −R$ 10,00.
+      expect(pluggyAmountToCents({ amount: 10, amountInAccountCurrency: 54.3 }, 'credit')).toBe(-5430);
+    });
+
+    it('o sinal continua vindo de `amount`, mesmo que o outro campo venha com sinal trocado', () => {
+      expect(pluggyAmountToCents({ amount: -10, amountInAccountCurrency: 54.3 }, 'credit')).toBe(5430);
+      expect(pluggyAmountToCents({ amount: -10, amountInAccountCurrency: -54.3 }, 'credit')).toBe(5430);
+      expect(pluggyAmountToCents({ amount: 10, amountInAccountCurrency: -54.3 }, 'credit')).toBe(-5430);
+    });
+
+    it('sem valor na moeda da conta (compra em real), usa `amount` como sempre', () => {
+      expect(pluggyAmountToCents({ amount: 25, amountInAccountCurrency: null }, 'credit')).toBe(-2500);
+      expect(pluggyAmountToCents({ amount: -25 }, 'checking')).toBe(-2500);
+    });
+
+    it('um valor que não é número finito é ignorado', () => {
+      expect(pluggyAmountToCents({ amount: 25, amountInAccountCurrency: '54.30' }, 'credit')).toBe(-2500);
+      expect(pluggyAmountToCents({ amount: 25, amountInAccountCurrency: Number.NaN }, 'credit')).toBe(-2500);
+    });
+  });
+
+  describe('pluggyCurrency (FIN-074)', () => {
+    it('usa o código ISO que a Pluggy informa', () => {
+      expect(pluggyCurrency('BRL')).toBe('BRL');
+      expect(pluggyCurrency('USD')).toBe('USD');
+    });
+
+    it('um código válido fora da lista do app é gravado como veio', () => {
+      expect(pluggyCurrency('ARS')).toBe('ARS');
+    });
+
+    it('código ausente ou fora do padrão cai em real', () => {
+      expect(pluggyCurrency(undefined)).toBe('BRL');
+      expect(pluggyCurrency(null)).toBe('BRL');
+      expect(pluggyCurrency('usd')).toBe('BRL');
+      expect(pluggyCurrency('US')).toBe('BRL');
+      expect(pluggyCurrency(986)).toBe('BRL');
+    });
   });
 
   describe('isCreditCardBillPayment', () => {

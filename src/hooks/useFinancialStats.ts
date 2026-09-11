@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { isDebtOverdue, todayISO } from '../utils/debts';
-import type { Account, Debt, Transaction } from '../types';
+import { computeInvestmentHoldings } from '../utils/investments';
+import type { Account, Debt, Investment, Transaction } from '../types';
 
 // FIN-086 — lógica de cálculo financeiro extraída de dentro de `App.tsx` (onde vivia como
 // um `useMemo` inline de ~70 linhas) para este módulo dedicado. Objetivo duplo: (1)
@@ -26,11 +27,16 @@ export interface FinancialStats {
   filteredTxsCount: number;
 }
 
+// Padrão estável para `investments` ausente: um `[]` literal no parâmetro seria um array novo
+// a cada render e invalidaria o `useMemo` do hook toda vez.
+const NO_INVESTMENTS: Investment[] = [];
+
 export function computeFinancialStats(
   transactions: Transaction[],
   accounts: Account[],
   debts: Debt[],
-  dashboardAccountId: string | null
+  dashboardAccountId: string | null,
+  investments: Pick<Investment, 'accountId' | 'currentValue'>[] = NO_INVESTMENTS
 ): FinancialStats {
   const activeTxs = dashboardAccountId
     ? transactions.filter(t => t.accountId === dashboardAccountId)
@@ -43,6 +49,11 @@ export function computeFinancialStats(
   const activeDebts = dashboardAccountId
     ? debts.filter(d => d.accountId === dashboardAccountId)
     : debts;
+
+  // FIN-073: com uma conta selecionada, só as posições da carteira vinculadas a ela.
+  const activeInvestments = dashboardAccountId
+    ? investments.filter(i => i.accountId === dashboardAccountId)
+    : investments;
 
   const income = activeTxs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const expense = activeTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -76,7 +87,9 @@ export function computeFinancialStats(
   // Investimentos são somados separadamente — misturá-los ao saldo líquido pode enganar
   // o usuário sobre quanto ele realmente tem disponível para gastar (ver FIN-018).
   const realBalance = activeAccs.filter(a => a.type !== 'credit' && a.type !== 'investment').reduce((s, a) => s + a.balance, 0);
-  const investmentBalance = activeAccs.filter(a => a.type === 'investment').reduce((s, a) => s + a.balance, 0);
+  // FIN-073: posições da carteira + contas de investimento sem posições. A conta com posições
+  // é representada por elas, sem contar em dobro — mesma regra do patrimônio líquido.
+  const investmentBalance = computeInvestmentHoldings(activeAccs, activeInvestments).total;
   const pendingBills = activeAccs.filter(a => a.type === 'credit').reduce((s, a) => s + (a.pendingBill ?? 0), 0);
   const totalActiveDebts = activeDebts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
 
@@ -106,10 +119,11 @@ export function useFinancialStats(
   transactions: Transaction[],
   accounts: Account[],
   debts: Debt[],
-  dashboardAccountId: string | null
+  dashboardAccountId: string | null,
+  investments: Investment[] = NO_INVESTMENTS
 ): FinancialStats {
   return useMemo(
-    () => computeFinancialStats(transactions, accounts, debts, dashboardAccountId),
-    [transactions, accounts, debts, dashboardAccountId]
+    () => computeFinancialStats(transactions, accounts, debts, dashboardAccountId, investments),
+    [transactions, accounts, debts, dashboardAccountId, investments]
   );
 }

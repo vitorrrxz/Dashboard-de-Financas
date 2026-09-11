@@ -66,6 +66,21 @@ describe('computeFinancialStats', () => {
     expect(s.investmentBalance).toBe(5000);
   });
 
+  it('posições da carteira entram em Investimentos sem somar em dobro a conta coberta (FIN-073)', () => {
+    const accounts = [acc({ id: 'xp', type: 'investment', balance: 10000 }), acc({ type: 'checking', balance: 1000 })];
+    const s = computeFinancialStats([], accounts, [], null, [{ accountId: 'xp', currentValue: 9000 }, { currentValue: 500 }]);
+    // Saldo da XP (10.000) + posições (9.500) daria 19.500: a conta com posições é representada por elas.
+    expect(s.investmentBalance).toBe(9500);
+    expect(s.realBalance).toBe(1000);
+  });
+
+  it('com uma conta selecionada, só entram as posições vinculadas a ela (FIN-073)', () => {
+    const accounts = [acc({ id: 'xp', type: 'investment', balance: 10000 }), acc({ id: 'rico', type: 'investment', balance: 2000 })];
+    const investments = [{ accountId: 'xp', currentValue: 9000 }, { accountId: 'rico', currentValue: 1500 }, { currentValue: 700 }];
+    expect(computeFinancialStats([], accounts, [], 'xp', investments).investmentBalance).toBe(9000);
+    expect(computeFinancialStats([], accounts, [], 'rico', investments).investmentBalance).toBe(1500);
+  });
+
   it('múltiplas contas consolidadas (dashboardAccountId null) somam tudo', () => {
     const accounts = [acc({ id: 'a1', type: 'checking', balance: 100 }), acc({ id: 'a2', type: 'checking', balance: 200 })];
     const txs = [tx({ accountId: 'a1', amount: 50 }), tx({ accountId: 'a2', amount: 30 })];
