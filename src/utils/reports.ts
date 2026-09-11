@@ -1,5 +1,6 @@
-import type { Account, Debt, Transaction } from '../types';
+import type { Account, Debt, Investment, Transaction } from '../types';
 import { isDebtPaid, todayISO } from './debts';
+import { computeInvestmentHoldings } from './investments';
 
 // FIN-062/FIN-063/FIN-064 — agregações da aba Relatórios. Funções puras (sem endpoint
 // novo), calculadas sobre os dados já carregados, no mesmo espírito de `useFinancialStats`
@@ -84,8 +85,12 @@ export function computeYearlyComparison(
 export interface NetWorth {
   /** Saldo líquido: conta corrente, poupança e dinheiro em espécie. */
   liquid: number;
-  /** Saldo das contas do tipo investimento (separado do líquido — ver FIN-018). */
+  /** Investimentos, separados do líquido (FIN-018): `portfolio` + `investmentAccounts`. */
   investments: number;
+  /** Parte dos investimentos que vem das posições da carteira (FIN-070). */
+  portfolio: number;
+  /** Parte dos investimentos que vem do saldo de contas de investimento sem posições. */
+  investmentAccounts: number;
   /** Faturas de cartão em aberto (passivo). */
   pendingBills: number;
   /** Saldo devedor das dívidas ainda não quitadas (passivo). */
@@ -106,21 +111,21 @@ export interface NetWorth {
  * nunca entra como ativo (seu saldo é a fatura, um passivo) e investimento é somado à
  * parte do dinheiro líquido (ver FIN-018).
  *
- * Nota de escopo: os investimentos vêm das **contas** do tipo `investment`, que é o que o
- * app tem hoje. Quando o módulo de investimentos (FIN-070) trouxer ativos com quantidade e
- * cotação, esta parcela deve passar a somar o valor de mercado da carteira.
+ * Investimentos (FIN-073): as posições da carteira pelo valor atual, mais o saldo das contas
+ * de investimento que ainda não têm posições. A conta com posições é representada por elas,
+ * para a mesma aplicação não entrar duas vezes — ver `computeInvestmentHoldings`. Sem
+ * `investments`, o resultado é o mesmo de antes da carteira existir.
  */
 export function computeNetWorth(
-  accounts: Pick<Account, 'type' | 'balance' | 'pendingBill'>[],
-  debts: Pick<Debt, 'totalAmount' | 'paidAmount' | 'paidInstallments' | 'totalInstallments'>[]
+  accounts: Pick<Account, 'id' | 'type' | 'balance' | 'pendingBill'>[],
+  debts: Pick<Debt, 'totalAmount' | 'paidAmount' | 'paidInstallments' | 'totalInstallments'>[],
+  investments: Pick<Investment, 'accountId' | 'currentValue'>[] = []
 ): NetWorth {
   const liquid = accounts
     .filter(a => a.type !== 'credit' && a.type !== 'investment')
     .reduce((sum, a) => sum + a.balance, 0);
 
-  const investments = accounts
-    .filter(a => a.type === 'investment')
-    .reduce((sum, a) => sum + a.balance, 0);
+  const holdings = computeInvestmentHoldings(accounts, investments);
 
   const pendingBills = accounts
     .filter(a => a.type === 'credit')
@@ -133,12 +138,14 @@ export function computeNetWorth(
     .filter(d => !isDebtPaid(d))
     .reduce((sum, d) => sum + Math.max(0, d.totalAmount - d.paidAmount), 0);
 
-  const assets = round2(liquid + investments);
+  const assets = round2(liquid + holdings.total);
   const liabilities = round2(pendingBills + debtsTotal);
 
   return {
     liquid: round2(liquid),
-    investments: round2(investments),
+    investments: holdings.total,
+    portfolio: holdings.positions,
+    investmentAccounts: holdings.accountBalances,
     pendingBills: round2(pendingBills),
     debts: round2(debtsTotal),
     assets,
@@ -147,8 +154,12 @@ export function computeNetWorth(
   };
 }
 
-/** Linhas do relatório de transações usadas tanto no CSV quanto no PDF (FIN-060/FIN-061). */
-export const TRANSACTION_REPORT_HEADERS = ['Data', 'Descrição', 'Categoria', 'Conta', 'Tipo', 'Valor (R$)'];
+/**
+ * Colunas do relatório de transações, as mesmas no CSV e no PDF (FIN-060/FIN-061). O valor sai
+ * na moeda da conta de cada linha, indicada na coluna "Moeda" (FIN-076) — um cabeçalho
+ * "Valor (R$)" rotularia como real uma linha em dólar.
+ */
+export const TRANSACTION_REPORT_HEADERS = ['Data', 'Descrição', 'Categoria', 'Conta', 'Tipo', 'Moeda', 'Valor'];
 
 /** Período coberto por um conjunto de transações, para o cabeçalho do relatório. */
 export function transactionsPeriod(transactions: Pick<Transaction, 'date'>[]): { from: string; to: string } {

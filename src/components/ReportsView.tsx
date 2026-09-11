@@ -4,13 +4,15 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts';
 import { Wallet, TrendingUp, CreditCard, TrendingDown, Scale } from 'lucide-react';
-import type { Account, Debt, Transaction } from '../types';
-import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth } from '../utils/reports';
+import type { Account, Debt, Investment, Transaction } from '../types';
+import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth, type NetWorth } from '../utils/reports';
 
 interface ReportsViewProps {
   transactions: Transaction[];
   accounts: Account[];
   debts: Debt[];
+  /** Posições da carteira (FIN-072) — entram nos investimentos do patrimônio (FIN-073). */
+  investments: Investment[];
 }
 
 /** Formata um valor em reais para exibição (mesmo formato usado no Dashboard). */
@@ -18,9 +20,22 @@ function fmt(value: number): string {
   return `R$ ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 }
 
+/**
+ * De onde vem o total de investimentos (FIN-073), quando há algo a explicar: as posições da
+ * carteira, o saldo das contas de investimento que ainda não têm posições, ou os dois.
+ */
+function investmentsDetail(netWorth: NetWorth): string | undefined {
+  if (netWorth.portfolio !== 0 && netWorth.investmentAccounts !== 0) {
+    return `Carteira ${fmt(netWorth.portfolio)} + contas ${fmt(netWorth.investmentAccounts)}`;
+  }
+  if (netWorth.portfolio !== 0) return 'Valor atual da carteira';
+  if (netWorth.investmentAccounts !== 0) return 'Saldo das contas de investimento';
+  return undefined;
+}
+
 /** Card de composição do patrimônio: rótulo, valor e se entra somando ou subtraindo. */
-function CompositionCard({ title, amount, icon, negative }: {
-  title: string; amount: number; icon: React.ReactNode; negative?: boolean;
+function CompositionCard({ title, amount, icon, negative, detail }: {
+  title: string; amount: number; icon: React.ReactNode; negative?: boolean; detail?: string;
 }) {
   return (
     <div className="glass-card rounded-2xl p-5">
@@ -33,6 +48,7 @@ function CompositionCard({ title, amount, icon, negative }: {
       <p className={`text-xl font-bold tracking-tight ${negative ? 'text-red-400' : 'text-white'}`}>
         {negative && amount !== 0 ? '−' : ''}{fmt(amount)}
       </p>
+      {detail && <p className="text-[11px] text-textMuted mt-1">{detail}</p>}
     </div>
   );
 }
@@ -42,10 +58,10 @@ function CompositionCard({ title, amount, icon, negative }: {
  * receitas × despesas por mês e por ano. Tudo derivado no cliente a partir dos dados já
  * carregados (`src/utils/reports.ts`), sem endpoint dedicado.
  */
-export function ReportsView({ transactions, accounts, debts }: ReportsViewProps) {
+export function ReportsView({ transactions, accounts, debts, investments }: ReportsViewProps) {
   const [granularity, setGranularity] = useState<'monthly' | 'yearly'>('monthly');
 
-  const netWorth = useMemo(() => computeNetWorth(accounts, debts), [accounts, debts]);
+  const netWorth = useMemo(() => computeNetWorth(accounts, debts, investments), [accounts, debts, investments]);
   const monthly = useMemo(() => computeMonthlyComparison(transactions, 12), [transactions]);
   const yearly = useMemo(() => computeYearlyComparison(transactions), [transactions]);
 
@@ -71,7 +87,7 @@ export function ReportsView({ transactions, accounts, debts }: ReportsViewProps)
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <CompositionCard title="Saldo em Contas" amount={netWorth.liquid}
             icon={<Wallet size={18} style={{ color: 'var(--color-primary)' }} />} />
-          <CompositionCard title="Investimentos" amount={netWorth.investments}
+          <CompositionCard title="Investimentos" amount={netWorth.investments} detail={investmentsDetail(netWorth)}
             icon={<TrendingUp size={18} className="text-teal-400" />} />
           <CompositionCard title="Faturas em Aberto" amount={netWorth.pendingBills} negative
             icon={<CreditCard size={18} className="text-pink-400" />} />

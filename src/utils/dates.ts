@@ -169,3 +169,26 @@ export function formatMonthLabel(month: string): string {
   const name = new Date(parsed.year, parsed.month - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
   return `${name.charAt(0).toUpperCase()}${name.slice(1)}/${parsed.year}`;
 }
+
+/**
+ * Tempo decorrido desde um instante, para exibição: "agora", "há 5 min", "há 3 h", "ontem"
+ * (entre 24 e 48 h), "há 4 dias"; a partir de uma semana, a data (dd/mm/aaaa).
+ *
+ * Recebe um timestamp completo (ISO com hora e fuso, como o `createdAt` vindo da API) — é
+ * seguro passá-lo por `new Date`, ao contrário de uma data pura YYYY-MM-DD. Um instante no
+ * futuro (relógio do servidor adiantado) vira "agora", nunca um tempo negativo. `now` existe
+ * para os testes.
+ */
+export function formatRelativeTime(timestamp: string, now: Date = new Date()): string {
+  const then = new Date(timestamp);
+  if (Number.isNaN(then.getTime())) return '';
+  const minutes = Math.floor((now.getTime() - then.getTime()) / 60_000);
+  if (minutes < 1) return 'agora';
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'ontem';
+  if (days < 7) return `há ${days} dias`;
+  return then.toLocaleDateString('pt-BR');
+}

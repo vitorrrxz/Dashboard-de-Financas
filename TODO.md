@@ -34,6 +34,7 @@
 - [x] Revisar expiracao/revogacao de token JWT (FIN-012)
 - [x] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
 - [x] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
+- [ ] Recusar `accountId` de conta de outro usuario em transacoes, dividas e recorrencias (FIN-096, achado ao implementar FIN-071)
 
 ### Integridade financeira
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
@@ -88,6 +89,7 @@
 
 ### Open Finance / Pluggy
 - [x] Tratar status de item Pluggy expirado / erro de login (FIN-041)
+- [x] Gravar compras em moeda estrangeira no cartao pelo valor na moeda da conta (FIN-095, achado ao implementar FIN-074)
 
 ### Infraestrutura / DX
 - [x] Documentar `sandbox-pluggy/` como prototipo isolado, nao integrado ao app principal (FIN-085)
@@ -138,24 +140,24 @@
 
 ## Fase 6 - Notificacoes
 
-- [ ] Criar model `Notification` e endpoint de listagem/leitura (FIN-065, depende de FIN-020, FIN-008)
-- [ ] Conectar sino do header a uma central de notificacoes real (FIN-066, depende de FIN-039, FIN-065)
-- [ ] Gerar notificacoes automaticas de vencimento de divida/fatura (FIN-067, depende de FIN-065, FIN-005)
-- [ ] Avaliar notificacoes por e-mail para vencimentos (FIN-068, depende de FIN-067)
-- [ ] Alertas de gasto incomum por categoria (FIN-069, depende de FIN-065)
+- [x] Criar model `Notification` e endpoint de listagem/leitura (FIN-065, depende de FIN-020, FIN-008)
+- [x] Conectar sino do header a uma central de notificacoes real (FIN-066, depende de FIN-039, FIN-065)
+- [x] Gerar notificacoes automaticas de vencimento de divida/fatura (FIN-067, depende de FIN-065, FIN-005)
+- [x] Avaliar notificacoes por e-mail para vencimentos (FIN-068, depende de FIN-067 — avaliacao registrada; implementacao aguarda decisao de produto/infra)
+- [x] Alertas de gasto incomum por categoria (FIN-069, depende de FIN-065)
 
 ## Fase 7 - Investimentos e Multi-moeda
 
 ### Investimentos
-- [ ] Criar model `Investment` no schema Prisma (FIN-070, depende de FIN-015, FIN-020)
-- [ ] Criar rotas CRUD `/api/investments` (FIN-071, depende de FIN-070, FIN-008)
-- [ ] Criar tela de carteira de investimentos (FIN-072, depende de FIN-071)
-- [ ] Integrar valor de investimentos ao patrimonio liquido (FIN-073, depende de FIN-064, FIN-072)
+- [x] Criar model `Investment` no schema Prisma (FIN-070, depende de FIN-015, FIN-020)
+- [x] Criar rotas CRUD `/api/investments` (FIN-071, depende de FIN-070, FIN-008)
+- [x] Criar tela de carteira de investimentos (FIN-072, depende de FIN-071)
+- [x] Integrar valor de investimentos ao patrimonio liquido (FIN-073, depende de FIN-064, FIN-072)
 
 ### Multi-moeda
-- [ ] Adicionar campo `currency` em Account e Transaction (FIN-074, depende de FIN-020)
-- [ ] Integrar API de cambio para conversao de exibicao (FIN-075, depende de FIN-074)
-- [ ] Atualizar UI para exibir/selecionar moeda por conta (FIN-076, depende de FIN-075)
+- [x] Adicionar campo `currency` em Account e Transaction (FIN-074, depende de FIN-020)
+- [x] Integrar API de cambio para conversao de exibicao (FIN-075, depende de FIN-074)
+- [x] Atualizar UI para exibir/selecionar moeda por conta (FIN-076, depende de FIN-075)
 
 ## Fase 8 - Colaboracao e PWA
 

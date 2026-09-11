@@ -199,10 +199,24 @@ function toCents(reais) {
 // de cartão contra dados reais, e um engano ali inverteria também as contas correntes, que
 // hoje estão corretas. O tipo da conta foi conferido contra o extrato real de um cartão.
 function pluggyAmountToCents(pluggyTx, accountType) {
-  const cents = toCents(pluggyTx.amount);
+  const cents = toCents(pluggyAmountInAccountCurrency(pluggyTx));
   // O teste de zero evita gravar -0: inofensivo em SQLite, mas confuso ao depurar.
   if (accountType !== 'credit' || cents === 0) return cents;
   return -cents;
+}
+
+// FIN-095 — Valor de uma compra em moeda estrangeira.
+//
+// Numa compra internacional no cartão, `amount` vem na moeda da COMPRA (dólares, por exemplo)
+// e `amountInAccountCurrency` no valor que entra na fatura, na moeda da CONTA. Gravar
+// `amount` registrava US$ 10 como R$ 10. O app guarda o valor na moeda da conta — é o que o
+// usuário paga e o que soma com o resto do extrato. Do campo novo só se usa o módulo: o sinal
+// continua vindo de `amount`, cuja convenção foi conferida contra dados reais em FIN-092.
+function pluggyAmountInAccountCurrency(pluggyTx) {
+  const inAccount = pluggyTx.amountInAccountCurrency;
+  if (typeof inAccount !== 'number' || !Number.isFinite(inAccount)) return pluggyTx.amount;
+  const sign = pluggyTx.amount < 0 ? -1 : pluggyTx.amount > 0 ? 1 : Math.sign(inAccount);
+  return sign * Math.abs(inAccount);
 }
 
 // Marcadores com que a Pluggy identifica o pagamento da própria fatura do cartão. A
@@ -221,6 +235,363 @@ function isCreditCardBillPayment(pluggyTx) {
   const haystack = ((pluggyTx.category ?? '') + ' ' + (pluggyTx.description ?? '')).toLowerCase();
   return CREDIT_CARD_PAYMENT_MARKERS.some(marker => haystack.includes(marker));
 }
+
+// FIN-074 — moeda de uma conta vinda da Pluggy (`currencyCode`, ISO 4217). Código ausente ou
+// fora do padrão cai em real — a moeda de todas as contas antes de FIN-074 —, porque um valor
+// inválido gravado aqui impediria a conversão de todos os totais da conta. Um código válido
+// fora da lista do app é gravado como veio: a tela mostra o código e avisa se faltar cotação.
+function pluggyCurrency(currencyCode) {
+  return typeof currencyCode === 'string' && CURRENCY_CODE_PATTERN.test(currencyCode) ? currencyCode : BASE_CURRENCY;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                        NOTIFICAÇÕES (FIN-065 a FIN-069)                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Lê um parâmetro numérico do ambiente, caindo no padrão quando ausente ou inválido — um
+ * valor malformado no `.env` não deve derrubar o servidor nem virar `NaN` silencioso no
+ * cálculo das notificações.
+ */
+function readNumberEnv(name, fallback, { min = -Infinity, max = Infinity, integer = false } = {}) {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) {
+    console.warn(`⚠️  ${name}="${raw}" inválido — usando o padrão ${fallback}.`);
+    return fallback;
+  }
+  return value;
+}
+
+// Parâmetros das notificações automáticas, configuráveis por ambiente (ver .env.example).
+const NOTIFICATION_SETTINGS = {
+  // Com quantos dias de antecedência avisar sobre uma parcela ou fatura (FIN-067).
+  dueSoonDays: readNumberEnv('NOTIFY_DUE_SOON_DAYS', 7, { min: 0, max: 60, integer: true }),
+  // Quantos meses anteriores formam a média de gasto por categoria (FIN-069).
+  unusualSpendingMonths: readNumberEnv('UNUSUAL_SPENDING_MONTHS', 3, { min: 2, max: 12, integer: true }),
+  // Quanto acima da média (0.5 = 50%) o gasto do mês precisa ficar para gerar alerta.
+  unusualSpendingThreshold: readNumberEnv('UNUSUAL_SPENDING_THRESHOLD', 0.5, { min: 0.1, max: 10 }),
+  // Diferença mínima, em centavos, entre o gasto do mês e a média — sem ela, uma categoria de
+  // valor baixo geraria alerta por variação irrelevante (R$ 12 → R$ 20 é +66%, mas não importa).
+  unusualSpendingMinCents: readNumberEnv('UNUSUAL_SPENDING_MIN_CENTS', 5000, { min: 0, integer: true }),
+};
+
+// Mínimo de meses anteriores com dados para existir uma "média" a comparar (FIN-069). Com um
+// mês só, qualquer variação normal de um mês para o outro viraria alerta.
+const MIN_BASELINE_MONTHS = 2;
+
+/** Soma `days` dias a uma data ISO, com componentes locais (sem parse UTC de string). */
+function addDaysISO(dateString, days) {
+  const [year, month, day] = dateString.split('-').map(Number);
+  const d = new Date(year, month - 1, day + days);
+  return formatISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+/** Desloca uma chave de mês (YYYY-MM) em `delta` meses — espelho de `shiftMonth` em src/utils/dates.ts. */
+function shiftMonthKey(month, delta) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const absolute = year * 12 + (monthNumber - 1) + delta;
+  const newYear = Math.floor(absolute / 12);
+  return `${newYear}-${String(absolute - newYear * 12 + 1).padStart(2, '0')}`;
+}
+
+/** Nome do mês com inicial maiúscula ("Setembro"), montado com componentes numéricos. */
+function monthLabelPtBR(month) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const name = new Date(year, monthNumber - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+// FIN-074 — símbolo de cada moeda aceita pelo app. Espelha `CURRENCY_SYMBOLS` de
+// src/utils/currency.ts, pelo mesmo motivo das outras duplicações deste arquivo: backend e
+// frontend não compartilham módulos. As chaves são a lista de moedas aceitas nos cadastros.
+const CURRENCY_SYMBOLS = { BRL: 'R$', USD: 'US$', EUR: '€', GBP: '£', CHF: 'CHF', CAD: 'C$', AUD: 'A$' };
+
+/**
+ * "US$ 1.234,56" a partir de centavos — mesmo formato de `formatMoney` no frontend. Moeda
+ * fora da lista aparece pelo código ISO.
+ */
+function formatCents(cents, currency = 'BRL') {
+  const symbol = Object.prototype.hasOwnProperty.call(CURRENCY_SYMBOLS, currency) ? CURRENCY_SYMBOLS[currency] : currency;
+  const value = (Math.abs(cents) / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${symbol} ${value}`;
+}
+
+/** "R$ 1.234,56" a partir de centavos — mesmo formato de `formatBRL` no frontend. */
+function formatCentsBRL(cents) {
+  return formatCents(cents, 'BRL');
+}
+
+/** "15/09" a partir de uma data ISO, sem passar por `Date` (imune a fuso). */
+function formatDayMonth(dateString) {
+  const [, month, day] = dateString.split('-');
+  return `${day}/${month}`;
+}
+
+/** Mesma regra de `isDebtPaid` em src/utils/debts.ts: quitada pelo valor OU pelas parcelas. */
+function isDebtPaid(debt) {
+  return debt.paidAmount >= debt.totalAmount || debt.paidInstallments >= debt.totalInstallments;
+}
+
+/**
+ * Valor da próxima parcela de uma dívida, em centavos: a parcela cheia limitada ao saldo, e
+ * a última fechando o saldo exato — mesma regra de `remainingDebtSchedule` no frontend.
+ */
+function nextInstallmentCents(debt) {
+  const balance = Math.max(0, debt.totalAmount - debt.paidAmount);
+  const isLast = debt.totalInstallments - debt.paidInstallments <= 1;
+  return isLast ? balance : Math.min(debt.monthlyPayment, balance);
+}
+
+/**
+ * Próximo vencimento da fatura de um cartão, a partir do dia de vencimento cadastrado: o
+ * deste mês se ainda não passou (hoje conta), senão o do mês seguinte. O dia é "clampado" ao
+ * tamanho do mês — vencimento no dia 31 cai em 30/set e em 28 ou 29/fev.
+ */
+function nextBillDueDate(dueDay, today) {
+  const [year, month] = today.split('-').map(Number);
+  const thisMonth = formatISODate(year, month, Math.min(dueDay, daysInMonth(year, month)));
+  if (thisMonth >= today) return thisMonth;
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return formatISODate(nextYear, nextMonth, Math.min(dueDay, daysInMonth(nextYear, nextMonth)));
+}
+
+/**
+ * Dia de vencimento (1–31) de uma fatura da Pluggy, ou `undefined` se a data não vier ou for
+ * inválida. As datas de fatura chegam como meia-noite UTC: ler o dia em UTC evita que o fuso
+ * do Brasil (UTC-3) o desloque para o dia anterior.
+ */
+function pluggyBillDueDay(bill) {
+  if (!bill?.dueDate) return undefined;
+  const date = new Date(bill.dueDate);
+  return Number.isNaN(date.getTime()) ? undefined : date.getUTCDate();
+}
+
+/**
+ * Notificações de vencimento (FIN-067): parcelas de dívida que vencem nos próximos
+ * `dueSoonDays` dias, parcelas já vencidas e faturas de cartão prestes a vencer.
+ *
+ * Cada candidata carrega uma `dedupeKey` que identifica a OCORRÊNCIA — a dívida e a data do
+ * vencimento, ou o cartão e a data da fatura. Quando a parcela é paga, `nextDueDate` avança e
+ * a próxima ocorrência ganha uma chave nova; o aviso da anterior não é recriado. As mensagens
+ * usam datas absolutas ("vence em 15/09"), nunca relativas ("vence amanhã"), porque ficam
+ * gravadas e seriam lidas em outro dia.
+ *
+ * Função pura (valores em centavos, datas ISO), exportada para os testes.
+ */
+function buildDueNotifications(debts, accounts, today, dueSoonDays) {
+  const limit = addDaysISO(today, dueSoonDays);
+  const candidates = [];
+
+  for (const debt of debts) {
+    if (isDebtPaid(debt)) continue;
+    const due = debt.nextDueDate;
+    const installment = `parcela ${debt.paidInstallments + 1}/${debt.totalInstallments}`;
+    const amount = formatCentsBRL(nextInstallmentCents(debt));
+    if (due < today) {
+      candidates.push({
+        type: 'debt_overdue',
+        dedupeKey: `debt_overdue:${debt.id}:${due}`,
+        title: debt.name,
+        message: `A ${installment} (${amount}) venceu em ${formatDayMonth(due)} e ainda não foi paga.`,
+      });
+    } else if (due <= limit) {
+      candidates.push({
+        type: 'debt_due',
+        dedupeKey: `debt_due:${debt.id}:${due}`,
+        title: debt.name,
+        message: `A ${installment} (${amount}) vence em ${formatDayMonth(due)}.`,
+      });
+    }
+  }
+
+  for (const account of accounts) {
+    if (account.type !== 'credit' || !(account.pendingBill > 0)) continue;
+    if (!Number.isInteger(account.dueDay) || account.dueDay < 1 || account.dueDay > 31) continue;
+    const due = nextBillDueDate(account.dueDay, today);
+    if (due > limit) continue;
+    candidates.push({
+      type: 'bill_due',
+      dedupeKey: `bill_due:${account.id}:${due}`,
+      title: `Fatura ${account.name}`,
+      // FIN-074: a fatura na moeda do cartão ("US$ 100,00" num cartão em dólar).
+      message: `A fatura de ${formatCents(account.pendingBill, account.currency || 'BRL')} vence em ${formatDayMonth(due)}.`,
+    });
+  }
+
+  return candidates;
+}
+
+/**
+ * Alertas de gasto incomum (FIN-069): compara, por categoria, o gasto do mês corrente com a
+ * média mensal dos meses anteriores e sinaliza as categorias que passaram do limiar.
+ *
+ * Decisões que evitam falso alarme:
+ * - Só entra na média um mês anterior que esteja inteiro dentro do histórico do usuário
+ *   (começa depois da primeira transação conhecida) E que tenha alguma transação. Um mês sem
+ *   dado — antes de o usuário começar, fora da janela sincronizada, ou uma lacuna de
+ *   importação — não é um mês de gasto zero; contá-lo derrubaria a média e acusaria tudo de
+ *   incomum. Com menos de `MIN_BASELINE_MONTHS` meses assim, nada é gerado.
+ * - Dentro desses meses, uma categoria sem gasto conta como zero — isso sim é informação.
+ * - O mês corrente conta só até hoje: parcelas já lançadas para o fim do mês ainda não
+ *   aconteceram. Comparar um mês parcial com meses cheios só subestima o atual, então o que
+ *   passa do limiar é desvio real.
+ * - Além do percentual, a diferença absoluta precisa chegar a `minCents`.
+ *
+ * `transactions` em centavos (negativo = despesa). A `dedupeKey` inclui o mês: no máximo um
+ * alerta por categoria por mês, atualizado (não duplicado) conforme o gasto cresce.
+ */
+function detectUnusualSpending(transactions, today, { months, threshold, minCents, historyStart } = {}) {
+  if (transactions.length === 0) return [];
+  const currentMonth = today.slice(0, 7);
+  const start = historyStart ?? transactions.reduce((min, t) => (t.date < min ? t.date : min), transactions[0].date);
+
+  const monthsWithData = new Set(transactions.map(t => t.date.slice(0, 7)));
+  const baselineMonths = Array.from({ length: months }, (_, i) => shiftMonthKey(currentMonth, -(i + 1)))
+    .filter(month => `${month}-01` >= start && monthsWithData.has(month));
+  if (baselineMonths.length < MIN_BASELINE_MONTHS) return [];
+
+  // mês → (categoria → centavos gastos)
+  const spendByMonth = new Map();
+  for (const t of transactions) {
+    if (t.amount >= 0) continue;
+    const month = t.date.slice(0, 7);
+    const counts = month === currentMonth ? t.date <= today : baselineMonths.includes(month);
+    if (!counts) continue;
+    const byCategory = spendByMonth.get(month) ?? new Map();
+    byCategory.set(t.category, (byCategory.get(t.category) ?? 0) - t.amount);
+    spendByMonth.set(month, byCategory);
+  }
+
+  const current = spendByMonth.get(currentMonth);
+  if (!current) return [];
+
+  const label = monthLabelPtBR(currentMonth);
+  const candidates = [];
+  for (const [category, spent] of current) {
+    const total = baselineMonths.reduce((sum, month) => sum + (spendByMonth.get(month)?.get(category) ?? 0), 0);
+    const average = total / baselineMonths.length;
+    if (spent - average < minCents) continue;
+    if (spent < average * (1 + threshold)) continue;
+
+    const base = `${label}: ${formatCentsBRL(spent)} em ${category}`;
+    candidates.push({
+      type: 'unusual_spending',
+      dedupeKey: `unusual_spending:${currentMonth}:${category}`,
+      title: `Gasto acima do normal em ${category}`,
+      message: average > 0
+        ? `${base}, ${Math.round((spent / average - 1) * 100)}% acima da média de ${formatCentsBRL(Math.round(average))} dos ${baselineMonths.length} meses anteriores.`
+        : `${base}, sem gasto nessa categoria nos ${baselineMonths.length} meses anteriores.`,
+    });
+  }
+  return candidates.sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey));
+}
+
+/* -------------------------------------------------------------------------- */
+/*                      CÂMBIO PARA EXIBIÇÃO (FIN-075)                        */
+/* -------------------------------------------------------------------------- */
+// Os totais do app são exibidos em real; contas e posições em outra moeda entram neles
+// convertidas pela cotação do dia. Provedor: Frankfurter (cotações de referência do Banco
+// Central Europeu) — gratuito, sem chave de acesso, de código aberto e hospedável por conta
+// própria. A avaliação dos provedores está em FIN-075 (docs/BACKLOG_DETAIL.md);
+// `EXCHANGE_RATES_URL` aponta para outra instância sem mudar código.
+const BASE_CURRENCY = 'BRL';
+const EXCHANGE_RATES_URL = (process.env.EXCHANGE_RATES_URL || 'https://api.frankfurter.dev/v1').replace(/\/+$/, '');
+// O BCE publica uma cotação por dia útil: com 12 h de cache, o servidor consulta o provedor no
+// máximo duas vezes por dia, não importa quantos usuários abram o app.
+const EXCHANGE_RATES_TTL_MS = 12 * 60 * 60 * 1000;
+// Depois de uma falha, espera antes de tentar de novo — com o provedor fora do ar, cada
+// carregamento do app esperaria o timeout inteiro.
+const EXCHANGE_RATES_RETRY_MS = 5 * 60 * 1000;
+const EXCHANGE_RATES_TIMEOUT_MS = 5000;
+const CURRENCY_CODE_PATTERN = /^[A-Z]{3}$/;
+
+/**
+ * Valida a resposta do provedor (`{ base, date, rates }`) e a inverte para "quantos reais vale
+ * 1 unidade de cada moeda" — o provedor responde quantas unidades de cada moeda valem 1 real.
+ * Cada cotação que não seja um número positivo é descartada (um 0 viraria divisão por zero).
+ * Devolve `null` quando a resposta não tem o formato esperado.
+ */
+function parseProviderRates(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const { base, date, rates } = body;
+  if (base !== BASE_CURRENCY || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (!rates || typeof rates !== 'object' || Array.isArray(rates)) return null;
+  const perUnit = {};
+  for (const [code, perReal] of Object.entries(rates)) {
+    if (CURRENCY_CODE_PATTERN.test(code) && typeof perReal === 'number' && Number.isFinite(perReal) && perReal > 0) {
+      perUnit[code] = 1 / perReal;
+    }
+  }
+  return { date, rates: perUnit };
+}
+
+/**
+ * Cache das cotações: validade de `ttlMs`, uma única consulta em andamento por vez e espera
+ * de `retryMs` depois de uma falha. Se a atualização falha e há cotação anterior, serve a
+ * anterior marcada como `stale` — o app continua convertendo e a tela avisa que a cotação é
+ * antiga. Sem cotação nenhuma, a falha sobe para quem chamou. `now` é injetável nos testes.
+ */
+function createExchangeRateCache({ fetchRates, ttlMs, retryMs, now = () => Date.now() }) {
+  let cached = null; // { date, rates, fetchedAt }
+  let lastFailureAt = -Infinity;
+  let inflight = null;
+
+  const serve = (entry, stale) => ({ date: entry.date, rates: entry.rates, stale });
+
+  return async function getRates() {
+    if (cached && now() - cached.fetchedAt < ttlMs) return serve(cached, false);
+    if (now() - lastFailureAt < retryMs) {
+      if (cached) return serve(cached, true);
+      throw new Error('Cotações indisponíveis; nova tentativa em instantes.');
+    }
+    if (!inflight) {
+      // `Promise.resolve().then` torna assíncrona até uma exceção síncrona de `fetchRates`,
+      // para ela passar pelo mesmo caminho de falha.
+      const attempt = Promise.resolve()
+        .then(() => fetchRates())
+        .then(
+          fresh => {
+            cached = { date: fresh.date, rates: fresh.rates, fetchedAt: now() };
+            return cached;
+          },
+          err => {
+            lastFailureAt = now();
+            throw err;
+          }
+        );
+      inflight = attempt;
+      // Libera a vaga só depois de a tentativa terminar, e só se ela ainda for a atual.
+      attempt.finally(() => { if (inflight === attempt) inflight = null; }).catch(() => {});
+    }
+    try {
+      return serve(await inflight, false);
+    } catch (err) {
+      if (cached) return serve(cached, true);
+      throw err;
+    }
+  };
+}
+
+/** Consulta o provedor de câmbio (com timeout) e devolve as cotações já validadas. */
+async function fetchProviderRates() {
+  const res = await fetch(`${EXCHANGE_RATES_URL}/latest?base=${BASE_CURRENCY}`, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(EXCHANGE_RATES_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`Provedor de câmbio respondeu HTTP ${res.status}.`);
+  const parsed = parseProviderRates(await res.json().catch(() => null));
+  if (!parsed) throw new Error('Provedor de câmbio respondeu num formato inesperado.');
+  return parsed;
+}
+
+const getExchangeRates = createExchangeRateCache({
+  fetchRates: fetchProviderRates,
+  ttlMs: EXCHANGE_RATES_TTL_MS,
+  retryMs: EXCHANGE_RATES_RETRY_MS,
+});
 
 // Loga o erro completo no servidor e retorna uma mensagem genérica ao cliente — nunca
 // `error.message`/detalhes internos do Prisma/Node, que podem vazar schema, nomes de
@@ -263,6 +634,14 @@ function validateBody(schema, body) {
 // Campos monetários trafegam em CENTAVOS (inteiro) entre API e frontend — ver FIN-015
 // em docs/BACKLOG_DETAIL.md. `interestRate` é a única exceção: é uma taxa percentual
 // (% ao mês), não um valor monetário, e permanece decimal.
+// FIN-074 — moedas aceitas nos cadastros: as chaves de `CURRENCY_SYMBOLS`, as mesmas do
+// frontend (`SUPPORTED_CURRENCIES` em src/utils/currency.ts — um teste garante que as listas
+// não divergem) e todas cotadas pelo provedor de câmbio (FIN-075).
+const SUPPORTED_CURRENCIES = Object.keys(CURRENCY_SYMBOLS);
+const currencyField = z.enum(SUPPORTED_CURRENCIES, {
+  message: `Moeda deve ser uma de: ${SUPPORTED_CURRENCIES.join(', ')}.`,
+}).optional();
+
 const ACCOUNT_TYPES = ['checking', 'savings', 'credit', 'investment', 'cash'];
 const accountSchema = z.object({
   name: z.string({ error: 'Nome da conta é obrigatório.' }).trim().min(1, 'Nome da conta é obrigatório.'),
@@ -273,6 +652,7 @@ const accountSchema = z.object({
   dueDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
   closingDay: z.coerce.number().int().min(1).max(31).nullable().optional(),
   pendingBill: z.coerce.number().int('Fatura deve ser um valor inteiro em centavos.').nullable().optional(),
+  currency: currencyField, // FIN-074 — ausente no cadastro = real (padrão do banco)
   color: z.string({ error: 'Cor é obrigatória.' }).trim().min(1, 'Cor é obrigatória.'),
 });
 const accountUpdateSchema = accountSchema.partial();
@@ -295,6 +675,8 @@ const transactionSchema = z.object({
   accountId: accountIdField,
   paymentType: z.enum(PAYMENT_TYPES).optional(),
   externalId: z.string().trim().min(1).optional(), // FITID do OFX — ver computeImportHash
+  // Sem `currency`: a moeda de uma transação é sempre a da conta, derivada pelo servidor
+  // (FIN-074). Um `currency` enviado pelo cliente é descartado pelo Zod, como todo campo extra.
 });
 const transactionBatchSchema = z.object({
   transactions: z.array(transactionSchema).min(1, 'Nenhuma transação enviada.'),
@@ -361,6 +743,21 @@ const recurringSchema = z.object({
   active: z.boolean().optional(),
 });
 const recurringUpdateSchema = recurringSchema.partial();
+
+// FIN-070/FIN-071 — carteira de investimentos (Fase 7). Os dois valores aceitam 0: uma posição
+// recebida sem custo (bonificação em ações, cripto de presente) não tem valor aplicado, e uma
+// que perdeu tudo vale 0 — são estados reais, não erro de digitação. Negativo não existe.
+// O vínculo com a conta é conferido na rota (`investmentAccountError`), porque depende do banco.
+const INVESTMENT_TYPES = ['fixed_income', 'stocks', 'funds', 'crypto', 'other'];
+const investmentSchema = z.object({
+  name: z.string({ error: 'Nome do investimento é obrigatório.' }).trim().min(1, 'Nome do investimento é obrigatório.'),
+  type: z.enum(INVESTMENT_TYPES, { message: `Tipo de investimento deve ser um de: ${INVESTMENT_TYPES.join(', ')}.` }),
+  amountInvested: z.coerce.number().int('Valor aplicado deve ser um inteiro em centavos.').min(0, 'Valor aplicado não pode ser negativo.'),
+  currentValue: z.coerce.number().int('Valor atual deve ser um inteiro em centavos.').min(0, 'Valor atual não pode ser negativo.'),
+  accountId: accountIdField,
+  currency: currencyField, // FIN-074 — ausente no cadastro = real (padrão do banco)
+});
+const investmentUpdateSchema = investmentSchema.partial();
 
 
 // Middleware de autenticação
@@ -483,10 +880,20 @@ app.put('/api/accounts/:id', authenticateToken, async (req, res) => {
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
     const { id } = req.params;
-    const acc = await prisma.account.updateMany({
-      where: { id, userId: req.user.userId },
-      data: validation.data,
-    });
+    const userId = req.user.userId;
+    const { currency } = validation.data;
+    // FIN-074: as transações de uma conta estão sempre na moeda dela, então trocar a moeda da
+    // conta (em geral, corrigir um cadastro errado) leva as transações junto — na mesma
+    // transação de banco, para nunca ficar metade numa moeda e metade na outra. Os valores não
+    // são convertidos: a troca corrige o rótulo, não faz câmbio. A posse da conta é conferida
+    // antes, para não mexer em transações do usuário apontadas para a conta de outra pessoa.
+    const owned = currency
+      ? await prisma.account.findFirst({ where: { id, userId }, select: { id: true } })
+      : null;
+    const [acc] = await prisma.$transaction([
+      prisma.account.updateMany({ where: { id, userId }, data: validation.data }),
+      ...(owned ? [prisma.transaction.updateMany({ where: { userId, accountId: id }, data: { currency } })] : []),
+    ]);
     res.json({ success: true, changes: acc.count });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao atualizar conta.');
@@ -538,6 +945,27 @@ app.get('/api/transactions', authenticateToken, async (req, res) => {
   }
 });
 
+/**
+ * FIN-074 — moeda de cada conta do usuário entre `accountIds`, para derivar a moeda das
+ * transações: uma transação fica sempre na moeda da conta vinculada (em real, sem conta). Uma
+ * conta que não é do usuário não entra no mapa, e a transação fica em real — conferir a posse do
+ * `accountId` nas rotas de transação é assunto de FIN-096.
+ */
+async function accountCurrencies(userId, accountIds) {
+  const ids = [...new Set(accountIds.filter(Boolean))];
+  if (ids.length === 0) return new Map();
+  const accounts = await prisma.account.findMany({
+    where: { userId, id: { in: ids } },
+    select: { id: true, currency: true },
+  });
+  return new Map(accounts.map(a => [a.id, a.currency]));
+}
+
+/** Moeda de uma transação ligada a `accountId`, a partir do mapa de `accountCurrencies`. */
+function currencyForAccount(currencies, accountId) {
+  return (accountId && currencies.get(accountId)) || BASE_CURRENCY;
+}
+
 app.post('/api/transactions', authenticateToken, async (req, res) => {
   const userId = req.user.userId;
   // Supports batch insert
@@ -558,9 +986,11 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
       // exatamente quais transações entraram, sem reimplementar o hash (ver FIN-004).
       const acceptedIndices = [];
       let skipped = 0;
+      // FIN-074: cada transação fica na moeda da conta em que é importada.
+      const currencies = await accountCurrencies(userId, validation.data.transactions.map(t => t.accountId));
       for (let i = 0; i < validation.data.transactions.length; i++) {
         const { externalId, ...t } = validation.data.transactions[i];
-        const data = { ...t, userId };
+        const data = { ...t, userId, currency: currencyForAccount(currencies, t.accountId) };
         data.importHash = computeImportHash(userId, { ...t, externalId });
         try {
           await prisma.transaction.create({ data });
@@ -579,7 +1009,8 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     if (!validation.ok) return res.status(400).json({ error: validation.message });
     try {
       const { externalId: _externalId, ...rest } = validation.data;
-      const data = { ...rest, userId };
+      const currencies = await accountCurrencies(userId, [rest.accountId]);
+      const data = { ...rest, userId, currency: currencyForAccount(currencies, rest.accountId) };
       const tx = await prisma.transaction.create({ data });
       res.json(tx);
     } catch (err) {
@@ -604,6 +1035,12 @@ app.put('/api/transactions/:id', authenticateToken, async (req, res) => {
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
     const { externalId: _externalId, ...data } = validation.data;
+    // FIN-074: trocar a conta troca a moeda junto — a transação segue na moeda da conta, e em
+    // real quando desvinculada (`accountId` nulo).
+    if (data.accountId !== undefined) {
+      const currencies = await accountCurrencies(req.user.userId, [data.accountId]);
+      data.currency = currencyForAccount(currencies, data.accountId);
+    }
     const result = await prisma.transaction.updateMany({
       where: { id: req.params.id, userId: req.user.userId },
       data,
@@ -792,6 +1229,109 @@ app.delete('/api/goals/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// --- INVESTMENTS (FIN-071) ---
+/**
+ * Confere o `accountId` informado para um investimento: a conta precisa existir, ser do
+ * próprio usuário e não ser um cartão de crédito. A chave estrangeira só garante que a conta
+ * existe — sem esta checagem, o id de uma conta de outro usuário seria aceito e o investimento
+ * ficaria vinculado a ela. E cartão não guarda aplicação: o saldo dele é uma fatura.
+ * Devolve a mensagem de erro, ou `null` quando o vínculo é válido ou não foi informado.
+ */
+async function investmentAccountError(userId, accountId) {
+  if (!accountId) return null;
+  const account = await prisma.account.findFirst({ where: { id: accountId, userId }, select: { type: true } });
+  if (!account) return 'Conta vinculada não encontrada.';
+  if (account.type === 'credit') return 'Um investimento não pode ser vinculado a um cartão de crédito.';
+  return null;
+}
+
+app.get('/api/investments', authenticateToken, async (req, res) => {
+  try {
+    const investments = await prisma.investment.findMany({
+      where: { userId: req.user.userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(investments);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar investimentos.');
+  }
+});
+
+app.post('/api/investments', authenticateToken, async (req, res) => {
+  const validation = validateBody(investmentSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
+  try {
+    const accountError = await investmentAccountError(userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
+    const investment = await prisma.investment.create({ data: { ...validation.data, userId } });
+    res.json(investment);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao criar investimento.');
+  }
+});
+
+app.put('/api/investments/:id', authenticateToken, async (req, res) => {
+  const validation = validateBody(investmentUpdateSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
+  try {
+    const accountError = await investmentAccountError(userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
+    // `update`, e não `updateMany`, para devolver o registro com o `updatedAt` novo — a
+    // carteira mostra há quanto tempo cada valor foi atualizado. O `userId` no `where`
+    // garante o isolamento: id inexistente ou de outro usuário cai no P2025 (404), como em
+    // /api/debts/:id.
+    const investment = await prisma.investment.update({
+      where: { id: req.params.id, userId },
+      data: validation.data,
+    });
+    res.json(investment);
+  } catch (err) {
+    if (err.code === 'P2025') return res.status(404).json({ error: 'Investimento não encontrado.' });
+    sendInternalError(res, err, 'Erro ao atualizar investimento.');
+  }
+});
+
+app.delete('/api/investments/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.investment.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir investimento.');
+  }
+});
+
+// --- EXCHANGE RATES (FIN-075) ---
+// O frontend pede só as moedas em uso (`?symbols=USD,EUR`) e recebe quantos reais vale 1
+// unidade de cada. Moeda que o provedor não cota simplesmente não vem na resposta — o frontend
+// deixa os itens dela fora dos totais e avisa. `stale: true` = cotação antiga, servida porque a
+// atualização falhou. Autenticada para não virar um proxy aberto do provedor.
+const MAX_EXCHANGE_SYMBOLS = 20;
+
+app.get('/api/exchange-rates', authenticateToken, async (req, res) => {
+  const raw = typeof req.query.symbols === 'string' ? req.query.symbols : '';
+  const symbols = [...new Set(raw.split(',').map(code => code.trim().toUpperCase()).filter(Boolean))];
+  if (symbols.length === 0 || symbols.length > MAX_EXCHANGE_SYMBOLS || !symbols.every(code => CURRENCY_CODE_PATTERN.test(code))) {
+    return res.status(400).json({
+      error: `Informe em "symbols" até ${MAX_EXCHANGE_SYMBOLS} códigos de moeda ISO, separados por vírgula (ex.: USD,EUR).`,
+    });
+  }
+  try {
+    const { date, rates, stale } = await getExchangeRates();
+    const picked = {};
+    for (const code of symbols) {
+      if (code === BASE_CURRENCY) picked[code] = 1;
+      else if (Object.prototype.hasOwnProperty.call(rates, code)) picked[code] = rates[code];
+    }
+    res.json({ base: BASE_CURRENCY, date, rates: picked, stale });
+  } catch (err) {
+    // O detalhe fica no log: a resposta não repete a mensagem do provedor (FIN-011).
+    console.error('Falha ao obter cotações de câmbio:', err);
+    res.status(502).json({ error: 'Cotações indisponíveis no momento. Tente novamente mais tarde.' });
+  }
+});
+
 // --- RECURRING TRANSACTIONS (FIN-054) ---
 app.get('/api/recurring-transactions', authenticateToken, async (req, res) => {
   try {
@@ -833,6 +1373,8 @@ app.post('/api/recurring-transactions/process', authenticateToken, async (req, r
     // convenção usada em `isDebtOverdue` no frontend.
     const dueRecurrences = await prisma.recurringTransaction.findMany({
       where: { userId, active: true, nextOccurrence: { lte: today } },
+      // FIN-074: a ocorrência nasce na moeda da conta da recorrência (real, sem conta).
+      include: { account: { select: { currency: true } } },
     });
 
     let processed = 0;
@@ -851,6 +1393,7 @@ app.post('/api/recurring-transactions/process', authenticateToken, async (req, r
             category: rec.category,
             date: occurrence,
             amount: rec.amount,
+            currency: rec.account?.currency ?? BASE_CURRENCY,
             importHash,
           },
           // Ocorrência já lançada por uma execução anterior/concorrente: nada a fazer.
@@ -902,6 +1445,130 @@ app.delete('/api/recurring-transactions/:id', authenticateToken, async (req, res
     res.json({ success: true });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao excluir recorrência.');
+  }
+});
+
+// --- NOTIFICATIONS (FIN-065 a FIN-069) ---
+
+// Quantas notificações a listagem devolve. A central mostra as mais recentes; o total de não
+// lidas vem à parte (`unreadCount`), então o limite nunca esconde nada do contador do sino.
+const NOTIFICATIONS_PAGE_SIZE = 50;
+
+// Tipos cujo aviso deixa de valer quando a ocorrência sai de cena: a parcela foi paga, ou o
+// "vence em" virou "venceu" (outro aviso, com outra chave). Faturas ficam de fora — não há
+// como saber se foram pagas, então o aviso só sai do contador quando o usuário o lê — e os
+// alertas de gasto incomum também, porque são informativos e valem para o mês inteiro.
+const RECONCILED_NOTIFICATION_TYPES = ['debt_due', 'debt_overdue'];
+
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    const [notifications, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where: { userId },
+        orderBy: [{ read: 'asc' }, { createdAt: 'desc' }],
+        take: NOTIFICATIONS_PAGE_SIZE,
+      }),
+      prisma.notification.count({ where: { userId, read: false } }),
+    ]);
+    res.json({ notifications, unreadCount });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar notificações.');
+  }
+});
+
+/*
+ * Gera as notificações automáticas — vencimentos (FIN-067) e gasto incomum (FIN-069) — a
+ * partir do estado atual das dívidas, cartões e transações. O frontend chama ao carregar o
+ * app e sempre que esses dados mudam. Declarado antes das rotas com `:id`, pelo mesmo motivo
+ * de `/recurring-transactions/process`.
+ *
+ * Idempotente no banco: cada aviso tem uma `dedupeKey` protegida pela constraint única
+ * `(userId, dedupeKey)`, e o upsert atualiza só título e mensagem — nunca `read`, para que um
+ * aviso já lido não volte a acender o sino. Tudo numa transação, junto da reconciliação.
+ */
+app.post('/api/notifications/generate', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+  try {
+    const today = todayISO();
+    const settings = NOTIFICATION_SETTINGS;
+    const baselineStart = `${shiftMonthKey(today.slice(0, 7), -settings.unusualSpendingMonths)}-01`;
+
+    const [debts, creditAccounts, recentTransactions, firstTransaction] = await Promise.all([
+      prisma.debt.findMany({ where: { userId } }),
+      prisma.account.findMany({ where: { userId, type: 'credit' } }),
+      // FIN-074: só transações em real — somar dólares e reais na mesma categoria distorceria a
+      // média e o gasto do mês. Gasto em moeda estrangeira fica fora deste alerta.
+      prisma.transaction.findMany({
+        where: { userId, currency: BASE_CURRENCY, date: { gte: baselineStart, lte: today } },
+        select: { date: true, amount: true, category: true },
+      }),
+      // O início do histórico decide quais meses da média estão completos — ver
+      // `detectUnusualSpending`. Precisa ser o de TODAS as transações, não só as da janela.
+      prisma.transaction.findFirst({ where: { userId }, orderBy: { date: 'asc' }, select: { date: true } }),
+    ]);
+
+    const candidates = [
+      ...buildDueNotifications(debts, creditAccounts, today, settings.dueSoonDays),
+      ...detectUnusualSpending(recentTransactions, today, {
+        months: settings.unusualSpendingMonths,
+        threshold: settings.unusualSpendingThreshold,
+        minCents: settings.unusualSpendingMinCents,
+        historyStart: firstTransaction?.date,
+      }),
+    ];
+
+    await prisma.$transaction([
+      ...candidates.map(candidate => prisma.notification.upsert({
+        where: { userId_dedupeKey: { userId, dedupeKey: candidate.dedupeKey } },
+        create: { userId, ...candidate },
+        update: { title: candidate.title, message: candidate.message },
+      })),
+      // Reconciliação não destrutiva: marca como lidos (nunca apaga) os avisos de dívida cuja
+      // ocorrência não está mais entre as candidatas — parcela paga, dívida quitada ou
+      // excluída, ou "vence em" que virou "venceu". Sem isso o sino continuaria aceso por algo
+      // que já foi resolvido.
+      prisma.notification.updateMany({
+        where: {
+          userId,
+          read: false,
+          type: { in: RECONCILED_NOTIFICATION_TYPES },
+          dedupeKey: { notIn: candidates.map(c => c.dedupeKey) },
+        },
+        data: { read: true },
+      }),
+    ]);
+
+    res.json({ success: true, active: candidates.length });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao gerar notificações.');
+  }
+});
+
+app.put('/api/notifications/read-all', authenticateToken, async (req, res) => {
+  try {
+    const result = await prisma.notification.updateMany({
+      where: { userId: req.user.userId, read: false },
+      data: { read: true },
+    });
+    res.json({ success: true, changes: result.count });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao marcar notificações como lidas.');
+  }
+});
+
+app.put('/api/notifications/:id/read', authenticateToken, async (req, res) => {
+  try {
+    // `userId` no filtro: a notificação de outro usuário simplesmente não é encontrada, e a
+    // resposta é a mesma de um id inexistente — não revela que o id existe (ver FIN-032).
+    const result = await prisma.notification.updateMany({
+      where: { id: req.params.id, userId: req.user.userId },
+      data: { read: true },
+    });
+    if (result.count === 0) return res.status(404).json({ error: 'Notificação não encontrada.' });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao marcar notificação como lida.');
   }
 });
 
@@ -984,6 +1651,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
 
     for (const pluggyAcc of accountsRes.results) {
       const accountType = mapPluggyAccountType(pluggyAcc);
+      const accountCurrency = pluggyCurrency(pluggyAcc.currencyCode); // FIN-074
       // Upsert atômico via constraint (userId, pluggyId) — ver FIN-021.
       const localAccount = await prisma.account.upsert({
         where: { userId_pluggyId: { userId, pluggyId: pluggyAcc.id } },
@@ -994,9 +1662,16 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           bank: pluggyAcc.marketingName || 'Banco Conectado',
           type: accountType,
           balance: toCents(pluggyAcc.balance),
+          currency: accountCurrency,
           color: '#6366f1',
         },
-        update: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name },
+        update: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name, currency: accountCurrency },
+      });
+      // FIN-074: as transações da conta ficam na moeda dela. Só grava se alguma estiver em
+      // outra moeda — na prática, nunca depois da primeira sincronização.
+      await prisma.transaction.updateMany({
+        where: { userId, accountId: localAccount.id, currency: { not: accountCurrency } },
+        data: { currency: accountCurrency },
       });
 
       // Para cartões de crédito, busca a fatura real via endpoint dedicado da Pluggy
@@ -1014,9 +1689,13 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               const dateB = new Date(b.billClosingDate ?? b.dueDate).getTime();
               return dateB - dateA;
             })[0];
+            // FIN-067: o dia de vencimento vem da própria fatura. Sem ele, o aviso de fatura a
+            // vencer nunca dispararia para um cartão conectado via Pluggy — o cadastro manual de
+            // `dueDay` era o único caminho, e a sincronização não o preenchia.
+            const dueDay = pluggyBillDueDay(currentBill);
             await prisma.account.updateMany({
               where: { id: localAccount.id, userId },
-              data: { pendingBill: toCents(currentBill.totalAmount) },
+              data: { pendingBill: toCents(currentBill.totalAmount), ...(dueDay ? { dueDay } : {}) },
             });
           }
         } catch (billError) {
@@ -1092,6 +1771,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           category: tx.category || 'Outros',
           date: tx.date.toISOString().split('T')[0],
           amount: pluggyAmountToCents(tx, accountType),
+          currency: accountCurrency, // FIN-074
           // Deixa explícito na transação que ela veio de um cartão — é o que o app já
           // exibe na lista, e serve de marca de que o sinal foi normalizado (FIN-092).
           paymentType: accountType === 'credit' ? 'credit' : 'debit',
@@ -1110,7 +1790,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               await prisma.transaction.upsert({
                 where: { userId_pluggyId: { userId, pluggyId: t.pluggyId } },
                 create: t,
-                update: { name: t.name, category: t.category, date: t.date, amount: t.amount, paymentType: t.paymentType },
+                update: { name: t.name, category: t.category, date: t.date, amount: t.amount, paymentType: t.paymentType, currency: t.currency },
               });
             }
           } else {
@@ -1147,4 +1827,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // `prisma` também exportado para que os testes possam chamar `$disconnect()` no
 // `afterAll` — sem isso, better-sqlite3 mantém o arquivo aberto e a limpeza do banco de
 // teste (`unlink`) falha com `EBUSY` no Windows (ver FIN-031).
-export { app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment };
+export {
+  app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment,
+  nextBillDueDate, pluggyBillDueDay, buildDueNotifications, detectUnusualSpending,
+  pluggyCurrency, formatCents, SUPPORTED_CURRENCIES, parseProviderRates, createExchangeRateCache,
+};

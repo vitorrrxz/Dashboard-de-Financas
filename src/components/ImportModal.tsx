@@ -4,6 +4,7 @@ import { parseFile } from '../utils/parsers';
 import type { Transaction } from '../utils/parsers';
 import type { PaymentType, Account } from '../types';
 import { formatDateBR } from '../utils/dates';
+import { BASE_CURRENCY, currencyOf, formatMoney } from '../utils/currency';
 
 interface ImportModalProps {
   onClose: () => void;
@@ -91,8 +92,16 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
   const income  = preview.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const expense = preview.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
 
+  // FIN-076: o extrato é importado na moeda da conta de destino — a prévia mostra os valores
+  // nela, e não sempre em real.
+  const selectedAccount = accounts.find(a => a.id === selectedAccountId);
+  const currency = selectedAccount ? currencyOf(selectedAccount) : BASE_CURRENCY;
+
   const selectedPayment = PAYMENT_TYPES.find(p => p.value === paymentType)!;
-  const willCreateDebt  = paymentType === 'credit' || paymentType === 'pix_installment';
+  const isDebtType      = paymentType === 'credit' || paymentType === 'pix_installment';
+  // Dívidas são registradas em real: numa conta em outra moeda a dívida automática não é criada
+  // (o valor seria gravado como real) — ver `handleImport` em App.tsx.
+  const willCreateDebt  = isDebtType && currency === BASE_CURRENCY;
 
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -138,6 +147,11 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             {willCreateDebt && (
               <span className="ml-1.5 font-semibold" style={{ color: selectedPayment.color }}>
                 · Gera dívida automática ✦
+              </span>
+            )}
+            {isDebtType && !willCreateDebt && (
+              <span className="ml-1.5 font-semibold text-amber-300">
+                · Conta em {currency}: sem dívida automática
               </span>
             )}
           </p>
@@ -202,16 +216,17 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
                 <div>
                   <p className="text-white text-sm font-semibold">{preview.length} transações encontradas</p>
                   <p className="text-textMuted text-xs mt-0.5">
-                    Receitas: <span className="text-accent">+R$ {income.toFixed(2).replace('.', ',')}</span>
+                    Receitas: <span className="text-accent">+{formatMoney(income, currency)}</span>
                     {' · '}
-                    Despesas: <span className="text-red-400">-R$ {expense.toFixed(2).replace('.', ',')}</span>
+                    Despesas: <span className="text-red-400">-{formatMoney(expense, currency)}</span>
                   </p>
                 </div>
               </div>
 
               <div className="flex flex-col gap-1 items-end">
-                <label className="text-[10px] text-textMuted uppercase font-bold pr-2">Importar para:</label>
+                <label htmlFor="import-account" className="text-[10px] text-textMuted uppercase font-bold pr-2">Importar para:</label>
                 <select
+                  id="import-account"
                   value={selectedAccountId}
                   onChange={e => setSelectedAccountId(e.target.value)}
                   className="bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-accent transition-colors cursor-pointer"
@@ -235,8 +250,18 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
               >
                 <span>{selectedPayment.icon}</span>
                 <span>
-                  Uma dívida de <strong>R$ {expense.toFixed(2).replace('.', ',')}</strong> será criada automaticamente
+                  Uma dívida de <strong>{formatMoney(expense, currency)}</strong> será criada automaticamente
                   na aba <strong>Dívidas</strong> como "{selectedPayment.label}".
+                </span>
+              </div>
+            )}
+            {isDebtType && !willCreateDebt && (
+              <div className="mb-4 p-3 rounded-xl flex items-center gap-2.5 text-xs font-medium text-amber-300"
+                style={{ backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
+                <span>
+                  A conta de destino está em {currency}. Dívidas são registradas em real, então nenhuma dívida
+                  automática será criada — cadastre-a na aba <strong>Dívidas</strong>, se quiser.
                 </span>
               </div>
             )}
@@ -261,7 +286,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
                       </td>
                       <td className="px-4 py-2.5 text-xs text-textMuted">{formatDateBR(tx.date)}</td>
                       <td className={`px-4 py-2.5 text-sm font-semibold text-right ${tx.amount > 0 ? 'text-accent' : 'text-white'}`}>
-                        {tx.amount > 0 ? '+' : ''}R$ {Math.abs(tx.amount).toFixed(2).replace('.', ',')}
+                        {tx.amount > 0 ? '+' : ''}{formatMoney(tx.amount, currency)}
                       </td>
                     </tr>
                   ))}
