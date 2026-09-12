@@ -1,7 +1,7 @@
 # TODO.md - FinFlow (Backend + Frontend)
 
 > Checklist de execução. Detalhamento completo de cada item (Objetivo, Problema, Arquivos, Critérios de aceite, notas de implementação e validação) em [`docs/BACKLOG_DETAIL.md`](docs/BACKLOG_DETAIL.md), sob o mesmo ID `FIN-XXX`.
-> Gerado a partir de auditoria do código real em 2026-09-04. Fases 0-2 corrigem o estado atual do app; Fases 3-9 são o roadmap de novas funcionalidades.
+> Gerado a partir de auditoria do código real em 2026-09-04. Fases 0-2 corrigem o estado atual do app; Fases 3-9 são o roadmap de novas funcionalidades; a Fase 10 reúne as melhorias propostas depois da entrega (12/09/2026).
 
 ## Protocolo
 
@@ -34,8 +34,10 @@
 - [x] Revisar expiracao/revogacao de token JWT (FIN-012)
 - [x] Normalizar e-mail (lowercase/trim) no cadastro e login (FIN-013)
 - [x] Avaliar enumeracao de e-mail no registro (FIN-014, depende de FIN-007)
-- [ ] Recusar `accountId` de conta de outro usuario em transacoes, dividas e recorrencias (FIN-096, achado ao implementar FIN-071)
-- [ ] Remover do git o banco real (`dev.db`) e as copias de backup (FIN-097, achado ao iniciar a Fase 8)
+- [x] Recusar `accountId` de conta de outro usuario em transacoes, dividas e recorrencias (FIN-096, achado ao implementar FIN-071)
+- [x] Remover do git o banco real (`dev.db`) e as copias de backup (FIN-097, achado ao iniciar a Fase 8)
+- [x] Atualizar dependencias com vulnerabilidades conhecidas — npm audit com 12 high e 2 critical (FIN-100, achado ao verificar a Fase 9)
+- [ ] Tirar do alcance publico o banco que ficou no historico do repositorio (FIN-101 — acao do dono do repositorio: trocar senhas reutilizadas; repositorio privado ou historico reescrito)
 
 ### Integridade financeira
 - [x] Unificar logica de "divida vencida" entre Dashboard e Divida Manager, corrigindo bug de fuso horario (FIN-005)
@@ -69,7 +71,7 @@
 ### Mobile / Responsividade
 - [x] Criar navegacao mobile — sidebar hoje fica 100% inacessivel abaixo de `md` (FIN-028)
 - [x] Adaptar grids fixos de 2 colunas em telas muito pequenas (FIN-029)
-- [ ] Mostrar editar/excluir transacao em telas de toque e no foco do teclado (FIN-099, achado ao implementar FIN-081)
+- [x] Mostrar editar/excluir transacao em telas de toque e no foco do teclado (FIN-099, achado ao implementar FIN-081)
 
 ### Testes automatizados
 - [x] Configurar Vitest + Testing Library no frontend (FIN-030)
@@ -177,19 +179,50 @@
 
 ## Fase 9 - Entregaveis
 
+> Verificado em 11/09/2026 — evidencias de cada criterio em `docs/BACKLOG_DETAIL.md`, secao "Fase 9 — Entregaveis".
+
 ### Criterios de aceite gerais
-- [ ] Nenhum bug P0 em aberto (Fase 0 completa)
-- [ ] Nenhuma vulnerabilidade HIGH/CRITICAL em aberto (Fase 1 - Seguranca completa)
-- [ ] Cobertura de testes minima nos fluxos de auth, isolamento por usuario e regras financeiras (FIN-030 a FIN-035)
-- [ ] App usavel em viewport mobile (FIN-028)
-- [ ] CI rodando lint + typecheck + testes + build a cada push (FIN-036)
+- [x] Nenhum bug P0 em aberto (Fase 0 completa)
+- [ ] Nenhuma vulnerabilidade HIGH/CRITICAL em aberto (Fase 1 - Seguranca completa) — FIN-096, FIN-097 e FIN-100 concluidas; falta FIN-101, acao do dono do repositorio
+- [x] Cobertura de testes minima nos fluxos de auth, isolamento por usuario e regras financeiras (FIN-030 a FIN-035)
+- [x] App usavel em viewport mobile (FIN-028; tambem FIN-029, FIN-081 e FIN-099)
+- [x] CI rodando lint + typecheck + testes + build a cada push (FIN-036)
 
 ### Pendencias pos-MVP (avaliar prioridade antes de iniciar)
-- [ ] Planejamento financeiro completo — Orcamento, Metas, Recorrencias, Projecao (Fases 3 e 4)
-- [ ] Relatorios e patrimonio liquido (Fase 5)
-- [ ] Central de notificacoes completa (Fase 6)
-- [ ] Investimentos e multi-moeda (Fase 7)
-- [ ] 2FA, backup e PWA (Fase 8 — colaboracao ficou fora do escopo, ver FIN-077)
+- [x] Planejamento financeiro completo — Orcamento, Metas, Recorrencias, Projecao (Fases 3 e 4)
+- [x] Relatorios e patrimonio liquido (Fase 5)
+- [x] Central de notificacoes completa (Fase 6)
+- [x] Investimentos e multi-moeda (Fase 7)
+- [x] 2FA, backup e PWA (Fase 8 — colaboracao ficou fora do escopo, ver FIN-077)
+
+## Fase 10 - Evolucao pos-entrega
+
+> Sugestoes discutidas em 12/09/2026, na ordem de prioridade combinada. Antes, a FIN-101 (acao do dono do repositorio, Fase 1). Nada multiusuario: o FinFlow e um dashboard pessoal (FIN-077).
+
+### Protecao dos dados
+- [ ] Backup automatico diario do banco SQLite, fora do repositorio e com rotacao (FIN-102, depende de FIN-097)
+
+### Numeros certos
+- [ ] Tratar transferencia entre contas proprias e pagamento de fatura fora dos totais de receita e despesa (FIN-103)
+- [ ] Detectar transferencias e pagamento de fatura automaticamente, para confirmacao (FIN-104, depende de FIN-103)
+- [ ] Regras de categorizacao do usuario, aplicadas na importacao e no sync (FIN-105)
+- [ ] Criar regra ao corrigir a categoria de uma transacao + tela de regras (FIN-106, depende de FIN-105)
+
+### Uso no dia a dia
+- [ ] Sincronizacao automatica com a Pluggy ao abrir o app (FIN-107)
+- [ ] Empacotar o app em Docker — frontend + API + banco em volume (FIN-108)
+- [ ] Acesso privado pelo celular via Tailscale com HTTPS — PWA instalado (FIN-109, depende de FIN-108)
+- [ ] Token de sessao em cookie httpOnly em vez do localStorage (FIN-110, depende de FIN-108)
+- [ ] Detectar assinaturas nas transacoes e sugerir recorrencias (FIN-111)
+- [ ] Historico mensal do patrimonio liquido, com grafico de evolucao (FIN-112, depende de FIN-064, FIN-073)
+- [ ] Metas ligadas a uma conta ou investimento, com progresso automatico (FIN-113, depende de FIN-050, FIN-096)
+
+### Engenharia
+- [ ] Acelerar a suite de testes — schema criado uma vez e copiado por arquivo (FIN-114)
+- [ ] Dividir `server.js` em rotas por dominio, sem mudar comportamento (FIN-115)
+- [ ] Dividir `App.tsx` em paginas e componentes, sem mudar comportamento (FIN-116)
+- [ ] Carregar abas pesadas sob demanda — pacote inicial abaixo de 500 kB (FIN-117, depende de FIN-116)
+- [ ] Dependabot e `npm audit` semanal no CI (FIN-118, depende de FIN-036, FIN-100)
 
 ---
 

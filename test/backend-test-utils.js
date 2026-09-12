@@ -37,7 +37,11 @@ export async function createTestApp(dbName, { authRateLimit } = {}) {
   // teste dedicado a validar o rate limit em si passa um valor baixo proposital.
   process.env.AUTH_RATE_LIMIT = String(authRateLimit ?? 1000);
 
-  execSync('npx prisma db push --accept-data-loss', {
+  // Sem `--accept-data-loss`: o arquivo acabou de ser apagado, então o push nunca tem dado a
+  // perder — e, se um dia `DATABASE_URL` apontasse para um banco com dados, o Prisma recusaria a
+  // mudança destrutiva em vez de aplicá-la. Desde o Prisma 7.10 a flag também exige consentimento
+  // explícito quando o comando é disparado por um agente de IA (FIN-100).
+  execSync('npx prisma db push', {
     env: process.env,
     stdio: 'pipe',
   });

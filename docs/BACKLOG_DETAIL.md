@@ -657,7 +657,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P2 — MEDIUM — FIN-096 — `accountId` de outro usuário aceito em transações, dívidas e recorrências** (achado ao implementar FIN-071, 10/09/2026)
+- [x] **P2 — MEDIUM — FIN-096 — `accountId` de outro usuário aceito em transações, dívidas e recorrências** (achado ao implementar FIN-071, 10/09/2026) ✅ Concluída (11/09/2026)
 
   **Objetivo**
   Garantir que um registro só possa ser vinculado a uma conta do próprio usuário.
@@ -679,11 +679,16 @@ Classificação por funcionalidade (código como fonte da verdade):
   - Testes de isolamento (FIN-032): vincular a uma conta de outro usuário recebe 400 nas três rotas, sem gravar nada.
 
   **Critérios de aceite**
-  - [ ] Nenhuma rota aceita `accountId` de conta de outro usuário.
+  - [x] Nenhuma rota aceita `accountId` de conta de outro usuário.
+
+  **Nota de implementação (11/09/2026):** as rotas de criação e edição de transações (avulsa, importação em lote e edição), dívidas e recorrências conferem a posse do `accountId` antes de gravar e respondem 400 com "Conta vinculada não encontrada." — a mesma mensagem dos investimentos (FIN-071), agora numa constante única. Nas transações, a conferência reaproveita a consulta que já buscava a moeda das contas (`accountCurrencies`, FIN-074): não há consulta a mais, e o lote inteiro continua fazendo uma só. Uma linha do lote com conta alheia recusa o lote todo antes de gravar qualquer uma — aceitar só as outras deixaria a importação pela metade sem o usuário perceber. Dívidas e recorrências usam `accountOwnershipError`, uma contagem por `id` e `userId`. Vazio ou nulo continua sendo "sem conta vinculada", e desvincular funciona como antes; um id de conta que nem existe também recebe 400.
+  Fora do escopo: o lançamento das recorrências (`/process`) segue usando a conta gravada em cada recorrência — com as rotas fechadas, uma conta alheia só chegaria ali por dado gravado antes desta correção.
+
+  **Validação executada:** `server.security.test.js` — 7 testes novos (16 no arquivo): transação avulsa com a conta de outro usuário recusada, e o mesmo payload com a própria conta aceito (a recusa vem só da posse); lote misto recusado por inteiro, sem gravar a linha válida, e o mesmo lote sem a linha alheia aceito; troca para a conta alheia na edição recusada, e desvincular com `''` aceito; dívida e recorrência recusadas ao criar e ao editar; id inexistente recusado nas três rotas; e, no fim, nenhum registro de um usuário aponta para a conta do outro. A conta alheia usada nos testes existe de verdade, para a recusa não vir da chave estrangeira. Em `server.currency.test.js`, o teste de FIN-074 que aceitava a transação ligada à conta de outro usuário (gravada em real) passou a esperar a recusa — a garantia de que a conta alheia não empresta a moeda continua, agora mais forte.
 
 ---
 
-- [ ] **P1 — HIGH — FIN-097 — Banco real (`dev.db`) e cópias de backup versionados no git** (achado ao iniciar a Fase 8, 11/09/2026)
+- [x] **P1 — HIGH — FIN-097 — Banco real (`dev.db`) e cópias de backup versionados no git** (achado ao iniciar a Fase 8, 11/09/2026) ✅ Concluída (11/09/2026)
 
   **Objetivo**
   Tirar do repositório o banco de dados real e as cópias dele.
@@ -703,8 +708,71 @@ Classificação por funcionalidade (código como fonte da verdade):
   Nenhuma.
 
   **Critérios de aceite**
-  - [ ] Nenhum arquivo de banco rastreado pelo git.
-  - [ ] `.gitignore` cobre o banco e as cópias.
+  - [x] Nenhum arquivo de banco rastreado pelo git.
+  - [x] `.gitignore` cobre o banco e as cópias.
+
+  **Nota de implementação (11/09/2026):** `git rm --cached` do `dev.db` e das quatro cópias versionadas — as três `dev.db.bak-…` e a `dev.db.backup-20260905-181115`, que a primeira listagem deixou passar —, com autorização do dono do repositório. Os arquivos continuam no disco; o próximo commit os tira do repositório. O `.gitignore` ganhou `dev.db*`, `*.db.bak*`, `*.db.backup*` e os arquivos auxiliares do SQLite (`*.db-wal`, `*.db-shm`), com o aviso de que uma regra ali não vale para arquivo já rastreado.
+  **O banco continua no histórico:** o repositório no GitHub é público (conferido na API do GitHub), e as versões antigas do `dev.db` seguem em todos os commits e branches já enviados. Tirar de lá depende do dono do repositório — registrado como FIN-101.
+  **Cuidado ao trocar de branch:** as branches antigas (master, F0 a F8) ainda rastreiam o `dev.db`. Como agora ele é ignorado, o git o sobrescreve sem avisar no checkout de uma delas, e o apaga ao voltar ou ao receber a remoção num pull. Antes de trocar de branch, copie o `dev.db` para fora do repositório; se ele sumir, `git restore --source=797ec9c -- dev.db` recupera a versão de 11/09, enquanto o histórico não for reescrito.
+
+  **Validação executada:** `test/repo-hygiene.test.js` — 3 testes, feitos com o próprio git: nenhum arquivo de banco rastreado (`git ls-files`, conferindo que a listagem veio de fato); o `.gitignore` cobre o banco, os auxiliares do SQLite e os nomes das cópias que já foram versionadas (`git check-ignore --no-index`); e as regras novas não ignoram o schema, as migrações nem o `.env.example`. Fora de um repositório git, os testes são pulados.
+
+---
+
+- [x] **P1 — HIGH — FIN-100 — Dependências com vulnerabilidades conhecidas (npm audit: 12 high e 2 critical)** (achado ao verificar os critérios da Fase 9, 11/09/2026) ✅ Concluída (11/09/2026)
+
+  **Objetivo**
+  Zerar as vulnerabilidades conhecidas das dependências — condição do critério "nenhuma vulnerabilidade HIGH/CRITICAL em aberto" da Fase 9.
+
+  **Problema**
+  O `npm audit` apontava 22 vulnerabilidades — 2 critical, 12 high, 6 moderate e 2 low —, 11 delas em dependências de produção. As críticas vinham do `shell-quote`, via `concurrently`, que sobe o `npm run dev`. Entre as altas: o servidor de desenvolvimento do `vite` (acesso a arquivos bloqueados e vazamento de hash NTLM no Windows), o `postcss` do build, o `qs` e o `body-parser` do Express (negação de serviço), `fast-uri`, `js-yaml`, `nanoid`, `browserslist` e `brace-expansion`. Quatro estavam no CLI do Prisma, com versões fixadas por ele — `mysql2`, `deepmerge-ts`, `hono` e `valibot` —, e para esses o npm só oferecia rebaixar o Prisma para a 6, uma quebra.
+
+  **Arquivos envolvidos**
+  - `package.json`, `package-lock.json`
+  - `test/backend-test-utils.js`
+
+  **Alterações necessárias**
+  - `npm audit fix` sem `--force` (só versões dentro das faixas do `package.json`).
+  - Para o que sobrar dentro do Prisma: avaliar se o código vulnerável é alcançável e se dá para forçar a versão corrigida.
+
+  **Dependências**
+  Nenhuma.
+
+  **Critérios de aceite**
+  - [x] `npm audit` sem vulnerabilidade HIGH ou CRITICAL.
+  - [x] CLI, cliente e adaptador do Prisma na mesma versão.
+  - [x] Suíte, lint, typecheck e build limpos depois das atualizações.
+
+  **Nota de implementação (11/09/2026):** o `npm audit fix` mexeu só no `package-lock.json`, dentro das faixas existentes — `vite` 8.3.0, `postcss` 8.5.28, `concurrently` 9.2.4 (com `shell-quote` 1.9.0) e o CLI do Prisma de 7.7.0 para 7.10.0, cujo `@prisma/dev` já não traz `hono` e usa um `valibot` corrigido. Como o CLI subiu sozinho, `@prisma/client` e `@prisma/adapter-better-sqlite3` foram alinhados em 7.10.0 — o gerador e o runtime do cliente precisam andar juntos —, e a faixa do `prisma` no `package.json` foi para `^7.10.0`.
+  Sobraram `mysql2` 3.15.3 e `deepmerge-ts` 7.1.5, fixados pelo próprio Prisma até na versão mais nova. Nenhum dos dois é alcançável aqui: o `mysql2` só é carregado pelo Prisma Studio ligado a um banco MySQL, e nenhum arquivo do CLI nem do `@prisma/config` referencia o `deepmerge-ts`. Por isso as versões corrigidas foram forçadas com `overrides` restritos à árvore do Prisma: `mysql2` `^3.24.4` (mesmo major) e `deepmerge-ts` `^8.0.2`. **Remover os `overrides` quando o Prisma atualizar essas dependências** — do contrário, eles continuam valendo sobre as versões futuras.
+  O Prisma 7.10 passou a exigir consentimento explícito do usuário quando um agente de IA dispara um comando destrutivo, e o helper dos testes de backend rodava `prisma db push --accept-data-loss`. A flag não fazia nada ali — cada teste começa de um arquivo recém-apagado — e foi retirada, com autorização do usuário: sem ela, se um dia `DATABASE_URL` apontasse para um banco com dados, o Prisma recusaria a mudança destrutiva em vez de aplicá-la.
+
+  **Validação executada:** `npm audit` — 0 vulnerabilidades; `npx prisma --version` (CLI e cliente 7.10.0), `npx prisma validate` e `npx prisma migrate status` (9 migrações, banco em dia); `npm run lint`, `npm run typecheck`, `npx vitest run` (44 arquivos, 620 testes) e `npm run build` limpos.
+
+---
+
+- [ ] **P1 — HIGH — FIN-101 — Banco real no histórico do repositório público** (achado ao concluir FIN-097, 11/09/2026) — ação do dono do repositório
+
+  **Objetivo**
+  Tirar do alcance público os dados que o `dev.db` levou para o histórico do git.
+
+  **Problema**
+  FIN-097 tirou o banco do índice, mas ele continua em todos os commits e branches já enviados ao GitHub — e o repositório é público (conferido na API do GitHub em 11/09/2026). Qualquer pessoa pode baixar as versões antigas do `dev.db`, com os dados financeiros e os hashes bcrypt das senhas; o hash de uma senha fraca pode ser quebrado offline.
+
+  **Arquivos envolvidos**
+  - histórico do git (todas as branches enviadas ao `origin`)
+
+  **Alterações necessárias**
+  - Se a senha usada no FinFlow também é usada em outro serviço, trocá-la lá.
+  - Decidir entre tornar o repositório privado e reescrever o histórico sem o banco (`git filter-repo --path-glob 'dev.db*' --invert-paths` e `push --force` de todas as branches), ou fazer os dois. Reescrever muda os hashes de todos os commits e obriga a reclonar; clones e forks já feitos mantêm as cópias antigas, e os pull requests antigos continuam apontando para os commits antigos no GitHub até o suporte do GitHub removê-los.
+  - Antes de reescrever, copiar o `dev.db` para fora do repositório.
+
+  **Dependências**
+  FIN-097.
+
+  **Critérios de aceite**
+  - [ ] Senhas reutilizadas trocadas.
+  - [ ] Repositório privado ou histórico sem arquivos de banco.
 
 ---
 
@@ -1268,7 +1336,7 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
-- [ ] **P3 — FIN-099 — Editar e excluir transação só aparecem com o mouse sobre a linha** (achado ao implementar FIN-081, 11/09/2026)
+- [x] **P3 — FIN-099 — Editar e excluir transação só aparecem com o mouse sobre a linha** (achado ao implementar FIN-081, 11/09/2026) ✅ Concluída (11/09/2026)
 
   **Objetivo**
   Deixar as ações de cada transação alcançáveis em tela de toque e pelo teclado.
@@ -1287,8 +1355,12 @@ Classificação por funcionalidade (código como fonte da verdade):
   FIN-081.
 
   **Critérios de aceite**
-  - [ ] Ações visíveis em tela de toque e com o foco do teclado.
-  - [ ] Botões com nome acessível.
+  - [x] Ações visíveis em tela de toque e com o foco do teclado.
+  - [x] Botões com nome acessível.
+
+  **Nota de implementação (11/09/2026):** as ações continuam aparecendo com o mouse sobre a linha (`group-hover`) e agora também quando o foco do teclado chega a elas (`focus-within`) e sempre em tela de toque (`pointer-coarse`, que o Tailwind compila para `@media (pointer: coarse)` — conferido no CSS do build). Os botões ganharam `type="button"` e nome acessível com o nome da transação ("Editar Uber", "Excluir Uber"), como na aba Contas (FIN-076). No modal de edição, destino do botão de editar, os seis rótulos foram associados aos campos (`htmlFor`/`id`, com `useId`), e o botão de fechar, só de ícone, ganhou nome. A `TxTable` passou a ser exportada de `App.tsx` para o teste.
+
+  **Validação executada:** `src/App.test.tsx` — 4 testes: botões com o nome da transação; ações com as classes de foco e de toque, além do hover; excluir pede confirmação e só exclui quando confirmado; editar abre o modal com cada campo encontrado pelo rótulo e preenchido, e "Fechar" o fecha.
 
 ---
 
@@ -2232,6 +2304,495 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
+## 23. 🧭 Evolução pós-entrega (Fase 10)
+
+> Sugestões discutidas em 12/09/2026, depois da verificação da Fase 9, na ordem de prioridade combinada: proteção dos dados, números certos, uso no dia a dia e engenharia. Nada aqui é multiusuário — o FinFlow é um dashboard pessoal (FIN-077). Antes de começar, a FIN-101 (ação do dono do repositório, seção 1).
+
+- [ ] **P1 — FIN-102 — Backup automático diário do banco SQLite**
+
+  **Objetivo**
+  Ter cópias recentes e restauráveis do banco sem depender de lembrar de exportar.
+
+  **Problema**
+  O único histórico do `dev.db` era, sem querer, o próprio git — que deixou de rastreá-lo em FIN-097. Restam a exportação manual (FIN-079) e as cópias avulsas feitas antes das migrações. Um disco com defeito, um arquivo corrompido ou o checkout de uma branch antiga (ver FIN-097) apagam meses de dados.
+
+  **Arquivos envolvidos**
+  - `scripts/backup-db.mjs` (novo), `package.json` (script `backup`)
+  - `server.js` (agendamento diário)
+  - `.env.example`, `README.md`
+
+  **Alterações necessárias**
+  - Cópia consistente mesmo com o servidor rodando: `VACUUM INTO` (ou a API de backup do better-sqlite3) — nunca copiar o arquivo aberto.
+  - Destino configurável (`BACKUP_DIR`), fora do repositório; nome com data e hora; rotação (manter, por exemplo, os últimos 30).
+  - O servidor faz um backup ao iniciar e a cada 24 h quando `BACKUP_DIR` está definido; `npm run backup` roda à mão.
+  - Conferir a cópia antes de apagar as antigas (abre como SQLite e tem as mesmas tabelas); uma falha só vai para o log, sem derrubar o servidor.
+  - Documentar como restaurar.
+
+  **Dependências**
+  FIN-097.
+
+  **Validação**
+  Teste com banco temporário: o backup gera um SQLite íntegro, com as mesmas contagens por tabela; a rotação mantém só os N mais recentes; destino inexistente ou sem permissão não derruba o servidor.
+
+  **Critérios de aceite**
+  - [ ] Backup diário automático fora do repositório, com rotação.
+  - [ ] Restauração documentada e testada.
+
+---
+
+- [ ] **P1 — FIN-103 — Transferência entre contas próprias fora dos totais de receita e despesa**
+
+  **Objetivo**
+  Não contar como receita nem como despesa o dinheiro que só muda de uma conta sua para outra.
+
+  **Problema**
+  Não existe o conceito de transferência. Mover dinheiro da conta corrente para a poupança aparece como despesa numa conta e receita na outra, e o importador classifica "transferência recebida" como Receita (`CATEGORY_RULES`, `parsers.ts`). O pagamento da fatura pela conta corrente provavelmente conta como despesa além das compras do cartão, que já foram lançadas uma a uma. O efeito provável: receitas e despesas infladas no dashboard, no orçamento, na projeção e nos relatórios.
+
+  **Arquivos envolvidos**
+  - `prisma/schema.prisma` + migração (marcação de transferência na `Transaction`)
+  - `server.js` (schemas e rotas de transação; backup e restauração)
+  - `src/types.ts`, `src/hooks/useFinancialStats.ts`, `src/utils/transactions.ts`, `src/utils/budget.ts`, `src/utils/projection.ts`, `src/utils/reports.ts`
+  - `src/App.tsx` (tabela e modal de edição)
+
+  **Alterações necessárias**
+  - Antes de mudar código: medir o problema nos dados reais, só lendo o banco — quantas transações parecem transferência ou pagamento de fatura e quanto pesam nos totais.
+  - Marcar uma transação como transferência (ex.: um `transferGroupId` ligando os dois lados), editável no modal.
+  - Transferências fora de receitas, despesas, orçamento, alertas de gasto incomum (FIN-069) e comparativos.
+  - Pagamento de fatura tratado como transferência da conta corrente para o cartão.
+  - Backup e restauração (FIN-079/FIN-080) levam o campo novo.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  Testes das regras financeiras: uma transferência não altera receita, despesa nem orçamento; pagar a fatura não duplica a despesa das compras.
+
+  **Critérios de aceite**
+  - [ ] Transferências e pagamento de fatura fora dos totais de receita e despesa.
+  - [ ] Totais conferidos contra os dados reais antes e depois.
+
+---
+
+- [ ] **P2 — FIN-104 — Detectar transferências e pagamento de fatura automaticamente**
+
+  **Objetivo**
+  Não depender de marcar cada transferência à mão.
+
+  **Problema**
+  Com FIN-103 dá para marcar transferências, mas elas chegam às dezenas pela Pluggy e pela importação, sempre sem marcação.
+
+  **Arquivos envolvidos**
+  - `src/utils/transfers.ts` (novo — detecção como função pura)
+  - `server.js` (sync Pluggy e importação em lote) ou a tela de transações
+  - `src/App.tsx`
+
+  **Alterações necessárias**
+  - Candidatos: mesmo valor absoluto com sinais opostos, contas diferentes do usuário, datas próximas (ex.: até 3 dias). Pagamento de fatura: débito na conta corrente com o valor da fatura do cartão, perto do vencimento.
+  - Sugerir, não aplicar sozinho: o usuário confirma ou descarta, e o descarte é lembrado.
+  - Uma transação nunca casa com mais de uma.
+
+  **Dependências**
+  FIN-103.
+
+  **Validação**
+  Testes da detecção: par exato casa; valores iguais em datas distantes não; três candidatos para um lado casam só um; descarte lembrado.
+
+  **Critérios de aceite**
+  - [ ] Pares sugeridos para confirmação, sem falso positivo nos casos testados.
+
+---
+
+- [ ] **P2 — FIN-105 — Regras de categorização do usuário**
+
+  **Objetivo**
+  Cada transação chegar já com a categoria que você usa.
+
+  **Problema**
+  A categorização automática é uma lista fixa de palavras-chave no código (`CATEGORY_RULES`, `parsers.ts`). O que você corrige à mão não ensina nada ao app, e a próxima importação ou sincronização traz o mesmo erro.
+
+  **Arquivos envolvidos**
+  - `prisma/schema.prisma` + migração (`CategoryRule`: texto a procurar, categoria, `userId`)
+  - `server.js` (rotas CRUD `/api/category-rules`; aplicação na importação em lote e no sync Pluggy; backup e restauração)
+  - `src/utils/parsers.ts`
+
+  **Alterações necessárias**
+  - Regras do usuário aplicadas no servidor, na gravação, para valerem nas duas origens (importação e Pluggy), antes das regras fixas.
+  - Casamento sem acento e sem diferenciar maiúsculas; em conflito, vence a regra mais específica (texto mais longo).
+  - Rotas com validação (FIN-008) e isolamento por usuário (FIN-032); as regras entram no backup.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  Testes das rotas (CRUD, validação, isolamento) e da aplicação: importação e sync usam a regra; sem regra, vale a lista fixa.
+
+  **Critérios de aceite**
+  - [ ] Regras do usuário aplicadas na importação e no sync.
+
+---
+
+- [ ] **P2 — FIN-106 — Criar regra ao corrigir a categoria de uma transação**
+
+  **Objetivo**
+  Ensinar o app no momento da correção, sem ir a outra tela.
+
+  **Problema**
+  Sem interface, as regras de FIN-105 ficam invisíveis.
+
+  **Arquivos envolvidos**
+  - `src/App.tsx` (modal de edição da `TxTable`)
+  - `src/components/CategoryRulesSettings.tsx` (novo, em Configurações)
+  - `server.js` (recategorizar em lote as transações que casam com a regra)
+
+  **Alterações necessárias**
+  - Ao trocar a categoria no modal: "Aplicar 'Transporte' às transações com 'UBER'? (12 encontradas)" — cria a regra e, se o usuário quiser, recategoriza as existentes.
+  - Tela de regras em Configurações: listar, editar e excluir.
+
+  **Dependências**
+  FIN-105.
+
+  **Validação**
+  Testes de componente: a oferta aparece só quando a categoria muda e mostra quantas transações casam; a recategorização em lote não toca transações de outro usuário.
+
+  **Critérios de aceite**
+  - [ ] Regra criada a partir da correção e gerenciável em Configurações.
+
+---
+
+- [ ] **P2 — FIN-107 — Sincronização automática com a Pluggy**
+
+  **Objetivo**
+  Abrir o app e ver os dados do banco já atualizados.
+
+  **Problema**
+  A sincronização só roda pelo botão (`POST /api/pluggy/sync/:itemId`). Sem ele, o dashboard mostra dados de dias atrás sem avisar.
+
+  **Arquivos envolvidos**
+  - `prisma/schema.prisma` + migração (data da última sincronização por conexão)
+  - `server.js` (rota de sync)
+  - `src/App.tsx`, `src/components/PluggyConnectButton.tsx`
+
+  **Alterações necessárias**
+  - Guardar quando cada conexão sincronizou pela última vez e mostrar "sincronizado há X".
+  - Ao abrir o app, sincronizar em segundo plano as conexões com mais de algumas horas (ex.: 6 h), sem travar a tela.
+  - Uma sincronização por vez por conexão; conexão com login expirado (FIN-041) fica fora da automática.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  Testes: conexão recente não sincroniza; conexão antiga sincroniza uma vez só, mesmo com duas abas abertas; erro de conexão não quebra a carga do dashboard.
+
+  **Critérios de aceite**
+  - [ ] Sincronização automática ao abrir o app, com a hora da última sincronização visível.
+
+---
+
+- [ ] **P2 — FIN-108 — Empacotar o app em Docker**
+
+  **Objetivo**
+  Rodar o FinFlow num computador ou servidor seu com um comando, sempre do mesmo jeito.
+
+  **Problema**
+  O app só roda em modo de desenvolvimento (`npm run dev`: Vite + nodemon) e não há configuração de produção: nada serve o build do frontend, e as migrações dependem de rodar o Prisma à mão.
+
+  **Arquivos envolvidos**
+  - `Dockerfile`, `.dockerignore`, `docker-compose.yml` (novos)
+  - `server.js` (servir `dist/` na mesma origem da API, com fallback para o `index.html`)
+  - `.env.example`, `README.md`
+
+  **Alterações necessárias**
+  - Imagem em etapas: build do frontend e servidor Node, sem as dependências de desenvolvimento.
+  - Banco e backups (FIN-102) em volume; `prisma migrate deploy` na subida.
+  - Frontend e API na mesma origem (o CORS de FIN-009 continua valendo no desenvolvimento).
+  - Segredos só por variável de ambiente; nenhum `.env` dentro da imagem.
+
+  **Dependências**
+  Nenhuma (recomendado depois de FIN-102, para o banco já nascer com backup).
+
+  **Validação**
+  `docker compose up` sobe o app; login, importação e 2FA funcionam; reiniciar o contêiner mantém os dados.
+
+  **Critérios de aceite**
+  - [ ] App completo rodando em contêiner, com banco persistente e migrações automáticas.
+
+---
+
+- [ ] **P2 — FIN-109 — Acesso privado pelo celular (Tailscale + HTTPS)**
+
+  **Objetivo**
+  Usar o FinFlow no celular como app instalado, sem expor os dados financeiros na internet.
+
+  **Problema**
+  O PWA (FIN-082) só instala com HTTPS — fora de `localhost`, o service worker nem é registrado sem ele. E publicar o app na internet aberta exporia o login e os dados a qualquer pessoa.
+
+  **Arquivos envolvidos**
+  - `docs/DEPLOY.md` (novo), `README.md`
+
+  **Alterações necessárias**
+  - Guia: o contêiner de FIN-108 num computador ou servidor dentro da rede privada do Tailscale, com HTTPS pelo próprio Tailscale (`tailscale serve`), acessível só pelos seus aparelhos.
+  - Checklist de instalação do PWA no Android e no iOS.
+  - `FRONTEND_URL` e CORS configurados para o endereço privado.
+
+  **Dependências**
+  FIN-108.
+
+  **Validação**
+  App instalado no celular, abrindo pelo endereço privado; fora da rede do Tailscale, o endereço não responde.
+
+  **Critérios de aceite**
+  - [ ] PWA instalado no celular via HTTPS, acessível só pelos seus aparelhos.
+
+---
+
+- [ ] **P2 — MEDIUM — FIN-110 — Token de sessão em cookie httpOnly**
+
+  **Objetivo**
+  Um script injetado na página não conseguir levar a sessão.
+
+  **Problema**
+  O JWT fica no `localStorage` (`finflow_token`, em `App.tsx`), legível por qualquer JavaScript da página: um XSS — inclusive vindo de uma dependência — leva a sessão junto. Com o app acessível pelo celular (FIN-109), o risco deixa de ser só local.
+
+  **Arquivos envolvidos**
+  - `server.js` (login, logout, `authenticateToken`, CORS)
+  - `src/services/api.ts`, `src/App.tsx`, `src/components/AuthForm.tsx`
+  - testes de backend (hoje autenticam pelo header `Authorization: Bearer`)
+
+  **Alterações necessárias**
+  - O login grava o token num cookie `HttpOnly`, `Secure`, `SameSite=Strict`; o logout o apaga; a revogação de FIN-012 continua valendo.
+  - Proteção contra CSRF: `SameSite=Strict` e conferência do `Origin` nas requisições que alteram dados.
+  - O frontend deixa de ler e guardar o token; a sessão é conferida pela API.
+  - Decidir se o header `Authorization` continua aceito (útil para scripts e para os testes).
+
+  **Dependências**
+  FIN-108 (frontend e API na mesma origem simplificam o cookie).
+
+  **Validação**
+  Testes: o login grava o cookie com os atributos certos; requisição sem cookie recebe 401; origem estranha recebe 403; logout invalida a sessão.
+
+  **Critérios de aceite**
+  - [ ] Token fora do alcance do JavaScript da página.
+
+---
+
+- [ ] **P3 — FIN-111 — Detectar assinaturas e sugerir recorrências**
+
+  **Objetivo**
+  Mostrar as cobranças que se repetem e que você talvez nem lembre mais.
+
+  **Problema**
+  As recorrências (FIN-053 a FIN-057) só existem se cadastradas à mão; streaming, aplicativos e seguros cobrados todo mês passam despercebidos no meio das transações.
+
+  **Arquivos envolvidos**
+  - `src/utils/subscriptions.ts` (novo — detecção como função pura)
+  - `src/components/RecurringManager.tsx`
+
+  **Alterações necessárias**
+  - Agrupar despesas pelo nome normalizado; é assinatura o grupo com 3 ou mais ocorrências em intervalo regular (semanal, mensal ou anual) e valor estável, com tolerância pequena para reajuste.
+  - Na aba Recorrências, "Assinaturas encontradas", com o total mensal e o botão "Criar recorrência"; ficam de fora as que já têm recorrência e as descartadas.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  Testes da detecção: mensal com reajuste pequeno é detectada; compras frequentes em datas irregulares não; menos de 3 ocorrências não.
+
+  **Critérios de aceite**
+  - [ ] Assinaturas sugeridas, cada uma a um clique de virar recorrência.
+
+---
+
+- [ ] **P3 — FIN-112 — Histórico mensal do patrimônio líquido**
+
+  **Objetivo**
+  Ver o patrimônio mês a mês, e não só o valor de hoje.
+
+  **Problema**
+  O patrimônio líquido (FIN-064/FIN-073) é calculado na hora, a partir dos saldos atuais (`computeNetWorth`, em `reports.ts`). Os saldos passados não ficam guardados, então não há como mostrar a evolução.
+
+  **Arquivos envolvidos**
+  - `prisma/schema.prisma` + migração (registro mensal: contas, investimentos, dívidas e patrimônio, em real)
+  - `server.js` (rotas; backup e restauração)
+  - `src/utils/reports.ts`, `src/components/ReportsView.tsx`
+
+  **Alterações necessárias**
+  - Um registro por mês, com a mesma regra de `computeNetWorth`: o do mês corrente é atualizado quando o dashboard carrega; os anteriores ficam congelados.
+  - Valores convertidos para real com o câmbio do dia (FIN-075), guardado junto.
+  - Gráfico da evolução em Relatórios.
+
+  **Dependências**
+  FIN-064, FIN-073.
+
+  **Validação**
+  Testes: o mês corrente é atualizado e os passados não; um registro por mês por usuário; isolamento entre usuários.
+
+  **Critérios de aceite**
+  - [ ] Gráfico da evolução do patrimônio a partir do primeiro mês registrado.
+
+---
+
+- [ ] **P3 — FIN-113 — Metas ligadas a uma conta ou investimento**
+
+  **Objetivo**
+  O progresso da meta andar sozinho quando o dinheiro está numa conta ou aplicação.
+
+  **Problema**
+  O valor acumulado de cada meta (FIN-049 a FIN-052) é digitado à mão, mesmo quando a reserva é uma poupança ou um investimento que o app já conhece.
+
+  **Arquivos envolvidos**
+  - `prisma/schema.prisma` + migração (vínculo opcional da `Goal` com uma conta ou um investimento)
+  - `server.js` (rotas de metas, com a checagem de posse de FIN-096; backup e restauração)
+  - `src/utils/goals.ts`, `src/components/GoalsManager.tsx`
+
+  **Alterações necessárias**
+  - A meta pode ser manual, como hoje, ou ligada; ligada, o acumulado é o saldo da conta ou o valor atual do investimento, convertido para real (FIN-075).
+  - Excluir a conta ou o investimento devolve a meta ao modo manual, com o último valor.
+
+  **Dependências**
+  FIN-050, FIN-096.
+
+  **Validação**
+  Testes: o progresso acompanha o saldo; vínculo com conta de outro usuário recusado; excluir a conta não apaga a meta.
+
+  **Critérios de aceite**
+  - [ ] Meta ligada mostra o progresso sem digitação.
+
+---
+
+- [ ] **P2 — FIN-114 — Acelerar a suíte de testes**
+
+  **Objetivo**
+  Rodar a suíte completa em bem menos tempo — ela roda a cada tarefa.
+
+  **Problema**
+  A suíte leva de 3 a 5 minutos (44 arquivos, 620 testes em 11/09/2026). Boa parte vem de cada um dos 14 arquivos de backend rodar `npx prisma db push` para criar o próprio banco; o ambiente `jsdom` soma quase um minuto, criado inclusive para testes de utilitários que não usam DOM.
+
+  **Arquivos envolvidos**
+  - `vitest.config.ts`, `test/backend-test-utils.js`
+
+  **Alterações necessárias**
+  - Criar o schema uma vez (`globalSetup`) num banco-modelo e copiar o arquivo para cada suíte de backend, em vez de um `db push` por arquivo.
+  - Separar os projetos do Vitest por ambiente: `node` para backend e utilitários, `jsdom` só para componentes e hooks.
+  - Medir antes e depois, e registrar no card.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  A mesma contagem de testes antes e depois, todos passando; tempo total registrado; nenhum `test_*.db` sobrando.
+
+  **Critérios de aceite**
+  - [ ] Suíte completa mais rápida, sem perder nenhum teste.
+
+---
+
+- [ ] **P3 — FIN-115 — Dividir `server.js` em rotas por domínio**
+
+  **Objetivo**
+  Mudanças menores e mais fáceis de revisar no backend.
+
+  **Problema**
+  O `server.js` tem cerca de 2.500 linhas: configuração, validação, autenticação, 2FA, todas as rotas, backup, Pluggy e notificações no mesmo arquivo. Qualquer mudança mexe nele, e o diff fica difícil de revisar — inclusive para o CodeRabbit.
+
+  **Arquivos envolvidos**
+  - `server.js` (continua como ponto de entrada, exportando `app` — os testes não mudam)
+  - módulos novos (ex.: `server/routes/transactions.js`, `server/lib/validation.js`)
+
+  **Alterações necessárias**
+  - Mover sem mudar comportamento: um router por domínio (autenticação e 2FA, contas, transações, dívidas, orçamento, metas, recorrências, investimentos, notificações, backup, Pluggy) e os utilitários compartilhados.
+  - Em passos pequenos, um domínio por vez, com a suíte verde a cada passo.
+
+  **Dependências**
+  Nenhuma (recomendado depois de FIN-114, para validar cada passo rápido).
+
+  **Validação**
+  Suíte completa, lint e build limpos a cada passo, sem alterar nenhum teste.
+
+  **Critérios de aceite**
+  - [ ] `server.js` reduzido à montagem do app, sem mudança de comportamento.
+
+---
+
+- [ ] **P3 — FIN-116 — Dividir `App.tsx` em páginas e componentes**
+
+  **Objetivo**
+  Um componente por tela, fácil de testar e de carregar sob demanda.
+
+  **Problema**
+  O `App.tsx` tem cerca de 1.750 linhas: sessão, carga de dados, navegação, dashboard, gráficos, tabela de transações e modais no mesmo arquivo — a `TxTable` precisou ser exportada de lá só para ser testada (FIN-099).
+
+  **Arquivos envolvidos**
+  - `src/App.tsx`
+  - novos: `src/pages/` (Dashboard, Transações…), `src/components/TxTable.tsx`, `src/components/NavItem.tsx`
+
+  **Alterações necessárias**
+  - Mover sem mudar comportamento; o `App.tsx` fica com a sessão, a carga de dados e a navegação.
+  - Os testes existentes, inclusive `App.test.tsx`, continuam passando, só com os imports atualizados.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  Suíte, lint, typecheck e build limpos; app conferido no navegador.
+
+  **Critérios de aceite**
+  - [ ] `App.tsx` reduzido à orquestração, sem mudança de comportamento.
+
+---
+
+- [ ] **P3 — FIN-117 — Carregar abas pesadas sob demanda**
+
+  **Objetivo**
+  Abrir o app mais rápido, principalmente no celular.
+
+  **Problema**
+  O build avisa que o pacote principal passa de 500 kB: todas as abas, os gráficos (Recharts) e o widget da Pluggy vêm no primeiro carregamento, mesmo quando o usuário só olha o dashboard. Hoje só o PDF (jsPDF) é carregado sob demanda.
+
+  **Arquivos envolvidos**
+  - `src/App.tsx` (ou as páginas de FIN-116), `vite.config.ts`
+
+  **Alterações necessárias**
+  - `React.lazy` e `Suspense` nas abas menos usadas (Relatórios, Investimentos, Configurações) e no widget da Pluggy, com um estado de carregamento acessível.
+  - Conferir que o service worker (FIN-082) guarda os pedaços novos em `/assets/`, para as abas já visitadas abrirem offline.
+
+  **Dependências**
+  FIN-116.
+
+  **Validação**
+  Build sem o aviso de 500 kB; tamanho do pacote inicial medido antes e depois; navegação por todas as abas no navegador.
+
+  **Critérios de aceite**
+  - [ ] Pacote inicial abaixo de 500 kB.
+
+---
+
+- [ ] **P2 — FIN-118 — Dependabot e `npm audit` semanal no CI**
+
+  **Objetivo**
+  Saber das vulnerabilidades e das atualizações quando elas aparecem, e não meses depois.
+
+  **Problema**
+  As 22 vulnerabilidades encontradas na Fase 9 (FIN-100) se acumularam sem ninguém ver: o CI não roda auditoria, e nada avisa quando sai uma versão corrigida. Os `overrides` de FIN-100 também precisam ser revistos quando o Prisma atualizar as dependências dele.
+
+  **Arquivos envolvidos**
+  - `.github/dependabot.yml` (novo — npm e GitHub Actions)
+  - `.github/workflows/audit.yml` (novo — agendado)
+
+  **Alterações necessárias**
+  - Dependabot semanal para o npm e para as actions, agrupando as atualizações menores para não abrir um PR por pacote.
+  - Workflow semanal com `npm audit --audit-level=high`, `permissions: contents: read` e `persist-credentials: false` — separado do CI de push, para um alerta novo não travar o trabalho do dia.
+
+  **Dependências**
+  FIN-036, FIN-100.
+
+  **Validação**
+  O workflow roda com sucesso ao ser disparado à mão (`workflow_dispatch`); o Dependabot abre o primeiro PR.
+
+  **Critérios de aceite**
+  - [ ] Auditoria semanal e PRs de atualização automáticos.
+
+---
+
 # 📊 Resumo
 
 | Métrica | Quantidade |
@@ -2266,17 +2827,26 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 | Infraestrutura/DX (seção 21) | 2 |
 | Débitos técnicos (seção 22) | 3 |
 
+## 🏁 Fase 9 — Entregáveis (verificação de 11/09/2026)
+
+Critérios gerais do `TODO.md`, conferidos no código e na execução, e não só pela marcação dos itens:
+
+- [x] **Nenhum bug P0 em aberto.** Os oito itens da Fase 0 estão concluídos, e nenhum card P0 do backlog está aberto.
+- [ ] **Nenhuma vulnerabilidade HIGH/CRITICAL em aberto.** Nesta fase foram fechadas as três pendências de segurança do código e das dependências: FIN-096 (vínculo com a conta de outro usuário), FIN-097 (banco fora do git) e FIN-100 (`npm audit` com 0 vulnerabilidades). **Falta a FIN-101:** o banco real continua no histórico do repositório público, e resolver isso depende do dono do repositório — trocar senhas reutilizadas e tornar o repositório privado ou reescrever o histórico.
+- [x] **Cobertura mínima de testes em autenticação, isolamento por usuário e regras financeiras.** Autenticação: `server.auth.test.js`, `server.rate-limit.test.js`, `server.two-factor.test.js` e `AuthForm.test.tsx`. Isolamento: `server.security.test.js` e os blocos de isolamento de orçamentos, metas, recorrências, investimentos, notificações, backup e 2FA. Regras financeiras: `debts.test.ts`, `useFinancialStats.test.ts`, `budget.test.ts`, `goals.test.ts`, `projection.test.ts`, `installments.test.ts`, `transactions.test.ts`, `currency.test.ts` e `parsers.test.ts`, entre outros. Suíte completa: 44 arquivos, 620 testes, todos passando.
+- [x] **App usável em viewport mobile.** Gaveta de navegação acessível (FIN-028 e FIN-081), grids que se ajustam a telas estreitas (FIN-029), PWA instalável (FIN-082) e as ações da tabela de transações alcançáveis em tela de toque (FIN-099).
+- [x] **CI rodando lint, typecheck, testes e build a cada push.** `.github/workflows/ci.yml` roda em todo push e pull request, com `permissions: contents: read` e `persist-credentials: false`. Os runs mais recentes no GitHub Actions passaram, inclusive o push da branch `F9-Entregaveis`; as mudanças desta fase entram no próximo push.
+
+**Pendências pós-MVP:** as Fases 3 a 8 estão concluídas. A colaboração entre usuários (FIN-077) ficou fora do escopo, por decisão de produto.
+
 ## 🎯 Próxima tarefa
 
-**FIN-022 — Criar endpoints `PUT`/`DELETE` para transação individual**
+Itens ainda abertos:
+- **FIN-101** (P1) — ação do dono do repositório, sem código a escrever; é o que falta para o último critério da Fase 9.
+- **FIN-098** (P2) — importação de extrato com mais de ~500 transações recusada pelo limite de 100 kB do corpo JSON.
+- **FIN-091** (P2) — `parseOFX` perde transações em extratos SGML sem tags de fechamento.
 
-### Por quê?
-
-Fase 2 do `TODO.md`, subseção "Banco de dados" (FIN-019, FIN-020, FIN-021), 100% concluída em 08/09/2026. Próxima subseção, na ordem do documento: "Backend / API" — FIN-022 é a primeira (P1), sem dependências pendentes (depende de FIN-008, já concluída).
-
-### Bloqueios
-
-Nenhum.
+Pela ordem do `TODO.md`, a próxima tarefa de código é a FIN-098; nenhuma das duas tem dependência pendente. Depois delas vem a Fase 10 (seção 23), começando pela FIN-102.
 
 ---
 

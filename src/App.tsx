@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useId } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
@@ -1572,8 +1572,8 @@ const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
 
 // FIN-022: edição/exclusão individual de transação. `rows` continua sendo o recorte já
 // filtrado/paginado calculado pelo componente pai — este componente só adiciona a UI de
-// ação por linha e o modal de edição.
-function TxTable({ rows, accounts, onUpdate, onDelete }: {
+// ação por linha e o modal de edição. Exportado para o teste das ações (FIN-099).
+export function TxTable({ rows, accounts, onUpdate, onDelete }: {
   rows: Transaction[];
   accounts: Account[];
   onUpdate: (id: string, tx: Partial<Transaction>) => Promise<void>;
@@ -1582,6 +1582,7 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [form, setForm] = useState<Partial<Transaction>>({});
   const [saving, setSaving] = useState(false);
+  const fieldId = useId();
 
   const openEdit = (t: Transaction) => { setEditing(t); setForm({ ...t }); };
 
@@ -1648,12 +1649,16 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
                   {formatTxAmount(t)}
                 </td>
                 <td className="py-4">
-                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => openEdit(t)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
-                      <Edit2 size={13} />
+                  {/* FIN-099: tela de toque não tem "passar o mouse" — lá as ações ficam sempre visíveis,
+                      e em qualquer tela aparecem quando o foco do teclado chega a elas. */}
+                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
+                    <button type="button" onClick={() => openEdit(t)} aria-label={`Editar ${t.name}`}
+                      className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                      <Edit2 size={13} aria-hidden="true" />
                     </button>
-                    <button onClick={() => handleDelete(t)} className="p-1.5 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
-                      <Trash2 size={13} />
+                    <button type="button" onClick={() => handleDelete(t)} aria-label={`Excluir ${t.name}`}
+                      className="p-1.5 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
+                      <Trash2 size={13} aria-hidden="true" />
                     </button>
                   </div>
                 </td>
@@ -1668,45 +1673,45 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
           <div className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-lg font-bold text-white">Editar Transação</h3>
-              <button onClick={() => setEditing(null)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
-                <X size={18} />
+              <button type="button" onClick={() => setEditing(null)} aria-label="Fechar" className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
+                <X size={18} aria-hidden="true" />
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Descrição</label>
-                <input value={form.name ?? ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
+                <label htmlFor={`${fieldId}-name`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Descrição</label>
+                <input id={`${fieldId}-name`} value={form.name ?? ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Data</label>
-                  <input type="date" value={form.date ?? ''} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="input-field" />
+                  <label htmlFor={`${fieldId}-date`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Data</label>
+                  <input id={`${fieldId}-date`} type="date" value={form.date ?? ''} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="input-field" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">
+                  <label htmlFor={`${fieldId}-amount`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">
                     Valor ({currencySymbol(currencyOf(accounts.find(a => a.id === form.accountId) ?? {}))})
                   </label>
-                  <input type="number" step="0.01" value={form.amount ?? 0} onChange={e => setForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className="input-field" />
+                  <input id={`${fieldId}-amount`} type="number" step="0.01" value={form.amount ?? 0} onChange={e => setForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className="input-field" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Categoria</label>
-                  <select value={form.category ?? ''} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="input-field">
+                  <label htmlFor={`${fieldId}-category`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Categoria</label>
+                  <select id={`${fieldId}-category`} value={form.category ?? ''} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="input-field">
                     {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Tipo</label>
-                  <select value={form.paymentType ?? 'debit'} onChange={e => setForm(f => ({ ...f, paymentType: e.target.value as PaymentType }))} className="input-field">
+                  <label htmlFor={`${fieldId}-type`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Tipo</label>
+                  <select id={`${fieldId}-type`} value={form.paymentType ?? 'debit'} onChange={e => setForm(f => ({ ...f, paymentType: e.target.value as PaymentType }))} className="input-field">
                     {Object.entries(PAYMENT_TYPE_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Conta</label>
-                <select value={form.accountId ?? ''} onChange={e => setForm(f => ({ ...f, accountId: e.target.value }))} className="input-field">
+                <label htmlFor={`${fieldId}-account`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Conta</label>
+                <select id={`${fieldId}-account`} value={form.accountId ?? ''} onChange={e => setForm(f => ({ ...f, accountId: e.target.value }))} className="input-field">
                   <option value="">Sem conta vinculada</option>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
