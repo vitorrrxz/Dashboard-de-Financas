@@ -22,36 +22,57 @@ model User {
 model Account {
   id          String   @id @default(uuid())
   userId      String
-  pluggyId    String?  
+  pluggyId    String?
   name        String
   bank        String
-  type        String   
-  balance     Float
-  limit       Float?
+  type        String
+  balance     Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
+  limit       Int?     // centavos
   dueDay      Int?
   closingDay  Int?
-  pendingBill Float?
+  pendingBill Int?     // centavos
   color       String
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id])
   transactions Transaction[]
-  debts       Debt[]   
+  debts       Debt[]
+
+  // Toda listagem filtra por userId; o sync Pluggy busca por (userId, pluggyId) — ver FIN-019.
+  @@index([userId])
+  // Reforça a idempotência do sync Pluggy a nível de banco, não só de aplicação — evita
+  // condição de corrida se duas sincronizações rodarem em paralelo (ver FIN-021).
+  // SQLite/Prisma permitem múltiplos NULL num índice único, então contas sem pluggyId
+  // (a maioria, criadas manualmente) não são afetadas.
+  @@unique([userId, pluggyId])
 }
 
 model Transaction {
   id          String   @id @default(uuid())
   userId      String
   accountId   String?
-  pluggyId    String?  
+  pluggyId    String?
+  importHash  String?  // chave de deduplicação de importações manuais (CSV/OFX) — ver FIN-003
   name        String
   category    String
   date        String
-  amount      Float
+  amount      Int      // centavos — ver FIN-015
+  paymentType String   @default("debit")
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id])
   account     Account? @relation(fields: [accountId], references: [id])
+
+  // ver FIN-019 em docs/BACKLOG_DETAIL.md
+  @@index([userId, date])
+  // Reforça a deduplicação de importação manual (CSV/OFX) a nível de banco, não só de
+  // aplicação — evita duplicatas se o usuário disparar duas importações do mesmo arquivo
+  // em paralelo (ex. duplo clique). SQLite/Prisma permitem múltiplos NULL num índice
+  // único, então transações não-importadas (criadas manualmente ou via Pluggy, sem
+  // importHash) não são afetadas. Ver nota de implementação em FIN-003.
+  @@unique([userId, importHash])
+  // Idempotência do sync Pluggy a nível de banco — ver FIN-021.
+  @@unique([userId, pluggyId])
 }
 
 model Debt {
@@ -61,25 +82,27 @@ model Debt {
   name              String
   description       String?
   category          String
-  totalAmount       Float
-  paidAmount        Float
-  monthlyPayment    Float
+  totalAmount       Int      // centavos — ver FIN-015
+  paidAmount        Int      // centavos
+  monthlyPayment    Int      // centavos
   totalInstallments Int
   paidInstallments  Int
   nextDueDate       String
-  interestRate      Float?
+  interestRate      Float?   // % ao mês — NÃO é valor monetário, permanece Float
   createdAt         DateTime   @default(now())
 
   user              User       @relation(fields: [userId], references: [id])
   account           Account?   @relation(fields: [accountId], references: [id])
   subItems          DebtItem[]
+
+  @@index([userId]) // ver FIN-019
 }
 
 model DebtItem {
   id          String   @id @default(uuid())
   debtId      String
   name        String
-  amount      Float
+  amount      Int      // centavos — ver FIN-015
   date        String
 
   debt        Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)

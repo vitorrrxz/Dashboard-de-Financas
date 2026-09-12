@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
-  Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown,
+  Bell, Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
   LogOut
 } from 'lucide-react';
 import {
@@ -12,7 +12,10 @@ import { ImportModal } from './components/ImportModal';
 import { AccountsManager } from './components/AccountsManager';
 import { DebtManager } from './components/DebtManager';
 import { AuthForm } from './components/AuthForm';
-import type { Account, Debt, Transaction } from './types';
+import { PluggyConnectButton } from './components/PluggyConnectButton';
+import { isDebtOverdue, todayISO } from './utils/debts';
+import { toCents, toReais } from './utils/money';
+import type { Account, Debt, DebtCategory, Transaction, PaymentType } from './types';
 
 const CATEGORY_COLORS: Record<string, string> = {
   'Alimentação': '#f59e0b', 'Transporte': '#3b82f6', 'Lazer': '#a855f7',
@@ -26,9 +29,54 @@ function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 }
 
+/* --- Conversão centavos (API/banco) ↔ reais (UI) — ver FIN-015 em docs/BACKLOG_DETAIL.md ---
+ * A API troca valores monetários em centavos (inteiro). Todo o resto do app (formulários,
+ * cálculos de `stats`, exibição) continua trabalhando em reais — a conversão acontece só
+ * nesta borda, logo após receber dados da API e logo antes de enviar. */
+function accountFromApi(a: Account): Account {
+  return {
+    ...a,
+    balance: toReais(a.balance),
+    limit: a.limit != null ? toReais(a.limit) : a.limit,
+    pendingBill: a.pendingBill != null ? toReais(a.pendingBill) : a.pendingBill,
+  };
+}
+function accountToApi<T extends Partial<Account>>(a: T): T {
+  const out: T = { ...a };
+  if (out.balance != null) out.balance = toCents(out.balance);
+  if (out.limit != null) out.limit = toCents(out.limit);
+  if (out.pendingBill != null) out.pendingBill = toCents(out.pendingBill);
+  return out;
+}
+function txFromApi(t: Transaction): Transaction {
+  return { ...t, amount: toReais(t.amount) };
+}
+function txToApi<T extends Partial<Transaction>>(t: T): T {
+  const out: T = { ...t };
+  if (out.amount != null) out.amount = toCents(out.amount);
+  return out;
+}
+function debtFromApi(d: Debt): Debt {
+  return {
+    ...d,
+    totalAmount: toReais(d.totalAmount),
+    paidAmount: toReais(d.paidAmount),
+    monthlyPayment: toReais(d.monthlyPayment),
+    subItems: d.subItems?.map(si => ({ ...si, amount: toReais(si.amount) })),
+  };
+}
+function debtToApi<T extends Partial<Debt>>(d: T): T {
+  const out: T = { ...d };
+  if (out.totalAmount != null) out.totalAmount = toCents(out.totalAmount);
+  if (out.paidAmount != null) out.paidAmount = toCents(out.paidAmount);
+  if (out.monthlyPayment != null) out.monthlyPayment = toCents(out.monthlyPayment);
+  if (out.subItems != null) out.subItems = out.subItems.map(si => ({ ...si, amount: toCents(si.amount) }));
+  return out;
+}
+
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
-  const [user, setUser]   = useState<any>(null);
+  const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
   const [loading, setLoading] = useState(!!token);
 
   const [activeTab, setActiveTab]     = useState<Tab>('dashboard');
@@ -42,7 +90,7 @@ export default function App() {
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
 
-  const fetchAPI = async (endpoint: string, method = 'GET', body?: any) => {
+  const fetchAPI = async (endpoint: string, method = 'GET', body?: unknown) => {
     const res = await fetch(`http://localhost:3001${endpoint}`, {
       method,
       headers: {
@@ -58,6 +106,15 @@ export default function App() {
     return res.json();
   };
 
+  const handleLogout = () => {
+    setToken(null);
+    setUser(null);
+    setAccounts([]);
+    setTxs([]);
+    setDebts([]);
+    localStorage.removeItem('finflow_token');
+  };
+
   useEffect(() => {
     if (token) {
       setLoading(true);
@@ -68,9 +125,9 @@ export default function App() {
         fetchAPI('/api/debts')
       ]).then(([meData, accsData, txsData, debtsData]) => {
         setUser(meData.user);
-        setAccounts(accsData);
-        setTxs(txsData);
-        setDebts(debtsData);
+        setAccounts((accsData as Account[]).map(accountFromApi));
+        setTxs((txsData as Transaction[]).map(txFromApi));
+        setDebts((debtsData as Debt[]).map(debtFromApi));
       }).catch(err => {
         console.error('Sessão expirada ou erro:', err);
         handleLogout();
@@ -78,86 +135,133 @@ export default function App() {
         setLoading(false);
       });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const handleLogout = () => {
-    setToken(null);
-    setUser(null);
-    setAccounts([]);
-    setTxs([]);
-    setDebts([]);
-    localStorage.removeItem('finflow_token');
-  };
-
-  const handleLogin = (newToken: string, newUser: any) => {
+  const handleLogin = (newToken: string, newUser: { id: string; name: string; email: string }) => {
     localStorage.setItem('finflow_token', newToken);
     setToken(newToken);
     setUser(newUser);
   };
 
   /* --- API Mappers --- */
-  const handleImport = async (newTxs: Transaction[]) => {
+  const handleImport = async (newTxs: Transaction[], paymentType: PaymentType) => {
     try {
-      const res = await fetchAPI('/api/transactions', 'POST', { transactions: newTxs });
+      // Attach paymentType to all transactions (ainda em reais — parsers.ts trabalha em reais)
+      const txsWithType = newTxs.map(t => ({ ...t, paymentType }));
+      const res = await fetchAPI('/api/transactions', 'POST', { transactions: txsWithType.map(txToApi) });
       if (res.success) {
+        if (res.skipped > 0) {
+          alert(`${res.count} transação(ões) importada(s). ${res.skipped} ignorada(s) por já existir (duplicata).`);
+        }
         const txsData = await fetchAPI('/api/transactions');
-        setTxs(txsData);
+        setTxs((txsData as Transaction[]).map(txFromApi));
+
+        // Auto-create debt for credit or pix_installment payments
+        // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
+        // já existia (res.count === 0), reimportar o mesmo extrato não deve gerar dívida.
+        if ((paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0) {
+          // Usa apenas as transações que a API de fato aceitou (res.acceptedIndices,
+          // posições no array original) — não todas as `txsWithType`. Numa reimportação
+          // parcial (algumas linhas já existiam, outras são novas), incluir as duplicatas
+          // descartadas aqui somaria valores já contabilizados em uma dívida anterior,
+          // inflando `totalAmount` e duplicando `subItems`.
+          const acceptedIndices: number[] = res.acceptedIndices ?? [];
+          const acceptedTxs = txsWithType.filter((_, i) => acceptedIndices.includes(i));
+          const expenseTxs = acceptedTxs.filter(t => t.amount < 0);
+          if (expenseTxs.length > 0) {
+            const totalExpense = expenseTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
+            const now = new Date();
+            const monthName = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+            const label = paymentType === 'credit' ? 'Crédito' : 'PIX Parcelado';
+            const category: DebtCategory = paymentType === 'credit' ? 'Cartão de Crédito' : 'Pessoal';
+            // Due date: last day of current month
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            const nextDueDate = lastDay.toISOString().slice(0, 10);
+
+            // Build account hint from first tx
+            const accountId = txsWithType[0]?.accountId;
+            const accountName = accounts.find(a => a.id === accountId);
+            const debtName = accountName
+              ? `Fatura ${accountName.bank} – ${monthName}`
+              : `Fatura ${label} – ${monthName}`;
+
+            // Evita dívida duplicada: se já existe uma dívida com o mesmo nome/conta
+            // (ex.: reimportação parcial do mesmo extrato), não cria outra (ver FIN-004).
+            const alreadyExists = debts.some(d => d.name === debtName && (d.accountId || undefined) === accountId);
+            if (alreadyExists) {
+              alert(`Já existe uma dívida "${debtName}" para esta conta/mês. Nenhuma dívida nova foi criada — edite a existente se necessário.`);
+              return;
+            }
+
+            const newDebt = {
+              name: debtName,
+              description: `Criada automaticamente a partir de ${expenseTxs.length} transação(ões) importadas`,
+              category,
+              totalAmount: totalExpense,
+              paidAmount: 0,
+              monthlyPayment: totalExpense,
+              totalInstallments: 1,
+              paidInstallments: 0,
+              nextDueDate,
+              interestRate: 0,
+              accountId: accountId || undefined,
+              subItems: expenseTxs.map(t => ({
+                id: String(Math.random()),
+                name: t.name,
+                amount: Math.abs(t.amount),
+                date: t.date,
+              }))
+            };
+            const createdDebt = await fetchAPI('/api/debts', 'POST', debtToApi(newDebt));
+            setDebts(prev => [...prev, debtFromApi(createdDebt)]);
+          }
+        }
       }
-    } catch (e: any) { alert("Erro ao importar: " + e.message); }
+    } catch (e: unknown) { alert("Erro ao importar: " + (e instanceof Error ? e.message : String(e))); }
   };
 
-  const handlePluggySync = async (itemId: string) => {
-    try {
-      await fetchAPI(`/api/pluggy/sync?itemId=${itemId}`); // Backend auto-saves
-      // Re-fetch state
-      const [accsData, txsData] = await Promise.all([ fetchAPI('/api/accounts'), fetchAPI('/api/transactions') ]);
-      setAccounts(accsData);
-      setTxs(txsData);
-      return true;
-    } catch (e: any) {
-      console.error(e);
-      alert('Erro ao sincronizar dados do Pluggy: ' + e.message);
-      return false;
-    }
-  };
+
 
   // CRUD ACCOUNTS
   const addAccount = async (acc: Omit<Account, 'id' | 'createdAt'>) => {
     try {
-      const newAcc = await fetchAPI('/api/accounts', 'POST', acc);
-      setAccounts(prev => [...prev, newAcc]);
-    } catch (e: any) { alert(e.message); throw e; }
+      const newAcc = await fetchAPI('/api/accounts', 'POST', accountToApi(acc));
+      setAccounts(prev => [...prev, accountFromApi(newAcc)]);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const updateAccount = async (id: string, acc: Omit<Account, 'id' | 'createdAt'>) => {
     try {
-      await fetchAPI(`/api/accounts/${id}`, 'PUT', acc);
+      await fetchAPI(`/api/accounts/${id}`, 'PUT', accountToApi(acc));
       setAccounts(prev => prev.map(a => a.id === id ? { ...a, ...acc } : a));
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const deleteAccount = async (id: string) => {
     try {
       await fetchAPI(`/api/accounts/${id}`, 'DELETE');
       setAccounts(prev => prev.filter(a => a.id !== id));
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
   // CRUD DEBTS
   const addDebt = async (debt: Omit<Debt, 'id' | 'createdAt'>) => {
     try {
-      const newDebt = await fetchAPI('/api/debts', 'POST', debt);
-      setDebts(prev => [...prev, newDebt]);
-    } catch (e: any) { alert(e.message); throw e; }
-  };
-  const updateDebt = async (id: string, debt: Omit<Debt, 'id' | 'createdAt'>) => {
-    // For simplicity, debts only need local mutate if we aren't supporting full update yet,
-    // wait, DebtManager deletes and adds if we don't have put. Let's provide an empty update function 
-    // or just implement delete and insert instead inside DebtManager.
+      const newDebt = await fetchAPI('/api/debts', 'POST', debtToApi(debt));
+      setDebts(prev => [...prev, debtFromApi(newDebt)]);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
   const deleteDebt = async (id: string) => {
     try {
       await fetchAPI(`/api/debts/${id}`, 'DELETE');
       setDebts(prev => prev.filter(d => d.id !== id));
-    } catch (e: any) { alert(e.message); throw e; }
+    } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
+  };
+
+  const updateDebt = async (id: string, debtData: Partial<Debt>) => {
+    try {
+      const updated = await fetchAPI(`/api/debts/${id}`, 'PUT', debtToApi(debtData));
+      setDebts(prev => prev.map(d => d.id === id ? debtFromApi(updated) : d));
+    } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
   };
 
 
@@ -199,22 +303,25 @@ export default function App() {
       .sort(([, a], [, b]) => b - a).slice(0, 6)
       .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayISO();
     const mPrefix = today.slice(0, 7);
     const monthExpense = activeTxs.filter(t => t.amount < 0 && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
 
-    const realBalance = activeAccs.filter(a => a.type !== 'credit').reduce((s, a) => s + a.balance, 0);
+    // "Saldo Real" reflete apenas dinheiro líquido disponível (corrente/poupança/dinheiro).
+    // Investimentos são somados separadamente — misturá-los ao saldo líquido pode enganar
+    // o usuário sobre quanto ele realmente tem disponível para gastar (ver FIN-018).
+    const realBalance = activeAccs.filter(a => a.type !== 'credit' && a.type !== 'investment').reduce((s, a) => s + a.balance, 0);
+    const investmentBalance = activeAccs.filter(a => a.type === 'investment').reduce((s, a) => s + a.balance, 0);
     const pendingBills = activeAccs.filter(a => a.type === 'credit').reduce((s, a) => s + (a.pendingBill ?? 0), 0);
     const totalActiveDebts = activeDebts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
-    
-    const overdueDebts = activeDebts.filter(d => d.nextDueDate < today && d.paidInstallments < d.totalInstallments);
+
+    const overdueDebts = activeDebts.filter(isDebtOverdue);
 
     const dailyMap: Record<string, number> = {};
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const startStr = thirtyDaysAgo.toISOString().substring(0, 10);
     
-    let runningBalance = realBalance; // Approximation
     activeTxs.filter(t => t.date >= startStr).forEach(t => {
        dailyMap[t.date] = (dailyMap[t.date] ?? 0) + t.amount;
     });
@@ -222,9 +329,9 @@ export default function App() {
        return { name: k.substring(5).replace('-','/'), balance: v };
     });
 
-    return { 
-      income, expense, importedBalance, balanceByMonth, dailyEvolution, 
-      expenseByCategory, monthExpense, realBalance, pendingBills, activeDebts: totalActiveDebts, overdueDebts,
+    return {
+      income, expense, importedBalance, balanceByMonth, dailyEvolution,
+      expenseByCategory, monthExpense, realBalance, investmentBalance, pendingBills, activeDebts: totalActiveDebts, overdueDebts,
       filteredTxsCount: activeTxs.length
     };
   }, [transactions, accounts, debts, dashboardAccountId]);
@@ -294,12 +401,25 @@ export default function App() {
           <button onClick={() => setActiveTab('accounts')}
             className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all shadow-lg"
             style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.25)' }}>
-            <Wallet size={15}/> Conectar Banco
+            <Wallet size={15}/> Gerenciar Contas
           </button>
           <button onClick={() => setShowImport(true)}
             className="w-full py-3 rounded-xl border border-white/10 text-xs font-medium text-textMuted hover:text-white flex items-center justify-center gap-2 transition-all hover:bg-white/5">
             <Upload size={14}/> Importação Manual
           </button>
+          {token && (
+            <PluggyConnectButton
+              token={token}
+              onSyncComplete={async () => {
+                const [accsData, txsData] = await Promise.all([
+                  fetchAPI('/api/accounts'),
+                  fetchAPI('/api/transactions'),
+                ]);
+                setAccounts((accsData as Account[]).map(accountFromApi));
+                setTxs((txsData as Transaction[]).map(txFromApi));
+              }}
+            />
+          )}
           {transactions.length > 0 && (
             <button onClick={async () => {
                 if (confirm('Remover todas as transações?')) {
@@ -366,9 +486,16 @@ export default function App() {
               )}
 
               {/* Summary Cards Row 1 — Real Accounts */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
+              {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem
+                  contas de investimento, mostramos o total delas separadamente ao lado. */}
+              <div className={`grid grid-cols-1 md:grid-cols-3 ${accounts.some(a => a.type === 'investment') ? 'lg:grid-cols-4' : ''} gap-5 mb-5`}>
                 <SummaryCard title="Saldo Real (Contas)" amount={fmt(stats.realBalance)} isPositive={stats.realBalance >= 0}
                   icon={<Wallet size={22} style={{ color:'var(--color-primary)' }}/>} badge="Saldo atual" />
+                {accounts.some(a => a.type === 'investment') && (
+                  <SummaryCard title="Investimentos" amount={fmt(stats.investmentBalance)} isPositive={stats.investmentBalance >= 0}
+                    icon={<TrendingUp size={22} className="text-teal-400"/>}
+                    badge={`${accounts.filter(a=>a.type==='investment').length} conta(s)`} />
+                )}
                 <SummaryCard title="Fatura Pendente" amount={fmt(stats.pendingBills)} isPositive={false}
                   icon={<CreditCard size={22} className="text-pink-400"/>} badge={`${accounts.filter(a=>a.type==='credit').length} cartão(ões)`} />
                 <SummaryCard title="Dívidas Ativas" amount={fmt(stats.activeDebts)} isPositive={false}
@@ -396,18 +523,18 @@ export default function App() {
                   </div>
                   <h2 className="text-2xl font-bold text-white mb-3">Bem-vindo ao FinFlow!</h2>
                   <p className="text-textMuted max-w-md mb-8">
-                    Seu painel financeiro agora tem <strong className="text-white">Open Finance</strong>! 
-                    Conecte sua conta bancária na aba <strong>Contas</strong> para que suas faturas e transações sejam importadas e agrupadas automaticamente.
+                    Seu painel financeiro pessoal! 
+                    Adicione suas contas na aba <strong>Contas</strong> e importe seus extratos bancários (CSV/OFX) para acompanhar suas finanças.
                   </p>
                   <div className="flex gap-3">
                     <button onClick={() => setActiveTab('accounts')}
                       className="px-6 py-3 rounded-xl text-white font-semibold text-sm shadow-md"
                       style={{ background:'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow:'0 4px 24px rgba(99,102,241,0.35)' }}>
-                      <span className="flex items-center gap-2"><Wallet size={16}/> Sincronizar Banco Clicando Aqui</span>
+                      <span className="flex items-center gap-2"><Wallet size={16}/> Adicionar Conta</span>
                     </button>
                     <button onClick={() => setShowImport(true)}
                       className="px-6 py-3 rounded-xl text-textMuted text-sm font-medium border border-white/10 hover:bg-white/5 hover:text-white transition-colors">
-                      <span className="flex items-center gap-2"><Upload size={16}/> Antigo Extrato Manual</span>
+                      <span className="flex items-center gap-2"><Upload size={16}/> Importar Extrato</span>
                     </button>
                   </div>
                 </div>
@@ -454,7 +581,7 @@ export default function App() {
                           <YAxis stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
                           <RechartsTooltip 
                             contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
-                            formatter={(v: any) => [fmt(v), chartPeriod === '30d' ? 'Evolução' : 'Saldo']} 
+                            formatter={(v: number) => [fmt(v), chartPeriod === '30d' ? 'Evolução' : 'Saldo']} 
                             labelStyle={{ color:'#9ca3af' }}
                           />
                           <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2.5} fill="url(#cg)" animationDuration={1000}/>
@@ -474,7 +601,7 @@ export default function App() {
                             <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} stroke="#6b7280" tick={{ fontSize:11 }} width={80}/>
                             <RechartsTooltip cursor={{ fill:'rgba(255,255,255,0.03)' }}
                               contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
-                              formatter={(v: any) => [fmt(v),'Gasto']}/>
+                              formatter={(v: number) => [fmt(v),'Gasto']}/>
                             <Bar dataKey="amount" radius={[0,4,4,0]} barSize={14}>
                               {stats.expenseByCategory.map(e => (
                                 <Cell key={e.name} fill={CATEGORY_COLORS[e.name] || '#6366f1'}/>
@@ -546,7 +673,6 @@ export default function App() {
                 onAdd={addAccount}
                 onUpdate={updateAccount}
                 onDelete={deleteAccount}
-                onPluggySync={handlePluggySync} 
               />
             </>
           )}
@@ -561,6 +687,7 @@ export default function App() {
               <DebtManager 
                 debts={debts} 
                 onAdd={addDebt}
+                onUpdate={updateDebt}
                 onDelete={deleteDebt}
                 accounts={accounts} 
               />
@@ -569,14 +696,14 @@ export default function App() {
         </div>
       </main>
 
-      {showImport && <ImportModal accounts={accounts} onClose={() => setShowImport(false)} onImport={handleImport} />}
+      {showImport && <ImportModal accounts={accounts} onClose={() => setShowImport(false)} onImport={(txs, pt) => handleImport(txs, pt)} />}
     </div>
   );
 }
 
 /* --- UI Helpers --- */
 
-function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: any) {
+function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { title: string; amount: string; icon: React.ReactNode; badge?: string; isPositive: boolean; onClick?: () => void }) {
   return (
     <div onClick={onClick} className={`glass-card rounded-2xl p-6 transition-all ${onClick ? 'cursor-pointer hover:bg-white/5 hover:-translate-y-1' : ''}`}>
       <div className="flex justify-between items-start mb-4">
@@ -593,6 +720,13 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: any) {
   );
 }
 
+const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
+  debit:           { label: 'Débito',       color: '#3b82f6' },
+  credit:          { label: 'Crédito',      color: '#ec4899' },
+  pix:             { label: 'PIX',          color: '#10b981' },
+  pix_installment: { label: 'PIX Parc.',    color: '#f59e0b' },
+};
+
 function TxTable({ rows }: { rows: Transaction[] }) {
   return (
     <div className="overflow-x-auto min-h-[400px]">
@@ -602,36 +736,52 @@ function TxTable({ rows }: { rows: Transaction[] }) {
             <th className="pb-3 font-semibold w-24">Data</th>
             <th className="pb-3 font-semibold">Descrição</th>
             <th className="pb-3 font-semibold">Categoria</th>
+            <th className="pb-3 font-semibold">Tipo</th>
             <th className="pb-3 font-semibold text-right">Valor</th>
           </tr>
         </thead>
         <tbody className="text-sm divide-y divide-white/5">
-          {rows.map(t => (
-            <tr key={t.id} className="group hover:bg-white/[0.02] transition-colors">
-              <td className="py-4 text-textMuted">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
-              <td className="py-4 font-medium text-white">{t.name}</td>
-              <td className="py-4">
-                <span className="px-2.5 py-1 rounded-full text-xs border"
-                  style={{
-                    backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'rgba(255,255,255,0.05)',
-                    borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'rgba(255,255,255,0.1)',
-                    color: CATEGORY_COLORS[t.category] || '#9ca3af'
-                  }}>
-                  {t.category}
-                </span>
-              </td>
-              <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
-                {t.amount >= 0 ? '+' : ''}{t.amount.toLocaleString('pt-BR', { minimumFractionDigits:2 })}
-              </td>
-            </tr>
-          ))}
+          {rows.map(t => {
+            const pt = PAYMENT_TYPE_META[t.paymentType ?? 'debit'] ?? PAYMENT_TYPE_META['debit'];
+            return (
+              <tr key={t.id} className="group hover:bg-white/[0.02] transition-colors">
+                <td className="py-4 text-textMuted">{new Date(t.date + 'T12:00:00').toLocaleDateString('pt-BR')}</td>
+                <td className="py-4 font-medium text-white">{t.name}</td>
+                <td className="py-4">
+                  <span className="px-2.5 py-1 rounded-full text-xs border"
+                    style={{
+                      backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'rgba(255,255,255,0.05)',
+                      borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'rgba(255,255,255,0.1)',
+                      color: CATEGORY_COLORS[t.category] || '#9ca3af'
+                    }}>
+                    {t.category}
+                  </span>
+                </td>
+                <td className="py-4">
+                  <span
+                    className="px-2.5 py-1 rounded-full text-xs font-semibold border"
+                    style={{
+                      backgroundColor: `${pt.color}15`,
+                      borderColor: `${pt.color}35`,
+                      color: pt.color,
+                    }}
+                  >
+                    {pt.label}
+                  </span>
+                </td>
+                <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
+                  {t.amount >= 0 ? '+' : ''}{t.amount.toLocaleString('pt-BR', { minimumFractionDigits:2 })}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-function NavItem({ icon, label, active, badge, badgeColor, onClick, isSubItem }: any) {
+function NavItem({ icon, label, active, badge, badgeColor, onClick, isSubItem }: { icon: React.ReactNode; label: string; active: boolean; badge?: number; badgeColor?: string; onClick: () => void; isSubItem?: boolean }) {
   return (
     <button onClick={onClick}
       className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${

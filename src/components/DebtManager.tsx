@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
-import type { Debt, DebtCategory } from '../types';
+import type { Debt, DebtCategory, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
+import { isDebtOverdue, isDebtPaid } from '../utils/debts';
 
 const CATEGORY_COLORS: Record<DebtCategory, string> = {
   'Empréstimo':        '#f59e0b',
@@ -22,20 +23,41 @@ const EMPTY_DEBT: Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallmen
   totalInstallments: 1,
   nextDueDate: new Date().toISOString().slice(0, 10),
   interestRate: 0,
+  accountId: '',
 };
 
 interface DebtManagerProps {
   debts: Debt[];
   onAdd: (debt: Omit<Debt, 'id' | 'createdAt'>) => Promise<void>;
+  onUpdate: (id: string, debtData: Partial<Debt>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  accounts: any[];
+  accounts: Account[];
 }
 
-export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerProps) {
+function advanceMonth(dateString: string): string {
+  const parts = dateString.split('-');
+  if (parts.length !== 3) return dateString;
+  let year = parseInt(parts[0]);
+  let month = parseInt(parts[1]);
+  const day = parseInt(parts[2]);
+
+  month += 1;
+  if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+
+  const yearStr = String(year);
+  const monthStr = String(month).padStart(2, '0');
+  const dayStr = String(day).padStart(2, '0');
+  return `${yearStr}-${monthStr}-${dayStr}`;
+}
+
+export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: DebtManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Debt | null>(null);
   const [form, setForm] = useState<Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallments'>>(EMPTY_DEBT);
-  const [pendingGroup, setPendingGroup] = useState<{ items: any[], total: number } | null>(null);
+  const [pendingGroup, setPendingGroup] = useState<{ items: Debt[], total: number } | null>(null);
   const [groupName, setGroupName] = useState('');
   const [groupCategory, setGroupCategory] = useState<DebtCategory>('Cartão de Crédito');
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
@@ -70,21 +92,53 @@ export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerPro
     if (!form.name.trim() || form.totalAmount <= 0) return;
     try {
       if (editing) {
-        // Ignorado no escopo atual. Deleta e adiciona se necessário ou use onUpdate
+        await onUpdate(editing.id, {
+          name: form.name,
+          description: form.description,
+          category: form.category,
+          totalAmount: form.totalAmount,
+          monthlyPayment: form.monthlyPayment,
+          totalInstallments: form.totalInstallments,
+          nextDueDate: form.nextDueDate,
+          interestRate: form.interestRate,
+          accountId: form.accountId || undefined,
+        });
       } else {
         await onAdd({
           ...form,
+          accountId: form.accountId || undefined,
           paidAmount: 0,
           paidInstallments: 0,
         });
       }
       setShowForm(false);
-    } catch { }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const handlePayInstallment = (debt: Debt) => {
-    // Para simplificar, sem onUpdate por agora.
-    alert("Função de pagar parcela via API não implementada nesta versão!");
+  const handlePayInstallment = async (debt: Debt) => {
+    if (isPaid(debt)) return;
+
+    const nextPaidInstallments = debt.paidInstallments + 1;
+    let nextPaidAmount = debt.paidAmount + debt.monthlyPayment;
+    if (nextPaidInstallments >= debt.totalInstallments) {
+      nextPaidAmount = debt.totalAmount;
+    } else {
+      nextPaidAmount = Math.min(nextPaidAmount, debt.totalAmount);
+    }
+
+    const nextDueDate = advanceMonth(debt.nextDueDate);
+
+    try {
+      await onUpdate(debt.id, {
+        paidInstallments: nextPaidInstallments,
+        paidAmount: nextPaidAmount,
+        nextDueDate,
+      });
+    } catch (err) {
+      alert("Erro ao pagar parcela: " + (err instanceof Error ? err.message : String(err)));
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -96,8 +150,8 @@ export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerPro
 
   const remaining = (d: Debt) => Math.max(0, d.totalAmount - d.paidAmount);
   const progress = (d: Debt) => d.totalInstallments > 0 ? (d.paidInstallments / d.totalInstallments) * 100 : 0;
-  const isPaid = (d: Debt) => d.paidInstallments >= d.totalInstallments;
-  const isOverdue = (d: Debt) => !isPaid(d) && new Date(d.nextDueDate) < new Date();
+  const isPaid = isDebtPaid;
+  const isOverdue = isDebtOverdue;
 
   const exportCSV = () => {
     if (debts.length === 0) return;
@@ -157,50 +211,83 @@ export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerPro
     e.target.value = '';
   };
 
-  const finalizeGroupImport = () => {
+  const finalizeGroupImport = async () => {
     if (!pendingGroup || !groupName.trim()) return;
 
-    const newDebt: Debt = {
-      id: `debt-group-${Date.now()}`,
+    const newDebtData: Omit<Debt, 'id' | 'createdAt'> = {
       name: groupName,
       category: groupCategory,
-      accountId: selectedAccountId,
+      accountId: selectedAccountId || undefined,
       totalAmount: pendingGroup.total,
       paidAmount: 0,
       monthlyPayment: pendingGroup.total,
       totalInstallments: 1,
       paidInstallments: 0,
       nextDueDate: new Date().toISOString().slice(0, 10),
-      createdAt: new Date().toISOString(),
       subItems: pendingGroup.items.map(it => ({
-        id: it.id,
+        id: String(Math.random()),
         name: it.name,
         amount: it.totalAmount,
         date: it.nextDueDate
       }))
     };
 
-    onChange([...debts, newDebt]);
-    setPendingGroup(null);
-    setGroupName('');
-  };
-
-  const handlePayAll = () => {
-    const active = debts.filter(d => d.paidInstallments < d.totalInstallments);
-    if (active.length === 0) return;
-    if (confirm(`Pagar uma parcela de todas as ${active.length} dívidas ativas?`)) {
-      onChange(debts.map(d => (d.paidInstallments < d.totalInstallments) ? {
-        ...d,
-        paidInstallments: d.paidInstallments + 1,
-        paidAmount: d.paidAmount + d.monthlyPayment,
-      } : d));
+    try {
+      await onAdd(newDebtData);
+      setPendingGroup(null);
+      setGroupName('');
+    } catch (err) {
+      alert("Erro ao salvar fatura consolidada: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
-  const handleDeleteAll = () => {
+  // Processa cada dívida independentemente via Promise.allSettled — se uma falhar (ex.
+  // rede caiu no meio), as demais não ficam bloqueadas, e o usuário sabe exatamente quais
+  // itens precisam ser tentados de novo (ver FIN-017 em docs/BACKLOG_DETAIL.md).
+  const handlePayAll = async () => {
+    const unpaidDebts = debts.filter(d => !isPaid(d));
+    if (unpaidDebts.length === 0) {
+      alert("Nenhuma parcela pendente de pagamento.");
+      return;
+    }
+
+    if (!confirm(`Deseja pagar uma parcela de todas as ${unpaidDebts.length} dívidas pendentes?`)) return;
+
+    const results = await Promise.allSettled(unpaidDebts.map(debt => {
+      const nextPaidInstallments = debt.paidInstallments + 1;
+      let nextPaidAmount = debt.paidAmount + debt.monthlyPayment;
+      if (nextPaidInstallments >= debt.totalInstallments) {
+        nextPaidAmount = debt.totalAmount;
+      } else {
+        nextPaidAmount = Math.min(nextPaidAmount, debt.totalAmount);
+      }
+      const nextDueDate = advanceMonth(debt.nextDueDate);
+      return onUpdate(debt.id, { paidInstallments: nextPaidInstallments, paidAmount: nextPaidAmount, nextDueDate });
+    }));
+
+    const failedNames = results
+      .map((r, i) => ({ r, debt: unpaidDebts[i] }))
+      .filter(({ r }) => r.status === 'rejected')
+      .map(({ debt }) => debt.name);
+
+    if (failedNames.length > 0) {
+      alert(`${results.length - failedNames.length} de ${results.length} parcela(s) paga(s) com sucesso.\nFalha em: ${failedNames.join(', ')}. Tente novamente para essas.`);
+    }
+  };
+
+  const handleDeleteAll = async () => {
     if (debts.length === 0) return;
-    if (confirm('TEM CERTEZA? Isso excluirá todas as dívidas permanentemente.')) {
-      onChange([]);
+    if (!confirm('TEM CERTEZA? Isso excluirá todas as dívidas permanentemente.')) return;
+
+    const results = await Promise.allSettled(debts.map(d => onDelete(d.id)));
+
+    const failedNames = results
+      .map((r, i) => ({ r, debt: debts[i] }))
+      .filter(({ r }) => r.status === 'rejected')
+      .map(({ debt }) => debt.name);
+
+    if (failedNames.length > 0) {
+      alert(`${results.length - failedNames.length} de ${results.length} dívida(s) excluída(s) com sucesso.\nFalha em: ${failedNames.join(', ')}. Tente novamente para essas.`);
     }
   };
 
@@ -452,7 +539,7 @@ export function DebtManager({ debts, onAdd, onDelete, accounts }: DebtManagerPro
               </FormField>
 
               <FormField label="Vincular à Conta">
-                <select value={(form as any).accountId || ''} onChange={e => set('accountId' as any, e.target.value)} className="input-field">
+                <select value={form.accountId || ''} onChange={e => set('accountId', e.target.value)} className="input-field">
                   <option value="">Sem conta específica</option>
                   {accounts.map(acc => (
                     <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
