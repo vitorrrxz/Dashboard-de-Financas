@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { registerServiceWorker } from './pwa'
 
 // Clear potentially corrupted localStorage data from old sessions
 try {
@@ -19,3 +20,5 @@ createRoot(root).render(
     <App />
   </StrictMode>,
 )
+
+registerServiceWorker() // FIN-082 — só no build de produção

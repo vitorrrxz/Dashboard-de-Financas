@@ -9,6 +9,7 @@ import {
   type DueItem, type InstallmentPurchase,
 } from '../utils/installments';
 import { MonthNavigator, MonthTotal } from './MonthNavigator';
+import { readableColor } from '../utils/theme';
 
 interface InstallmentsPanelProps {
   transactions: Transaction[];
@@ -48,9 +49,9 @@ export function InstallmentsPanel({ transactions, debts, accounts }: Installment
       <div className="glass-card rounded-2xl p-4 flex flex-wrap items-end justify-between gap-4">
         <MonthNavigator id="debt-month" value={month} months={months} onChange={setMonth}/>
         <div className="flex flex-wrap items-end gap-6">
-          <MonthTotal label="Parcelas do cartão" value={totals.card} color={CARD_COLOR}/>
-          <MonthTotal label="Dívidas" value={totals.debt} color={DEBT_COLOR}/>
-          <MonthTotal label="Valor total" value={totals.total} color="#ffffff"/>
+          <MonthTotal label="Parcelas do cartão" value={totals.card} color={readableColor(CARD_COLOR)}/>
+          <MonthTotal label="Dívidas" value={totals.debt} color={readableColor(DEBT_COLOR)}/>
+          <MonthTotal label="Valor total" value={totals.total} color="var(--color-textMain)"/>
         </div>
       </div>
 
@@ -148,9 +149,9 @@ function DueRow({ item, today }: { item: DueItem; today: string }) {
 /** Célula de valor do card de compra parcelada. */
 function InfoCell({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="rounded-lg p-2.5" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+    <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
       <p className="text-xs text-textMuted mb-0.5">{label}</p>
-      <p className="text-sm font-bold" style={{ color: color ?? '#ffffff' }}>{value}</p>
+      <p className="text-sm font-bold" style={{ color: color ? readableColor(color) : 'var(--color-textMain)' }}>{value}</p>
     </div>
   );
 }
@@ -178,7 +179,7 @@ function PurchaseCard({ purchase: p, accountName }: { purchase: InstallmentPurch
           <span>{p.chargedInstallments}/{p.totalInstallments} parcelas lançadas</span>
           <span>{pct.toFixed(0)}%</span>
         </div>
-        <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.07)' }}
+        <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-7)' }}
           role="progressbar" aria-valuemin={0} aria-valuemax={p.totalInstallments} aria-valuenow={p.chargedInstallments}
           aria-label={`${p.chargedInstallments} de ${p.totalInstallments} parcelas lançadas`}>
           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: barColor }}/>

@@ -172,7 +172,7 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
           <button
             onClick={handleConnect}
             disabled={status === 'loading'}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all disabled:opacity-60"
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-on-accent flex items-center justify-center gap-2 transition-all disabled:opacity-60"
             style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}
           >
             {status === 'loading'
@@ -186,7 +186,7 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
           <button
             onClick={handleSync}
             disabled={status === 'syncing'}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all disabled:opacity-60"
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-on-accent flex items-center justify-center gap-2 transition-all disabled:opacity-60"
             style={{ background: 'linear-gradient(135deg,#10b981,#059669)' }}
           >
             {status === 'syncing'
@@ -199,7 +199,7 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
         {needsReauth && (status === 'connected' || status === 'done') && (
           <button
             onClick={handleConnect}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all"
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-on-accent flex items-center justify-center gap-2 transition-all"
             style={{ background: 'linear-gradient(135deg,#f59e0b,#d97706)' }}
           >
             <Link2 size={14} /> Reconectar Banco

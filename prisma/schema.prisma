@@ -21,6 +21,27 @@ model User {
   recurring    RecurringTransaction[]
   notifications Notification[]
   investments  Investment[]
+  twoFactor    UserTwoFactor?
+}
+
+// FIN-078 — verificação em duas etapas (TOTP). Tabela própria, 1:1 com User, em vez de colunas
+// novas em User: o login continua lendo a mesma linha de antes, e o segredo fica fora dela.
+// O registro nasce na configuração (`enabledAt` nulo) e só vale no login depois de confirmado
+// com um código do aplicativo. Desativar apaga o registro.
+model UserTwoFactor {
+  userId        String    @id
+  // Segredo TOTP cifrado com AES-256-GCM (chave de TWO_FACTOR_ENCRYPTION_KEY — ver server.js).
+  // Nunca em texto puro: quem copiasse o banco poderia gerar os códigos.
+  secret        String
+  enabledAt     DateTime? // null = configuração iniciada e ainda não confirmada
+  // Último intervalo de 30 s aceito. Um código só vale uma vez: sem isto, quem visse um código
+  // poderia reusá-lo enquanto ele ainda está na janela de validade.
+  lastUsedStep  Int?
+  // JSON com os hashes bcrypt dos códigos de recuperação ainda não usados.
+  recoveryCodes String    @default("[]")
+  createdAt     DateTime  @default(now())
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Account {

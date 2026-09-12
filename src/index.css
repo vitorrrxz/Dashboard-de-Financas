@@ -14,6 +14,98 @@
   --font-family-sans: 'Inter', sans-serif;
 }
 
+/*
+ * FIN-083 — temas. O escuro é o padrão: os tokens do @theme acima e os valores deste :root. O
+ * claro redefine os mesmos tokens em [data-theme="light"], que src/utils/theme.ts aplica ao <html>
+ * (e o script inline do index.html, antes da primeira pintura).
+ *
+ * Neste código, `white` quer dizer "cor de contraste com o fundo": `text-white` é o texto
+ * principal, e `bg-white/5`, `border-white/10` são véus e bordas sutis sobre o fundo. Por isso o
+ * tema claro redefine --color-white como um azul-marinho quase preto — e essas classes (algumas
+ * centenas) passam a funcionar sobre fundo claro sem mudar os componentes. Texto que deve continuar
+ * branco nos dois temas, sobre botão ou selo colorido, usa `text-on-accent`.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Véus da cor de contraste para estilos inline — no escuro, iguais a rgba(255,255,255,X). */
+  --fg-3: color-mix(in srgb, var(--color-white) 3%, transparent);
+  --fg-4: color-mix(in srgb, var(--color-white) 4%, transparent);
+  --fg-5: color-mix(in srgb, var(--color-white) 5%, transparent);
+  --fg-6: color-mix(in srgb, var(--color-white) 6%, transparent);
+  --fg-7: color-mix(in srgb, var(--color-white) 7%, transparent);
+  --fg-8: color-mix(in srgb, var(--color-white) 8%, transparent);
+  --fg-10: color-mix(in srgb, var(--color-white) 10%, transparent);
+
+  /* Cores de texto com sentido (positivo, negativo, alerta…) para estilos inline. */
+  --text-positive: #2dd4bf;
+  --text-negative: #f87171;
+  --text-warning: #fbbf24;
+  --text-pink: #f472b6;
+  --text-indigo: #a5b4fc;
+  /* Quanto da cor de um dado (categoria, tipo de pagamento) entra no texto — ver readableColor(). */
+  --tint-strength: 100%;
+
+  --glass-panel-bg: rgba(28, 28, 36, 0.4);
+  --glass-panel-border: rgba(255, 255, 255, 0.05);
+  --glass-card-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
+  --glass-card-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+
+  --chart-grid: #1e1e2e;
+  --chart-axis: #6b7280;
+  --tooltip-bg: #1c1c24;
+  --tooltip-border: rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-background: #f3f4f9;
+  --color-dashboard: #ffffff;
+  --color-card: #ffffff;
+  /* Primária e secundária um tom abaixo: texto e botões com contraste AA sobre o fundo claro. */
+  --color-primary: #4f46e5;
+  --color-secondary: #9333ea;
+  --color-accent: #0f766e;
+  --color-textMain: #0f172a;
+  --color-textMuted: #475569;
+  /* A cor de contraste — ver a explicação no início deste arquivo. */
+  --color-white: #0f172a;
+
+  /* Tons claros da paleta usados como texto (feitos para fundo escuro) viram tons escuros. */
+  --color-red-300: #b91c1c;
+  --color-red-400: #b91c1c;
+  --color-teal-300: #0f766e;
+  --color-teal-400: #0f766e;
+  --color-amber-200: #92400e;
+  --color-amber-300: #92400e;
+  --color-amber-400: #b45309;
+  --color-pink-300: #be185d;
+  --color-pink-400: #be185d;
+  --color-orange-400: #c2410c;
+  --color-blue-400: #1d4ed8;
+  --color-indigo-300: #4338ca;
+
+  --text-positive: #0f766e;
+  --text-negative: #b91c1c;
+  --text-warning: #92400e;
+  --text-pink: #be185d;
+  --text-indigo: #4338ca;
+  --tint-strength: 55%;
+
+  --glass-panel-bg: rgba(255, 255, 255, 0.78);
+  --glass-panel-border: rgba(15, 23, 42, 0.08);
+  --glass-card-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.97) 0%, rgba(255, 255, 255, 0.88) 100%);
+  --glass-card-border: rgba(15, 23, 42, 0.08);
+  --glass-shadow: 0 8px 24px 0 rgba(15, 23, 42, 0.06);
+
+  --chart-grid: #e2e8f0;
+  --chart-axis: #475569;
+  --tooltip-bg: #ffffff;
+  --tooltip-border: rgba(15, 23, 42, 0.12);
+}
+
 @layer base {
   body {
     background-color: var(--color-background);
@@ -24,39 +116,60 @@
   }
 }
 
+/* Branco sobre fundo colorido (botões com gradiente, selos sólidos) — branco nos dois temas. */
+@utility text-on-accent {
+  color: #ffffff;
+}
+
 .glass-panel {
-  background: rgba(28, 28, 36, 0.4);
+  background: var(--glass-panel-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-panel-border);
 }
 
 .glass-card {
-  background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.01) 100%);
+  background: var(--glass-card-bg);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-card-border);
+  box-shadow: var(--glass-shadow);
 }
 
 .input-field {
   width: 100%;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--fg-5);
+  border: 1px solid var(--fg-8);
   border-radius: 0.625rem;
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
-  color: #ffffff;
+  color: var(--color-textMain);
   outline: none;
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
 
 .input-field:focus {
-  border-color: rgba(99, 102, 241, 0.5);
+  border-color: color-mix(in srgb, var(--color-primary) 50%, transparent);
 }
 
 .input-field option {
-  background-color: #1c1c24;
-  color: #ffffff;
+  background-color: var(--color-card);
+  color: var(--color-textMain);
+}
+
+/*
+ * FIN-083 — gráficos do Recharts: grade, textos dos eixos e cursor do tooltip seguem o tema. Regra
+ * CSS vence atributo de apresentação do SVG, então as cores não precisam ir como props.
+ */
+.recharts-cartesian-grid line {
+  stroke: var(--chart-grid);
+}
+
+.recharts-cartesian-axis-tick-value {
+  fill: var(--chart-axis);
+}
+
+.recharts-tooltip-cursor {
+  fill: var(--fg-3);
 }

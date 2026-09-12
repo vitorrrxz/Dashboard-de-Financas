@@ -48,7 +48,7 @@ export function NotificationBell({ notifications, unreadCount, onSelect, onMarkA
         <Bell size={20} className="text-textMuted" aria-hidden="true"/>
         {unreadCount > 0 && (
           <span aria-hidden="true"
-            className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center border-2 border-[#0a0a0f]">
+            className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-on-accent text-[10px] font-bold flex items-center justify-center border-2 border-background">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}

@@ -55,6 +55,12 @@ export function downloadCSV(filename: string, headers: string[], rows: CSVCell[]
   downloadBlob(blob, filename);
 }
 
+/** FIN-079: baixa um JSON formatado (legível num editor de texto) — o arquivo de backup. */
+export function downloadJSON(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  downloadBlob(blob, filename);
+}
+
 /** Sufixo de data (YYYY-MM-DD) usado nos nomes de arquivo exportados. */
 export function exportDateSuffix(): string {
   const d = new Date();

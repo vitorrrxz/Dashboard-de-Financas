@@ -683,6 +683,31 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
+- [ ] **P1 — HIGH — FIN-097 — Banco real (`dev.db`) e cópias de backup versionados no git** (achado ao iniciar a Fase 8, 11/09/2026)
+
+  **Objetivo**
+  Tirar do repositório o banco de dados real e as cópias dele.
+
+  **Problema**
+  O `dev.db` — com os dados financeiros reais e os hashes bcrypt das senhas — está versionado, apesar de `dev.db` e `*.db` estarem no `.gitignore`: o arquivo entrou no git antes da regra, e o `.gitignore` não vale para arquivo já rastreado. As cópias feitas antes das migrações também entraram nos commits — `dev.db.backup-20260905-181115`, `dev.db.bak-2026-09-10T19-52-49-700Z`, `dev.db.bak-2026-09-11T00-23-33-875Z` e `dev.db.bak-pre-fin074-2026-09-11T00-03-26-984Z` —, e os nomes delas nem casam com `*.db`. Quem tem acesso ao repositório, a um clone ou ao remoto tem os dados de todos os usuários. O segredo do 2FA já nasce cifrado (FIN-078) por causa disso.
+
+  **Arquivos envolvidos**
+  - `.gitignore`
+  - histórico do git
+
+  **Alterações necessárias**
+  - `git rm --cached` do `dev.db` e das cópias — os arquivos continuam no disco — e uma regra no `.gitignore` que cubra as cópias (`dev.db*`, `*.db.bak*`). A cópia feita na Fase 8 já tem nome terminado em `.db`, coberto pela regra atual.
+  - Se o repositório já foi enviado a um remoto: avaliar reescrever o histórico (`git filter-repo`) — decisão do dono do repositório, porque muda os commits de todos os clones — e, se o remoto for público, trocar as senhas das contas que estão no banco.
+
+  **Dependências**
+  Nenhuma.
+
+  **Critérios de aceite**
+  - [ ] Nenhum arquivo de banco rastreado pelo git.
+  - [ ] `.gitignore` cobre o banco e as cópias.
+
+---
+
 ## 2. 💰 Integridade Financeira
 
 - [x] **P1 — FIN-015 — Migrar campos monetários de `Float` para representação segura (inteiro em centavos)** ✅ Concluída
@@ -1045,6 +1070,29 @@ Classificação por funcionalidade (código como fonte da verdade):
 
 ---
 
+- [ ] **P2 — FIN-098 — Importação de extrato com mais de ~500 transações recusada pelo limite de 100 kB do corpo JSON** (achado ao implementar FIN-080, 11/09/2026)
+
+  **Objetivo**
+  Importar um extrato inteiro, qualquer que seja o número de lançamentos.
+
+  **Problema**
+  A importação manual envia o extrato inteiro num único `POST /api/transactions` (`{ transactions: [...] }`), e o `express.json()` global aceita até 100 kB, o padrão do Express. Cada transação ocupa cerca de 190 bytes no corpo (nome, categoria, data, valor, id da conta, tipo, FITID), então um extrato com mais de ~500 lançamentos — um ano de cartão, por exemplo — é recusado com 413. Até FIN-080 a resposta era a página HTML padrão do Express, e o frontend mostrava só "Erro na API"; agora é um JSON com mensagem clara, mas a importação continua falhando.
+
+  **Arquivos envolvidos**
+  - `server.js` (`POST /api/transactions`)
+  - `src/App.tsx` (`handleImport`)
+
+  **Alterações necessárias**
+  - Limite próprio maior nesta rota, como o da restauração em FIN-080, ou envio em lotes pelo frontend. Os lotes mantêm o limite global pequeno e permitem mostrar o progresso; a deduplicação por `importHash` já torna idempotente o reenvio de um lote.
+
+  **Dependências**
+  FIN-003.
+
+  **Critérios de aceite**
+  - [ ] Um extrato de 2.000 transações é importado inteiro.
+
+---
+
 ## 5. 🖥️ Frontend
 
 - [x] **P1 — FIN-025 — Centralizar a base URL da API (hoje hardcoded em 3 arquivos)** ✅ Concluída
@@ -1217,6 +1265,30 @@ Classificação por funcionalidade (código como fonte da verdade):
 
   **Nota de implementação (08/09/2026)**
   `grid-cols-2` → `grid-cols-1 sm:grid-cols-2` nos dois grids de resumo (`AccountsManager.tsx:84`, `DebtManager.tsx:331`). Escopo limitado exatamente aos dois grids citados na descrição da tarefa — os demais `grid-cols-2` do projeto (campos de formulário dentro dos modais de conta/dívida) não têm o mesmo risco de truncar valores monetários e ficaram fora do escopo.
+
+---
+
+- [ ] **P3 — FIN-099 — Editar e excluir transação só aparecem com o mouse sobre a linha** (achado ao implementar FIN-081, 11/09/2026)
+
+  **Objetivo**
+  Deixar as ações de cada transação alcançáveis em tela de toque e pelo teclado.
+
+  **Problema**
+  Na tabela de transações (`TxTable`, em `src/App.tsx`), os botões de editar e excluir ficam com `opacity-0` e só aparecem com `group-hover`. Em tela de toque não existe "passar o mouse": os botões estão lá, mas invisíveis, e só um toque às cegas no lugar certo os aciona. Eles também não aparecem ao receber o foco pelo teclado, e são botões só de ícone, sem nome acessível.
+
+  **Arquivos envolvidos**
+  - `src/App.tsx` (`TxTable`)
+
+  **Alterações necessárias**
+  - Mostrar as ações sempre em telas de toque (`pointer-coarse:opacity-100`) e ao receber foco (`focus-within:opacity-100`).
+  - `aria-label` com o nome da transação ("Editar Uber", "Excluir Uber"), como nos botões da aba Contas (FIN-076).
+
+  **Dependências**
+  FIN-081.
+
+  **Critérios de aceite**
+  - [ ] Ações visíveis em tela de toque e com o foco do teclado.
+  - [ ] Botões com nome acessível.
 
 ---
 
@@ -2012,30 +2084,77 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ## 19. 👥 Colaboração (Roadmap)
 
-- [ ] **P3 — FIN-077 — Modelar compartilhamento de dados entre usuários (household/family)**
+- [ ] **P3 — FIN-077 — Modelar compartilhamento de dados entre usuários (household/family)** — fora do escopo (decisão de produto, 11/09/2026)
   Decisão arquitetural relevante (nova entidade `Household` compartilhando `Account`/`Transaction`, ou visibilidade compartilhada por convite). Requer definição de produto antes de implementar — não iniciar sem alinhamento explícito, dado o impacto no modelo de isolamento por usuário auditado nas seções 1 e 2.
 
-- [ ] **P3 — FIN-078 — Implementar 2FA (TOTP) no login**
+  **Decisão (11/09/2026): não será implementada.** O FinFlow é um dashboard financeiro pessoal — cada conta é de uma pessoa só —, e compartilhar dados entre usuários não combina com essa proposta. A caixa fica desmarcada apenas como registro da decisão: não implementar, e não tratar como a próxima tarefa em aberto. O modelo do app continua o isolamento por `userId` auditado nas seções 1 e 2 (FIN-080 já garante que restaurar um backup nunca toca dados de outro usuário). Se a decisão mudar, as perguntas a responder antes de começar são: o que se compartilha (tudo, como uma "casa", ou só contas escolhidas), quem pode editar, o que acontece com os dados de quem sai do grupo e se as transações pessoais continuam invisíveis para os outros membros.
+
+- [x] **P3 — FIN-078 — Implementar 2FA (TOTP) no login** ✅ Concluída (11/09/2026)
   Adicionar dependência `otplib` (ou similar), novo campo `twoFactorSecret` em `User`, fluxo de setup e verificação no login. **Dependências:** FIN-012 (revisão de estratégia de sessão deve ser considerada em conjunto).
 
-- [ ] **P3 — FIN-079 — Implementar exportação completa de dados do usuário (backup)**
+  **Nota de implementação (11/09/2026):** códigos de 6 dígitos a cada 30 s (RFC 6238), compatíveis com Google e Microsoft Authenticator, Authy e 1Password. Biblioteca `otpauth`, e não `otplib`: a versão 13 do `otplib` trocou a API inteira, e o `otpauth` tem uma única dependência (`@noble/hashes`). O QR code é gerado no servidor por `qrcode-generator`, sem dependências. Aceita também o intervalo anterior e o seguinte (±30 s), para o relógio do celular um pouco fora.
+  - **Dados:** tabela própria `UserTwoFactor`, 1:1 com `User`, em vez de colunas novas em `User` — o login continua lendo a mesma linha, e a migração `20260911190406_add_two_factor` é só um `CREATE TABLE`, sem recriar tabela nenhuma. No banco real, aplicada com backup antes (`dev.bak-pre-fin078-….db`, nome coberto pelo `*.db` do `.gitignore`) e comparação antes/depois: todas as tabelas existentes com a mesma assinatura (sha256 de todas as linhas) e `PRAGMA foreign_key_check` sem erros.
+  - **Segredo cifrado:** AES-256-GCM, com o `userId` como dado autenticado — o segredo de um usuário copiado para a linha de outro não decifra — e tag de 16 bytes exigida na decifragem. A chave vem de `TWO_FACTOR_ENCRYPTION_KEY` (mínimo 32 caracteres, derivada por HKDF), documentada no `.env.example`. É uma chave própria, e não derivada do `JWT_SECRET`, para que trocar o `JWT_SECRET` depois de um vazamento não invalide o 2FA de todos. Sem a chave, a ativação fica indisponível (503) e a tela explica o que falta: com o segredo em texto puro, qualquer cópia do banco geraria os códigos — e o `dev.db` está versionado (FIN-097).
+  - **Fluxo:** gerar o QR code (`POST /api/auth/2fa/setup`; o registro nasce pendente e não muda o login) → confirmar com a senha e um código (`/enable`), que devolve 10 códigos de recuperação uma única vez → no login, a senha certa sem código responde `{ twoFactorRequired: true }`, sem token. A senha errada recebe a mesma mensagem de sempre: nada revela se a conta usa 2FA. Desativar (`/disable`) pede a senha e um código. Ativar e desativar exigem a senha para que um token vazado não baste para cadastrar outro celular e trancar o dono fora da conta.
+  - **Um código vale uma vez:** o último intervalo aceito fica em `lastUsedStep`, e o consumo é um `updateMany` condicionado ao valor lido — dois envios simultâneos do mesmo código não passam os dois, e um código anterior ao último usado é recusado mesmo dentro da janela. Os códigos de recuperação (50 bits, sem letras que se confundem) ficam com bcrypt — com um hash rápido, 50 bits seriam quebráveis por força bruta por quem copiasse o banco — e saem da lista ao serem usados, pelo mesmo `updateMany` condicionado.
+  - **Chave perdida ou trocada:** o login continua exigindo o segundo fator — nunca cai para só a senha. O código do aplicativo passa a ser recusado com a indicação de usar um código de recuperação, que não depende da chave.
+  - **Frontend:** segundo passo no login (`AuthForm`, com "Usar um código de recuperação" e `autocomplete="one-time-code"`) e a nova aba **Configurações**, com a seção de verificação em duas etapas (`TwoFactorSettings`): QR code, chave para digitar à mão, códigos de recuperação com "Copiar", estado e desativação. As respostas são normalizadas antes de usadas (`src/utils/twoFactor.ts`), e o QR code só é aceito como imagem embutida (`data:image/`). De passagem, os rótulos do formulário de login ganharam `htmlFor`.
+  - **Limitações:** ativar o 2FA não derruba sessões já abertas — os tokens seguem válidos até expirar, conforme a decisão de FIN-012. O limite de tentativas é o de FIN-007: por IP, 10 a cada 15 minutos, compartilhado com login e cadastro.
+
+  **Validação executada:** `server.two-factor.test.js` — 30 testes: estado; configuração (segredo cifrado e amarrado ao usuário, configuração pendente não muda o login, recomeçar troca o segredo, 409 com a verificação ativa sem mexer no registro); ativação (senha e código errados, formato inválido, janela de ±30 s, códigos de recuperação distintos e guardados só como hash); login (sem código pede o segundo fator, senha errada sem revelar o 2FA, reuso do código recusado, código anterior ao último usado recusado, envio simultâneo entra uma vez só, recuperação normalizada e de uso único, também sob envio simultâneo); servidor sem a chave ou com a chave trocada (503 na ativação, o login continua exigindo o segundo fator e só a recuperação entra); desativação; isolamento; e a cifragem (chave, usuário, adulteração, tag truncada, valor malformado). `AuthForm.test.tsx` — 9 testes; `TwoFactorSettings.test.tsx` — 10; `twoFactor.test.ts` — 4.
+
+- [x] **P3 — FIN-079 — Implementar exportação completa de dados do usuário (backup)** ✅ Concluída (11/09/2026)
   Endpoint `GET /api/account/export` retornando todos os dados do usuário (accounts, transactions, debts) em JSON. **Dependências:** Nenhuma.
 
-- [ ] **P3 — FIN-080 — Implementar importação/restauração de backup**
+  **Nota de implementação (11/09/2026):** `GET /api/account/export` devolve um arquivo JSON (`format: "finflow-backup"`, `version: 1`) com tudo o que o usuário cadastrou ou importou — contas, transações, dívidas com os itens, orçamentos, metas, recorrências e investimentos —, com os valores em centavos, como no banco, e os ids originais, que refazem os vínculos na restauração. Ficam de fora a senha, a verificação em duas etapas (segredos não saem do servidor), as notificações (derivadas dos dados, voltam a ser geradas) e o `userId` das linhas. As leituras rodam numa única transação de banco — o arquivo é um retrato consistente mesmo com um sync da Pluggy gravando ao mesmo tempo — e a ordenação usa o `id` como desempate, para dois backups dos mesmos dados saírem idênticos. Resposta com `Content-Disposition: attachment` e `Cache-Control: no-store`. Na tela: **Configurações → Backup dos seus dados → Baixar backup**, com o aviso de que o arquivo tem os dados financeiros em texto aberto.
+
+  **Validação executada:** `server.backup.test.js`, junto com FIN-080: a exportação exige autenticação; traz as sete seções com as quantidades certas, os valores em centavos, a moeda e os itens das dívidas; não traz `userId`, hash de senha, segredo do 2FA, códigos de recuperação nem notificações; cabeçalhos de download e de cache; isolamento entre usuários. No frontend, `BackupSettings.test.tsx` e `backup.test.ts`.
+
+- [x] **P3 — FIN-080 — Implementar importação/restauração de backup** ✅ Concluída (11/09/2026)
   Endpoint que aceita o JSON gerado por FIN-079 e recria os dados para o usuário autenticado, com validação cuidadosa (reaproveitar FIN-008) para não permitir sobrescrever dados de outro usuário. **Dependências:** FIN-079, FIN-008.
+
+  **Nota de implementação (11/09/2026):** `POST /api/account/import` **substitui** todos os dados do usuário pelos do arquivo, numa única transação de banco — ou tudo é trocado, ou nada muda. Por ser destrutiva, pede a senha, e o arquivo inteiro é validado antes de qualquer exclusão: cada linha pelos schemas das rotas (FIN-008), com três ajustes — o `id` original, as datas de criação e os campos que o sync da Pluggy grava sem passar por aquelas regras (nome vazio, moeda fora da lista), pois recusá-los impediria restaurar um backup legítimo —, e depois a coerência do arquivo: ids repetidos, vínculo com conta que não está no arquivo, investimento em cartão de crédito e as constraints únicas do banco (categoria de orçamento, `pluggyId`, `importHash`), que de outro modo só falhariam no meio da gravação. O erro diz onde está o problema: "transação nº 2 (date): Data deve estar no formato YYYY-MM-DD".
+  - **Nunca toca dados de outro usuário:** o `userId` gravado é sempre o de quem restaura, e as exclusões são filtradas por ele. Os ids do arquivo são mantidos quando estão livres — a restauração devolve os dados exatamente como eram, inclusive a deduplicação das importações de extrato, que usa o id da conta. Se algum id já pertence a outra pessoa (o backup de alguém restaurado na conta de outro usuário, no mesmo servidor), todos os registros ganham ids novos e os vínculos são refeitos.
+  - A moeda de cada transação vem da conta restaurada, e não do arquivo (a regra de FIN-074). A verificação em duas etapas fica como está; as notificações dos dados antigos são apagadas e voltam a ser geradas na próxima carga do app.
+  - **Limite do corpo:** a restauração tem limite próprio de 25 MB — cerca de 100 mil transações — e o corpo só é lido depois da autenticação; o parser global continua com os 100 kB do Express. Responder o 413 em JSON exigiu um tratador de erros, e ele revelou um problema maior: corpo malformado ou grande demais em **qualquer** rota caía no tratador padrão do Express, que responde uma página HTML com a pilha do erro fora de produção — o vazamento de FIN-011. Agora todas as rotas respondem esses erros em JSON, com mensagem genérica.
+  - **Frontend:** Configurações → Backup dos seus dados → Restaurar. O arquivo é conferido no navegador antes de qualquer envio — é um backup do FinFlow? quantos registros de cada tipo? cabe no limite? —, e o botão só libera com a senha e a confirmação "Entendo que os meus dados atuais serão substituídos". Depois de restaurar, o app refaz a carga completa e mostra o resumo do que voltou.
+  - **Limitação:** as recorrências com a próxima ocorrência já vencida no backup são lançadas na carga seguinte, como em qualquer abertura do app.
+
+  **Validação executada:** `server.backup.test.js` — 15 testes: na mesma conta, bagunçar os dados e restaurar devolve exatamente o backup (mesmos ids, datas e valores); senha errada não muda nada; 13 arquivos inválidos recusados com a posição do problema, sem apagar nada; o backup de outra pessoa restaurado na própria conta ganha ids novos, com os vínculos refeitos, e os dados da outra pessoa ficam intactos; a moeda da transação vem da conta, mesmo adulterada no arquivo; dados da Pluggy (nome vazio, moeda JPY) fazem ida e volta; 2FA mantido e notificações apagadas; 3.000 transações (acima de 100 kB) aceitas; acima de 25 MB, 413 em JSON; corpo malformado e acima do limite padrão numa rota comum respondem JSON. `BackupSettings.test.tsx` — 6 testes; `backup.test.ts` — 7.
 
 ---
 
 ## 20. 📱 PWA / Mobile (Roadmap)
 
-- [ ] **P2 — FIN-081 — Criar navegação mobile completa (bottom nav ou drawer)**
+- [x] **P2 — FIN-081 — Criar navegação mobile completa (bottom nav ou drawer)** ✅ Concluída (11/09/2026)
   Esta é a versão "produto completo" do que já é corrigido emergencialmente em FIN-028 — usar esta tarefa para refinar UX (animações, acessibilidade, atalhos) depois que FIN-028 já resolveu o bloqueio funcional. **Dependências:** FIN-028.
 
-- [ ] **P3 — FIN-082 — Adicionar `manifest.json` + service worker (PWA instalável)**
+  **Nota de implementação (11/09/2026):** mantida a gaveta (drawer) de FIN-028, que reaproveita todo o conteúdo da barra lateral, agora com o comportamento de um diálogo modal nas telas pequenas (`useMobileDrawer`): ao abrir, o foco vai para o botão de fechar; Tab e Shift+Tab circulam só dentro da gaveta; Esc fecha; ao fechar, o foco volta ao botão ☰. Deslizar para a esquerda também fecha — só um gesto predominantemente horizontal, para rolar o menu não fechá-lo. A gaveta desliza e o fundo escurece em 200 ms, sem animação para quem pede menos movimento no sistema (`motion-reduce`). Fechada, fica `inert`: fora do teclado e dos leitores de tela, e não só fora da tela. Alargar a janela com a gaveta aberta a fecha, para ela não reabrir sozinha. Da largura `md` para cima nada muda: é a barra lateral de sempre.
+  Acessibilidade do esqueleto do app: link "Pular para o conteúdo" (o primeiro item focável da página), `aria-current="page"` no item ativo, `aria-expanded`/`aria-controls` no botão ☰, nome acessível nos botões só de ícone (abrir e fechar o menu, sair da conta), `<nav aria-label="Principal">`, rótulo no campo de busca e `lang="pt-BR"` no `index.html` — antes `en`, o que fazia os leitores de tela lerem o app com pronúncia inglesa.
+  Atalhos globais de teclado (trocar de aba por tecla, por exemplo) não foram adicionados: disputariam combinações com o navegador e com os leitores de tela. O link de pular para o conteúdo cobre o atalho de acessibilidade esperado. Achado no caminho: as ações de editar e excluir da tabela de transações só aparecem com o mouse sobre a linha — registrado como FIN-099.
+
+  **Validação executada:** `useMobileDrawer.test.tsx` — 9 testes: foco inicial e devolvido; Esc; Tab e Shift+Tab circulares, sem interferir no meio da lista; foco que escapou volta no próximo Tab; fechada = escondida e sem armadilha de foco; em tela larga, nem escondida nem modal; alargar a janela fecha; deslize para a esquerda fecha, e deslize curto ou vertical não; `useMediaQuery` acompanha a mudança e não quebra sem `matchMedia`.
+
+- [x] **P3 — FIN-082 — Adicionar `manifest.json` + service worker (PWA instalável)** ✅ Concluída (11/09/2026)
   **Dependências:** FIN-081 (a navegação mobile deve estar resolvida antes de promover instalação como app).
 
-- [ ] **P3 — FIN-083 — Implementar tema claro (light mode)**
+  **Nota de implementação (11/09/2026):** `public/manifest.webmanifest` (nome, `display: standalone`, `lang: pt-BR`, cores) com ícones PNG de 192 e 512 px, um "maskable" (fundo até a borda e o "F" dentro da zona segura) e o ícone da tela inicial do iOS (`apple-touch-icon.png`, 180 px). Os PNGs foram gerados por script — um codificador PNG com o zlib do Node, já que o projeto não tem ferramenta de imagem — com o logo do app: o quadrado com o gradiente índigo→roxo e o "F". O `favicon.svg`, que ainda era o logo do Vite, passou a ser o mesmo desenho.
+  O `public/sw.js` é registrado só no build de produção (`src/pwa.ts`), porque no `npm run dev` um cache de arquivos atrapalharia o recarregamento do Vite. Ele **nunca guarda dados financeiros**: requisições à API (em outra origem, ou em `/api/` na mesma), a outras origens e qualquer método que não seja GET passam direto. A navegação vem da rede primeiro (sempre a versão publicada) e, sem rede, da última página guardada; `/assets/`, com nomes que têm o hash do Vite, vem do cache primeiro, com limite de 60 entradas; os demais arquivos, da rede com o cache de reserva. Respostas de erro e marcadas `no-store` não entram no cache. A instalação já guarda o JS e o CSS citados no HTML, para o app abrir offline desde a primeira visita com o service worker ativo.
+  **Sem conexão, a sessão não cai mais:** antes, qualquer falha na carga inicial deslogava — abrir o app instalado sem internet apagaria o token. Agora só 401/403 (sessão inválida) encerram a sessão; sem conexão ou com o servidor fora do ar, a tela "Sem conexão com o servidor" oferece tentar de novo ou sair.
+  Limitação, por decisão: offline, o app abre, mas sem dados — eles não são guardados no aparelho, porque dados financeiros num cache do navegador ficariam ao alcance de quem usasse o mesmo aparelho.
+
+  **Validação executada:** `test/pwa.test.js` — 12 testes: manifesto com o necessário para instalar; ícones existentes e com o tamanho declarado no cabeçalho do PNG, incluindo o maskable; `index.html` com o manifesto, o ícone do iOS, `theme-color` igual ao do manifesto e `lang="pt-BR"`; e o service worker executado num contexto isolado, com cache e rede simulados — instalação (casca e arquivos citados no HTML), ativação (apaga só os caches antigos do FinFlow), API, outras origens e POST nunca interceptados, cache primeiro em `/assets/`, sem cache para erro e `no-store`, limite de entradas, navegação com e sem rede. `src/pwa.test.ts` — 4 testes do registro: só em produção, depois do `load`, e falha só no console.
+
+- [x] **P3 — FIN-083 — Implementar tema claro (light mode)** ✅ Concluída (11/09/2026)
   Definir tokens de cor alternativos em `src/index.css` (hoje só há tema escuro fixo, [index.css:4-15](src/index.css#L4-L15)) e um toggle persistido (ex. `localStorage`). **Dependências:** Nenhuma.
+
+  **Nota de implementação (11/09/2026):** tema claro por tokens, com o escuro como padrão — quem nunca escolheu continua vendo o app como antes. `data-theme="light"` no `<html>` redefine os tokens de `src/index.css`. O ponto central: neste código, `white` é a "cor de contraste com o fundo" — `text-white` é o texto principal, e `bg-white/5` e `border-white/10` são véus e bordas sobre o fundo —, e o Tailwind 4 compila essas classes para `var(--color-white)` (conferido no CSS gerado). O tema claro redefine `--color-white` como um azul-marinho quase preto, e algumas centenas de classes passam a funcionar sobre fundo claro sem mudar os componentes. Os tons claros da paleta usados como texto (`text-red-400`, `text-amber-300`…) viram tons escuros no claro, e primária, secundária e acento descem um tom, para texto e botões com contraste AA.
+  O que não se resolvia só com tokens foi trocado nos componentes: texto branco sobre botão ou selo colorido virou `text-on-accent`, branco nos dois temas; estilos inline com as cores do escuro (`rgba(255,255,255,…)`, `#1c1c24`…) viraram variáveis (`--fg-8`, `--tooltip-bg`…); fundos fixos (`bg-[#0a0a0f]`) viraram `bg-background`; e as cores de categoria e de tipo de pagamento usadas como texto passam por `readableColor()`, pura no escuro e escurecida no claro — um âmbar puro sobre branco ficaria ilegível. Nos gráficos, a grade, os textos dos eixos e o cursor seguem o tema por CSS (regra CSS vence atributo do SVG), e o tooltip usa as variáveis.
+  A escolha fica em **Configurações → Aparência** — Escuro, Claro ou Igual ao sistema, que acompanha a troca de tema do sistema operacional sem recarregar —, com um atalho ☀/🌙 no cabeçalho. A preferência fica no `localStorage`, com leitura e gravação protegidas: armazenamento bloqueado ou cheio não quebra o app. Um script inline no `index.html` aplica o tema antes da primeira pintura — sem ele, quem escolheu o claro veria o escuro piscar a cada abertura —, e a cor da barra do navegador (`theme-color`) acompanha o tema. O `color-scheme` também acompanha, então campos nativos e barras de rolagem seguem o tema; no escuro isso é novo: o calendário dos campos de data passa a abrir escuro.
+
+  **Validação executada:** `test/theme.test.js` — 10 testes: todo token do tema escuro tem valor no claro; contraste WCAG AA (4,5:1) do texto principal e secundário sobre o fundo e o cartão, nos dois temas, e, no claro, dos tons de texto redefinidos, do eixo dos gráficos, do branco sobre a primária e a secundária e das cores de dado depois de `readableColor`; o script do `index.html` concorda com `resolveTheme` em todas as combinações e fica no escuro sem `matchMedia` ou com o armazenamento bloqueado; e nenhum componente voltou a usar as cores fixas do tema escuro. `theme.test.ts` — 7 testes; `useTheme.test.tsx` — 4; `ThemeSettings.test.tsx` — 2.
+
+  **Validação executada (Fase 8):** `npm run lint`, `npm run typecheck`, `npx vitest run` (42 arquivos, 606 testes) e `npm run build` limpos.
 
 ---
 

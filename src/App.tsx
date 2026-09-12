@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
   Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut, Edit2, X, Menu, PiggyBank, Target, Repeat, BarChart3, Download, FileText
+  LogOut, Edit2, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, BarChart3, Download, FileText, Settings
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -21,9 +21,14 @@ import { MonthNavigator, MonthTotal } from './components/MonthNavigator';
 import { NotificationBell } from './components/NotificationBell';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
+import { TwoFactorSettings } from './components/TwoFactorSettings';
+import { BackupSettings } from './components/BackupSettings';
+import { ThemeSettings } from './components/ThemeSettings';
 import { toCents, toReais } from './utils/money';
-import { apiFetch } from './services/api';
+import { apiFetch, ApiError } from './services/api';
 import { useFinancialStats } from './hooks/useFinancialStats';
+import { useMobileDrawer } from './hooks/useMobileDrawer';
+import { useTheme } from './hooks/useTheme';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
 import { computeInvestmentHoldings, describeHoldings } from './utils/investments';
@@ -36,6 +41,7 @@ import {
 } from './utils/transactions';
 import { isInstallmentTransaction } from './utils/installments';
 import { CATEGORY_COLORS } from './utils/categories';
+import { readableColor } from './utils/theme';
 import {
   BASE_CURRENCY, accountsInBase, currencyOf, currencySymbol, describeConversion, foreignCurrencies,
   formatMoney, investmentsInBase, parseExchangeRates, recurringInBase, transactionsInBase,
@@ -46,7 +52,7 @@ import type {
   RecurringTransaction, Transaction, PaymentType,
 } from './types';
 
-type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports';
+type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports' | 'settings';
 
 // FIN-066: aba para onde o clique numa notificação leva, por tipo.
 const NOTIFICATION_TAB: Record<NotificationType, Tab> = {
@@ -184,6 +190,20 @@ export default function App() {
   const [dashboardAccountId, setDashboardAccountId] = useState<string | null>(null);
   const [chartPeriod, setChartPeriod] = useState<'30d' | 'all'>('30d');
   const [mobileNavOpen, setMobileNavOpen] = useState(false); // FIN-028
+  // FIN-081: a gaveta do menu em telas pequenas — foco preso nela, Esc, deslize para fechar e
+  // `inert` quando fechada. Refs do botão que abre (recebe o foco de volta) e do que fecha.
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const drawer = useMobileDrawer({
+    open: mobileNavOpen,
+    onClose: () => setMobileNavOpen(false),
+    containerRef: drawerRef,
+    initialFocusRef: drawerCloseRef,
+    returnFocusRef: menuButtonRef,
+  });
+  // FIN-083: tema claro/escuro — aplicado ao documento também na tela de login.
+  const theme = useTheme();
   const [notifications, setNotifications] = useState<AppNotification[]>([]); // FIN-066
   const [unreadCount, setUnreadCount] = useState(0);
   const [exportingPDF, setExportingPDF] = useState(false); // FIN-061
@@ -203,6 +223,11 @@ export default function App() {
   // o botão "Carregar mais", que busca o restante via paginação real da API.
   const [txHasMore, setTxHasMore]     = useState(false);
   const [txLoadingMore, setTxLoadingMore] = useState(false);
+  // FIN-080: incrementado depois de restaurar um backup — refaz a carga de todos os dados.
+  const [dataVersion, setDataVersion] = useState(0);
+  const [settingsNotice, setSettingsNotice] = useState('');
+  // FIN-082: a carga falhou sem ser por sessão inválida (sem conexão, servidor fora do ar).
+  const [loadError, setLoadError] = useState('');
 
   // Wrapper fino sobre o `apiFetch` compartilhado (ver FIN-025/FIN-027 em
   // docs/BACKLOG_DETAIL.md) — mantém a assinatura posicional e o retorno `any` já usados
@@ -226,6 +251,8 @@ export default function App() {
     setInvestments([]);
     setRates(null);
     setRatesFailed(false);
+    setSettingsNotice('');
+    setLoadError('');
     localStorage.removeItem('finflow_token');
   };
 
@@ -258,14 +285,22 @@ export default function App() {
         setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
         setInvestments((investmentsData as Investment[]).map(investmentFromApi));
       }).catch(err => {
-        console.error('Sessão expirada ou erro:', err);
-        handleLogout();
+        // FIN-082: só um token recusado (401/403) encerra a sessão. Sem conexão — o app instalado
+        // aberto offline — ou com o servidor fora do ar, a sessão continua e a tela oferece tentar
+        // de novo; antes, qualquer falha aqui deslogava.
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          console.error('Sessão expirada:', err);
+          handleLogout();
+        } else {
+          console.error('Falha ao carregar os dados:', err);
+          setLoadError('Não foi possível carregar os seus dados. Verifique a conexão com a internet e tente de novo.');
+        }
       }).finally(() => {
         setLoading(false);
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, dataVersion]);
 
   // FIN-066/FIN-067: gera as notificações automáticas e recarrega a central na carga inicial
   // e sempre que os dados que as originam mudam (pagamento de parcela, importação, edição de
@@ -322,6 +357,23 @@ export default function App() {
     localStorage.setItem('finflow_token', newToken);
     setToken(newToken);
     setUser(newUser);
+  };
+
+  /**
+   * FIN-080: depois de restaurar um backup, todos os dados mudaram no servidor — refaz a carga
+   * completa (a mesma do login) e guarda o resumo para a aba Configurações mostrar. O filtro de
+   * conta do Dashboard volta para "todas", porque a conta escolhida pode não existir mais.
+   */
+  /** FIN-082: nova tentativa depois de uma carga que falhou sem conexão. */
+  const retryLoad = () => {
+    setLoadError('');
+    setDataVersion(v => v + 1);
+  };
+
+  const handleRestored = (summary: string) => {
+    setSettingsNotice(summary);
+    setDashboardAccountId(null);
+    setDataVersion(v => v + 1);
   };
 
   /* --- API Mappers --- */
@@ -789,7 +841,27 @@ export default function App() {
   const isEmpty     = transactions.length === 0;
 
   if (!token) return <AuthForm onLogin={handleLogin} />;
-  if (loading) return <div className="h-screen w-full flex items-center justify-center bg-[#0a0a0f] text-white">Carregando Banco de Dados...</div>;
+  if (loading) return <div className="h-screen w-full flex items-center justify-center bg-background text-white">Carregando Banco de Dados...</div>;
+  if (loadError) return (
+    <div className="h-screen w-full flex items-center justify-center p-6" style={{ backgroundColor: 'var(--color-background)' }}>
+      <div role="alert" className="glass-card rounded-2xl p-8 max-w-md text-center">
+        <WifiOff size={32} className="mx-auto mb-4 text-amber-400" aria-hidden="true"/>
+        <h1 className="text-xl font-bold text-white mb-2">Sem conexão com o servidor</h1>
+        <p className="text-sm text-textMuted mb-6">{loadError}</p>
+        <div className="flex flex-wrap gap-3 justify-center">
+          <button type="button" onClick={retryLoad}
+            className="px-5 py-2.5 rounded-xl text-sm text-on-accent font-semibold"
+            style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>
+            Tentar de novo
+          </button>
+          <button type="button" onClick={handleLogout}
+            className="px-5 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 hover:text-white transition-colors">
+            Sair
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   // ---------- Render ----------
   return (
@@ -797,25 +869,37 @@ export default function App() {
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 rounded-full blur-[100px] pointer-events-none" style={{ backgroundColor: 'rgba(99,102,241,0.12)' }} />
       <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style={{ backgroundColor: 'rgba(168,85,247,0.07)' }} />
 
-      {/* ── Sidebar (FIN-028: drawer off-canvas em mobile, estática em md+) ── */}
-      {mobileNavOpen && (
-        <div className="fixed inset-0 bg-black/70 z-40 md:hidden" onClick={() => setMobileNavOpen(false)} />
-      )}
-      <aside className={`w-64 glass-panel border-r border-white/5 flex-col justify-between z-50
-        ${mobileNavOpen ? 'fixed inset-y-0 left-0 flex' : 'hidden'} md:static md:z-10 md:flex`}>
+      {/* FIN-081: primeiro item focável da página — leva direto ao conteúdo, pulando o menu. */}
+      <a href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-xl focus:bg-primary focus:text-on-accent focus:text-sm focus:font-semibold">
+        Pular para o conteúdo
+      </a>
+
+      {/* ── Sidebar (FIN-028/FIN-081: gaveta que desliza em mobile, estática em md+) ── */}
+      <div aria-hidden="true" onClick={() => setMobileNavOpen(false)}
+        className={`fixed inset-0 bg-black/70 z-40 md:hidden transition-opacity duration-200 motion-reduce:transition-none
+          ${mobileNavOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
+      <aside id="app-sidebar" ref={drawerRef} inert={drawer.hidden}
+        {...(drawer.modal ? { role: 'dialog', 'aria-modal': true, 'aria-label': 'Menu de navegação' } : {})}
+        {...drawer.swipeHandlers}
+        className={`w-64 glass-panel border-r border-white/5 flex flex-col justify-between z-50
+          fixed inset-y-0 left-0 transition-transform duration-200 ease-out motion-reduce:transition-none
+          ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}
+          md:static md:z-10 md:translate-x-0 md:transition-none`}>
         <div>
           <div className="p-6 flex items-center justify-between text-white">
             <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg"
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg text-on-accent"
                 style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>F</div>
               <span className="text-xl font-bold">Fin<span style={{ color: 'var(--color-primary)', fontWeight: 300 }}>Flow</span></span>
             </div>
-            <button onClick={() => setMobileNavOpen(false)} className="md:hidden p-1.5 rounded-lg text-textMuted hover:text-white hover:bg-white/10 transition-colors">
+            <button ref={drawerCloseRef} type="button" onClick={() => setMobileNavOpen(false)} aria-label="Fechar menu"
+              className="md:hidden p-1.5 rounded-lg text-textMuted hover:text-white hover:bg-white/10 transition-colors">
               <X size={18}/>
             </button>
           </div>
 
-          <nav className="mt-4 px-4 space-y-1">
+          <nav aria-label="Principal" className="mt-4 px-4 space-y-1">
             <NavItem icon={<LayoutDashboard size={18}/>} label="Dashboard" active={activeTab==='dashboard'} onClick={() => { setActiveTab('dashboard'); setMobileNavOpen(false); }} />
 
             <div className="space-y-1">
@@ -855,6 +939,9 @@ export default function App() {
 
             {/* FIN-062/FIN-063/FIN-064 */}
             <NavItem icon={<BarChart3 size={18}/>} label="Relatórios" active={activeTab==='reports'} onClick={() => { setActiveTab('reports'); setMobileNavOpen(false); }} />
+
+            {/* FIN-078/FIN-079/FIN-080/FIN-083 */}
+            <NavItem icon={<Settings size={18}/>} label="Configurações" active={activeTab==='settings'} onClick={() => { setActiveTab('settings'); setMobileNavOpen(false); }} />
           </nav>
         </div>
 
@@ -864,13 +951,14 @@ export default function App() {
                   <p className="text-sm font-semibold text-white truncate">{user?.name}</p>
                   <p className="text-xs text-textMuted truncate">{user?.email}</p>
               </div>
-              <button onClick={handleLogout} className="p-2 ml-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors">
+              <button type="button" onClick={handleLogout} aria-label="Sair da conta" title="Sair da conta"
+                className="p-2 ml-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors">
                   <LogOut size={14}/>
               </button>
           </div>
 
           <button onClick={() => { setActiveTab('accounts'); setMobileNavOpen(false); }}
-            className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all shadow-lg"
+            className="w-full py-3 rounded-xl text-sm font-semibold text-on-accent flex items-center justify-center gap-2 transition-all shadow-lg"
             style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.25)' }}>
             <Wallet size={15}/> Gerenciar Contas
           </button>
@@ -908,11 +996,13 @@ export default function App() {
       </aside>
 
       {/* ── Main Content ── */}
-      <main className="flex-1 overflow-y-auto z-10 custom-scrollbar">
-        <header className="sticky top-0 z-20 backdrop-blur-xl bg-[#0a0a0f]/80 border-b border-white/5 px-4 md:px-8 py-5 flex justify-between items-center gap-3">
+      <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto z-10 custom-scrollbar focus:outline-none">
+        <header className="sticky top-0 z-20 backdrop-blur-xl bg-background/80 border-b border-white/5 px-4 md:px-8 py-5 flex justify-between items-center gap-3">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             {/* FIN-028: botão hambúrguer, único ponto de entrada para a navegação em mobile */}
-            <button onClick={() => setMobileNavOpen(true)} className="md:hidden p-2 rounded-full hover:bg-white/5 transition-colors text-white shrink-0">
+            <button ref={menuButtonRef} type="button" onClick={() => setMobileNavOpen(true)}
+              aria-label="Abrir menu" aria-expanded={mobileNavOpen} aria-controls="app-sidebar"
+              className="md:hidden p-2 rounded-full hover:bg-white/5 transition-colors text-white shrink-0">
               <Menu size={22}/>
             </button>
             <div className="relative w-full max-w-sm">
@@ -920,7 +1010,7 @@ export default function App() {
               {/* FIN-040: só troca para a aba Transações na transição vazio→preenchido
                   (1ª tecla), não a cada tecla — evita arrancar o usuário de outra aba a
                   cada caractere digitado. */}
-              <input type="text" placeholder="Buscar transações, contas..." value={search}
+              <input type="search" aria-label="Buscar transações" placeholder="Buscar transações, contas..." value={search}
                 onChange={e => {
                   const v = e.target.value;
                   if (v && !search) setActiveTab('transactions');
@@ -929,7 +1019,14 @@ export default function App() {
                 className="w-full bg-white/5 border border-white/10 rounded-full pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-primary/50 transition-colors" />
             </div>
           </div>
-          <div className="flex items-center gap-4 relative">
+          <div className="flex items-center gap-2 md:gap-4 relative">
+            {/* FIN-083: atalho entre claro e escuro — a escolha completa, com "igual ao sistema", fica em Configurações. */}
+            <button type="button" onClick={() => theme.setPreference(theme.resolved === 'dark' ? 'light' : 'dark')}
+              aria-label={theme.resolved === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
+              title={theme.resolved === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
+              className="p-2 rounded-full hover:bg-white/5 transition-colors text-textMuted hover:text-white">
+              {theme.resolved === 'dark' ? <Sun size={20} aria-hidden="true"/> : <Moon size={20} aria-hidden="true"/>}
+            </button>
             {/* FIN-066: central de notificações persistidas no servidor (substitui FIN-039). */}
             <NotificationBell notifications={notifications} unreadCount={unreadCount}
               onSelect={openNotification} onMarkAllRead={markAllNotificationsRead}/>
@@ -951,9 +1048,9 @@ export default function App() {
                     onChange={(e) => setDashboardAccountId(e.target.value || null)}
                     className="bg-white/5 border border-white/10 text-sm text-white py-2 px-4 rounded-xl focus:outline-none focus:border-primary/50"
                   >
-                    <option value="" className="bg-[#12121a]">Todas as Contas</option>
+                    <option value="" className="bg-dashboard">Todas as Contas</option>
                     {accounts.map(a => (
-                      <option key={a.id} value={a.id} className="bg-[#12121a]">{a.name} - {a.bank}</option>
+                      <option key={a.id} value={a.id} className="bg-dashboard">{a.name} - {a.bank}</option>
                     ))}
                   </select>
                 )}
@@ -1038,7 +1135,7 @@ export default function App() {
                           <span className="text-white font-medium">{b.category}</span>
                           <span className={b.isOverLimit ? 'text-red-400' : 'text-textMuted'}>{fmt(b.spent)} / {fmt(b.limit)}</span>
                         </div>
-                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
                           <div className={`h-full rounded-full transition-all ${b.isOverLimit ? 'bg-red-400' : 'bg-primary'}`}
                             style={{ width: `${Math.min(100, b.percentage)}%` }} />
                         </div>
@@ -1061,7 +1158,7 @@ export default function App() {
                   </p>
                   <div className="flex gap-3">
                     <button onClick={() => setActiveTab('accounts')}
-                      className="px-6 py-3 rounded-xl text-white font-semibold text-sm shadow-md"
+                      className="px-6 py-3 rounded-xl text-on-accent font-semibold text-sm shadow-md"
                       style={{ background:'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow:'0 4px 24px rgba(99,102,241,0.35)' }}>
                       <span className="flex items-center gap-2"><Wallet size={16}/> Adicionar Conta</span>
                     </button>
@@ -1081,13 +1178,13 @@ export default function App() {
                       <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
                         <button 
                           onClick={() => setChartPeriod('30d')}
-                          className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === '30d' ? 'bg-primary text-white shadow-lg' : 'text-textMuted hover:text-white'}`}
+                          className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === '30d' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}
                         >
                           30 Dias
                         </button>
                         <button 
                           onClick={() => setChartPeriod('all')}
-                          className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === 'all' ? 'bg-primary text-white shadow-lg' : 'text-textMuted hover:text-white'}`}
+                          className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === 'all' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}
                         >
                           Histórico
                         </button>
@@ -1102,20 +1199,19 @@ export default function App() {
                               <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                             </linearGradient>
                           </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false}/>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                           <XAxis 
                             dataKey="name" 
-                            stroke="#6b7280" 
                             axisLine={false} 
                             tickLine={false} 
                             tick={{ fontSize:10 }} 
                             interval={chartPeriod === '30d' ? 4 : 0}
                           />
-                          <YAxis stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
                           <RechartsTooltip 
-                            contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
+                            contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
                             formatter={(v) => [fmt(Number(v)), chartPeriod === '30d' ? 'Evolução' : 'Saldo']}
-                            labelStyle={{ color:'#9ca3af' }}
+                            labelStyle={{ color:'var(--color-textMuted)' }}
                           />
                           <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2.5} fill="url(#cg)" animationDuration={1000}/>
                         </AreaChart>
@@ -1129,11 +1225,11 @@ export default function App() {
                       <div className="h-60">
                         <ResponsiveContainer width="100%" height="100%">
                           <BarChart data={stats.expenseByCategory} layout="vertical" margin={{ left:-10, right:10 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" horizontal={false}/>
+                            <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
                             <XAxis type="number" hide/>
-                            <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} stroke="#6b7280" tick={{ fontSize:11 }} width={80}/>
-                            <RechartsTooltip cursor={{ fill:'rgba(255,255,255,0.03)' }}
-                              contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
+                            <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize:11 }} width={80}/>
+                            <RechartsTooltip
+                              contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
                               formatter={(v) => [fmt(Number(v)),'Gasto']}/>
                             <Bar dataKey="amount" radius={[0,4,4,0]} barSize={14}>
                               {stats.expenseByCategory.map(e => (
@@ -1167,13 +1263,13 @@ export default function App() {
                             <stop offset="95%" stopColor="#14b8a6" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2e" vertical={false}/>
-                        <XAxis dataKey="name" stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }}/>
-                        <YAxis stroke="#6b7280" axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false}/>
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize:10 }}/>
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
                         <RechartsTooltip
-                          contentStyle={{ backgroundColor:'#1c1c24', border:'1px solid rgba(255,255,255,0.1)', borderRadius:12 }}
+                          contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
                           formatter={(v) => [fmt(Number(v)), 'Saldo projetado']}
-                          labelStyle={{ color:'#9ca3af' }}
+                          labelStyle={{ color:'var(--color-textMuted)' }}
                         />
                         <Area type="monotone" dataKey="balance" stroke="#14b8a6" strokeWidth={2.5} fill="url(#pg)" animationDuration={1000}/>
                       </AreaChart>
@@ -1208,7 +1304,7 @@ export default function App() {
                     <FileText size={15}/> {exportingPDF ? 'Gerando...' : 'PDF'}
                   </button>
                   <button onClick={() => setShowImport(true)}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-white font-medium transition-colors"
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-on-accent font-medium transition-colors"
                     style={{ backgroundColor:'var(--color-primary)' }}>
                     <Upload size={15}/> Importar
                   </button>
@@ -1222,9 +1318,9 @@ export default function App() {
 
                 <div className="flex flex-wrap items-end gap-6">
                   <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-accent)"/>
-                  <MonthTotal label="Despesas" value={monthTotals.expense} color="#f87171"/>
+                  <MonthTotal label="Despesas" value={monthTotals.expense} color="var(--text-negative)"/>
                   <MonthTotal label="Valor total" value={monthTotals.balance} signed
-                    color={monthTotals.balance >= 0 ? '#ffffff' : '#f87171'}/>
+                    color={monthTotals.balance >= 0 ? 'var(--color-textMain)' : 'var(--text-negative)'}/>
                 </div>
               </div>
 
@@ -1242,16 +1338,16 @@ export default function App() {
               )}
               <div className="flex gap-2 mb-5">
                 {([
-                  { key: 'all',     label: 'Todas',     color: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)',  text: '#a5b4fc' },
-                  { key: 'income',  label: '↑ Receitas', color: 'rgba(20,184,166,0.12)', border: 'rgba(20,184,166,0.4)', text: '#5eead4' },
-                  { key: 'expense', label: '↓ Despesas', color: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.4)',  text: '#fca5a5' },
+                  { key: 'all',     label: 'Todas',     color: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)',  text: 'var(--text-indigo)' },
+                  { key: 'income',  label: '↑ Receitas', color: 'rgba(20,184,166,0.12)', border: 'rgba(20,184,166,0.4)', text: 'var(--text-positive)' },
+                  { key: 'expense', label: '↓ Despesas', color: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.4)',  text: 'var(--text-negative)' },
                 ] as const).map(f => (
                   <button key={f.key} onClick={() => setTxFilter(f.key)}
                     className="px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200"
                     style={{
-                      backgroundColor: txFilter === f.key ? f.color : 'rgba(255,255,255,0.04)',
-                      borderColor: txFilter === f.key ? f.border : 'rgba(255,255,255,0.08)',
-                      color: txFilter === f.key ? f.text : '#9ca3af',
+                      backgroundColor: txFilter === f.key ? f.color : 'var(--fg-4)',
+                      borderColor: txFilter === f.key ? f.border : 'var(--fg-8)',
+                      color: txFilter === f.key ? f.text : 'var(--color-textMuted)',
                       borderWidth: 1
                     }}>
                     {f.label}
@@ -1404,6 +1500,30 @@ export default function App() {
               />
             </>
           )}
+
+          {/* ══════════ SETTINGS TAB (FIN-078) ══════════ */}
+          {activeTab === 'settings' && (
+            <>
+              <div className="mb-6">
+                <h1 className="text-3xl font-bold text-white mb-1">Configurações</h1>
+                <p className="text-textMuted text-sm">Aparência, segurança da conta e backup dos dados</p>
+              </div>
+              <div className="space-y-6 max-w-3xl">
+                {settingsNotice && (
+                  <div role="status" className="p-4 rounded-xl flex items-start justify-between gap-3 border border-teal-500/25 bg-teal-500/10">
+                    <p className="text-sm text-teal-300">{settingsNotice}</p>
+                    <button type="button" onClick={() => setSettingsNotice('')} aria-label="Fechar aviso"
+                      className="p-1 rounded-lg text-teal-300 hover:bg-white/10 transition-colors shrink-0">
+                      <X size={14}/>
+                    </button>
+                  </div>
+                )}
+                <ThemeSettings preference={theme.preference} onChange={theme.setPreference} />
+                <TwoFactorSettings token={token} />
+                <BackupSettings token={token} onRestored={handleRestored} />
+              </div>
+            </>
+          )}
         </div>
       </main>
 
@@ -1418,7 +1538,7 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { titl
   return (
     <div onClick={onClick} className={`glass-card rounded-2xl p-6 transition-all ${onClick ? 'cursor-pointer hover:bg-white/5 hover:-translate-y-1' : ''}`}>
       <div className="flex justify-between items-start mb-4">
-        <div className="p-2.5 rounded-xl" style={{ backgroundColor:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.05)' }}>
+        <div className="p-2.5 rounded-xl" style={{ backgroundColor:'var(--fg-3)', border:'1px solid var(--fg-5)' }}>
           {icon}
         </div>
         {badge && <span className="text-[10px] uppercase tracking-wider font-bold text-textMuted bg-white/5 px-2.5 py-1 rounded-full border border-white/5">{badge}</span>}
@@ -1505,9 +1625,9 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
                 <td className="py-4">
                   <span className="px-2.5 py-1 rounded-full text-xs border"
                     style={{
-                      backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'rgba(255,255,255,0.05)',
-                      borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'rgba(255,255,255,0.1)',
-                      color: CATEGORY_COLORS[t.category] || '#9ca3af'
+                      backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'var(--fg-5)',
+                      borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'var(--fg-10)',
+                      color: CATEGORY_COLORS[t.category] ? readableColor(CATEGORY_COLORS[t.category]) : 'var(--color-textMuted)'
                     }}>
                     {t.category}
                   </span>
@@ -1518,7 +1638,7 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
                     style={{
                       backgroundColor: `${pt.color}15`,
                       borderColor: `${pt.color}35`,
-                      color: pt.color,
+                      color: readableColor(pt.color),
                     }}
                   >
                     {pt.label}
@@ -1595,7 +1715,7 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
 
             <div className="flex gap-3 mt-6">
               <button onClick={() => setEditing(null)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors disabled:opacity-50"
+              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
                 {saving ? 'Salvando...' : 'Salvar'}
               </button>
@@ -1609,7 +1729,7 @@ function TxTable({ rows, accounts, onUpdate, onDelete }: {
 
 function NavItem({ icon, label, active, badge, badgeColor, onClick, isSubItem }: { icon: React.ReactNode; label: string; active: boolean; badge?: number; badgeColor?: string; onClick: () => void; isSubItem?: boolean }) {
   return (
-    <button onClick={onClick}
+    <button type="button" onClick={onClick} aria-current={active ? 'page' : undefined}
       className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${
         active ? 'bg-white/10 text-white shadow-sm' : 'text-textMuted hover:bg-white/5 hover:text-white'
       } ${isSubItem ? 'text-sm py-2' : ''}`}>
@@ -1619,7 +1739,7 @@ function NavItem({ icon, label, active, badge, badgeColor, onClick, isSubItem }:
       </div>
       {badge !== undefined && (
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-          style={{ backgroundColor: badgeColor || 'rgba(255,255,255,0.1)', color: badgeColor ? '#fff' : 'inherit' }}>
+          style={{ backgroundColor: badgeColor || 'var(--fg-10)', color: badgeColor ? '#fff' : 'inherit' }}>
           {badge}
         </span>
       )}

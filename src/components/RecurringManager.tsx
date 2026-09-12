@@ -129,7 +129,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
                 style={{
                   backgroundColor: rec.amount >= 0 ? 'rgba(20,184,166,0.15)' : 'rgba(236,72,153,0.15)',
                   border: `1px solid ${rec.amount >= 0 ? 'rgba(20,184,166,0.3)' : 'rgba(236,72,153,0.3)'}`,
-                  color: rec.amount >= 0 ? '#2dd4bf' : '#f472b6',
+                  color: rec.amount >= 0 ? 'var(--text-positive)' : 'var(--text-pink)',
                 }}>
                 <Repeat size={18} />
               </div>
@@ -137,7 +137,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-semibold text-white truncate">{rec.name}</p>
-                  <span className="text-xs px-2 py-0.5 rounded-full text-textMuted" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                  <span className="text-xs px-2 py-0.5 rounded-full text-textMuted" style={{ backgroundColor: 'var(--fg-5)' }}>
                     {FREQUENCY_LABELS[rec.frequency]}
                   </span>
                   {!rec.active && (
@@ -179,7 +179,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
       </div>
 
       <button onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-white text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
+        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
         style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
         <Plus size={16} /> Adicionar Recorrência
       </button>
@@ -248,7 +248,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
 
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-white font-semibold transition-colors"
+              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
                 style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
                 {editingId ? 'Salvar' : 'Adicionar'}
               </button>
