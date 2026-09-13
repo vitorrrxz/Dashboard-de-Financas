@@ -11,12 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-<<<<<<< HEAD
-    "@prisma/client": "^5.22.0",
-=======
     "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/client": "^7.7.0",
->>>>>>> 015246de5bfe97b0f341b3d799cb8a8b7cd415c0
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.9.0",
     "clsx": "^2.1.1",
@@ -53,7 +49,7 @@
     "globals": "^17.4.0",
     "nodemon": "^3.1.14",
     "postcss": "^8.5.10",
-    "prisma": "^5.22.0",
+    "prisma": "^6.12.0",
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.0",

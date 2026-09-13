@@ -1,0 +1,4 @@
+{
+  "ext": "js,mjs,cjs,json,env",
+  "ignore": ["node_modules", "src", "dist"]
+}
