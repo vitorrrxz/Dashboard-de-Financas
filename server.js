@@ -1249,8 +1249,8 @@ app.get('/api/transactions', authenticateToken, async (req, res) => {
 /**
  * FIN-074 — moeda de cada conta do usuário entre `accountIds`, para derivar a moeda das
  * transações: uma transação fica sempre na moeda da conta vinculada (em real, sem conta). Uma
- * conta que não é do usuário não entra no mapa, e a transação fica em real — conferir a posse do
- * `accountId` nas rotas de transação é assunto de FIN-096.
+ * conta que não é do usuário não entra no mapa — e as rotas recusam o vínculo com ela antes de
+ * gravar (FIN-096, `hasForeignAccount`).
  */
 async function accountCurrencies(userId, accountIds) {
   const ids = [...new Set(accountIds.filter(Boolean))];
@@ -1265,6 +1265,29 @@ async function accountCurrencies(userId, accountIds) {
 /** Moeda de uma transação ligada a `accountId`, a partir do mapa de `accountCurrencies`. */
 function currencyForAccount(currencies, accountId) {
   return (accountId && currencies.get(accountId)) || BASE_CURRENCY;
+}
+
+// FIN-096 — a chave estrangeira só garante que a conta existe: sem conferir a posse, um usuário
+// vinculava os próprios registros à conta de outra pessoa. Mesma mensagem do vínculo de
+// investimentos (`investmentAccountError`).
+const ACCOUNT_NOT_FOUND = 'Conta vinculada não encontrada.';
+
+/**
+ * FIN-096 — algum `accountId` informado fica fora do mapa de `accountCurrencies`, isto é, não é
+ * uma conta do usuário? Vazio ou nulo é "sem conta vinculada" e passa.
+ */
+function hasForeignAccount(currencies, accountIds) {
+  return accountIds.some(id => id && !currencies.has(id));
+}
+
+/**
+ * FIN-096 — confere o `accountId` de uma dívida ou recorrência. Devolve a mensagem de erro, ou
+ * `null` quando a conta é do usuário ou não foi informada.
+ */
+async function accountOwnershipError(userId, accountId) {
+  if (!accountId) return null;
+  const owned = await prisma.account.count({ where: { id: accountId, userId } });
+  return owned > 0 ? null : ACCOUNT_NOT_FOUND;
 }
 
 app.post('/api/transactions', authenticateToken, async (req, res) => {
@@ -1287,8 +1310,11 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
       // exatamente quais transações entraram, sem reimplementar o hash (ver FIN-004).
       const acceptedIndices = [];
       let skipped = 0;
-      // FIN-074: cada transação fica na moeda da conta em que é importada.
-      const currencies = await accountCurrencies(userId, validation.data.transactions.map(t => t.accountId));
+      // FIN-074: cada transação fica na moeda da conta em que é importada. FIN-096: uma linha que
+      // aponta para conta que não é do usuário recusa o lote inteiro, antes de gravar qualquer uma.
+      const accountIds = validation.data.transactions.map(t => t.accountId);
+      const currencies = await accountCurrencies(userId, accountIds);
+      if (hasForeignAccount(currencies, accountIds)) return res.status(400).json({ error: ACCOUNT_NOT_FOUND });
       for (let i = 0; i < validation.data.transactions.length; i++) {
         const { externalId, ...t } = validation.data.transactions[i];
         const data = { ...t, userId, currency: currencyForAccount(currencies, t.accountId) };
@@ -1311,6 +1337,7 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
     try {
       const { externalId: _externalId, ...rest } = validation.data;
       const currencies = await accountCurrencies(userId, [rest.accountId]);
+      if (hasForeignAccount(currencies, [rest.accountId])) return res.status(400).json({ error: ACCOUNT_NOT_FOUND });
       const data = { ...rest, userId, currency: currencyForAccount(currencies, rest.accountId) };
       const tx = await prisma.transaction.create({ data });
       res.json(tx);
@@ -1340,6 +1367,7 @@ app.put('/api/transactions/:id', authenticateToken, async (req, res) => {
     // real quando desvinculada (`accountId` nulo).
     if (data.accountId !== undefined) {
       const currencies = await accountCurrencies(req.user.userId, [data.accountId]);
+      if (hasForeignAccount(currencies, [data.accountId])) return res.status(400).json({ error: ACCOUNT_NOT_FOUND });
       data.currency = currencyForAccount(currencies, data.accountId);
     }
     const result = await prisma.transaction.updateMany({
@@ -1378,6 +1406,8 @@ app.post('/api/debts', authenticateToken, async (req, res) => {
   const validation = validateBody(debtSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
+    const accountError = await accountOwnershipError(req.user.userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
     const { subItems, ...rest } = validation.data;
     // paidAmount/paidInstallments são opcionais no schema (para não forçar reset a 0 em
     // updates parciais via debtUpdateSchema, que reaproveita o mesmo schema base) — mas
@@ -1401,6 +1431,8 @@ app.put('/api/debts/:id', authenticateToken, async (req, res) => {
   const validation = validateBody(debtUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
+    const accountError = await accountOwnershipError(req.user.userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
     const { id } = req.params;
     const { subItems: _subItems, ...data } = validation.data;
 
@@ -1541,7 +1573,7 @@ app.delete('/api/goals/:id', authenticateToken, async (req, res) => {
 async function investmentAccountError(userId, accountId) {
   if (!accountId) return null;
   const account = await prisma.account.findFirst({ where: { id: accountId, userId }, select: { type: true } });
-  if (!account) return 'Conta vinculada não encontrada.';
+  if (!account) return ACCOUNT_NOT_FOUND;
   if (account.type === 'credit') return 'Um investimento não pode ser vinculado a um cartão de crédito.';
   return null;
 }
@@ -1647,6 +1679,8 @@ app.post('/api/recurring-transactions', authenticateToken, async (req, res) => {
   const validation = validateBody(recurringSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
+    const accountError = await accountOwnershipError(req.user.userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
     const data = { active: true, ...validation.data, userId: req.user.userId };
     const recurring = await prisma.recurringTransaction.create({ data });
     res.json(recurring);
@@ -1730,6 +1764,8 @@ app.put('/api/recurring-transactions/:id', authenticateToken, async (req, res) =
   const validation = validateBody(recurringUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
+    const accountError = await accountOwnershipError(req.user.userId, validation.data.accountId);
+    if (accountError) return res.status(400).json({ error: accountError });
     const recurring = await prisma.recurringTransaction.updateMany({
       where: { id: req.params.id, userId: req.user.userId },
       data: validation.data,

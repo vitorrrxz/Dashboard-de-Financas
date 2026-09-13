@@ -27,8 +27,12 @@ dist-ssr
 
 # Local environment and database files
 .env
+# SQLite database, its side files and any copy of it: real data and password hashes.
+# A rule here does not apply to a file git already tracks (FIN-097).
 *.db
 *.db-journal
-dev.db
-dev.db-journal
-
+*.db-wal
+*.db-shm
+dev.db*
+*.db.bak*
+*.db.backup*

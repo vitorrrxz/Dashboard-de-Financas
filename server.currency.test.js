@@ -161,12 +161,15 @@ describe('moedas no servidor (FIN-074/FIN-075)', () => {
       expect((await listTransactions(tokenA)).find(t => t.id === created.body.id).currency).toBe('USD');
     });
 
-    it('a conta de outro usuário não empresta a moeda dela', async () => {
+    // Até FIN-096 o vínculo era aceito e a transação ficava em real; agora a conta de outro usuário
+    // é recusada antes de gravar — e continua sem emprestar a moeda dela.
+    it('a conta de outro usuário não empresta a moeda dela: o vínculo é recusado (FIN-096)', async () => {
       const usdOfB = await createAccount(tokenB, { name: 'Dólar de B', currency: 'USD' });
       const res = await request(app).post('/api/transactions').set(auth(tokenA))
         .send({ name: 'Referência cruzada', category: 'Outros', date: '2026-09-07', amount: -100, accountId: usdOfB.id });
-      expect(res.status).toBe(200);
-      expect(res.body.currency).toBe('BRL');
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Conta vinculada não encontrada.');
+      expect((await listTransactions(tokenA)).find(t => t.name === 'Referência cruzada')).toBeUndefined();
     });
   });
 
