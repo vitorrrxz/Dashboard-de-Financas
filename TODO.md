@@ -205,7 +205,7 @@
 ### Numeros certos
 - [x] Tratar transferencia entre contas proprias e pagamento de fatura fora dos totais de receita e despesa (FIN-103)
 - [x] Detectar pagamento de fatura automaticamente, pelo texto, na sincronizacao e na importacao (FIN-104, depende de FIN-103 — pares ficaram de fora: nenhum nos dados reais)
-- [ ] Regras fixas do importador casam pedacos de palavra — "pagamento" vira Lazer por causa de "game" (FIN-119, achado ao implementar FIN-104)
+- [x] Regras fixas do importador casam pedacos de palavra — "pagamento" vira Lazer por causa de "game" (FIN-119, achado ao implementar FIN-104)
 - [x] Regras de categorizacao do usuario, aplicadas na importacao e no sync (FIN-105)
 - [x] Criar regra ao corrigir a categoria de uma transacao + tela de regras (FIN-106, depende de FIN-105)
 

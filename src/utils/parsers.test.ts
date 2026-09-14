@@ -198,8 +198,25 @@ describe('parseCSV', () => {
 describe('autoCategory — pagamento de fatura (FIN-104)', () => {
   it('reconhece a fatura antes das outras regras', () => {
     expect(autoCategory('PAGAMENTO DE FATURA NUBANK')).toBe('Pagamento de fatura');
-    // "claro" levaria a Moradia, e "pagamento" a Lazer (contém "game", FIN-119), se a regra da fatura não viesse antes.
+    // "claro" levaria a Moradia se a regra da fatura não viesse antes.
     expect(autoCategory('PGTO FATURA CARTAO CLARO')).toBe('Pagamento de fatura');
     expect(autoCategory('SALARIO SETEMBRO')).toBe('Receita');
+  });
+});
+
+describe('autoCategory — palavra inteira, sem acento (FIN-119)', () => {
+  it('pedaço de palavra não casa', () => {
+    expect(autoCategory('PAGAMENTO BOLETO')).toBe('Outros'); // "game" dentro de "pagamento" levava a Lazer
+    expect(autoCategory('PIX JOSE NETO')).toBe('Outros'); // "net" levava a Moradia
+    expect(autoCategory('LUZIA COSMETICOS')).toBe('Outros'); // "luz" também
+  });
+
+  it('palavra inteira, plural, acento e pontuação casam', () => {
+    expect(autoCategory('OI FIBRA')).toBe('Moradia');
+    expect(autoCategory('DROGARIAS PACHECO')).toBe('Saúde');
+    expect(autoCategory('FARMÁCIA POPULAR')).toBe('Saúde');
+    expect(autoCategory('PAG*PEDÁGIO SEM PARAR')).toBe('Transporte');
+    expect(autoCategory('C&A MODAS')).toBe('Compras');
+    expect(autoCategory('PAGAMENTO RECEBIDO')).toBe('Receita');
   });
 });

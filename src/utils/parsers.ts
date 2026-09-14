@@ -16,22 +16,28 @@ export interface Transaction {
 }
 
 const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
-  // FIN-104 — antes de todas: "pagamento" cairia em Lazer (contém "game", FIN-119), e "claro" ou "tim" em Moradia.
+  // FIN-104 — antes de todas: "claro" ou "tim" no texto levariam a Moradia.
   { keywords: ['pagamento de fatura', 'pagamento fatura', 'pgto fatura', 'pag fatura'], category: 'Pagamento de fatura' },
   { keywords: ['supermercado', 'mercado', 'padaria', 'restaurante', 'ifood', 'rappi', 'mcdonalds', 'burger', 'subway', 'lanchonete', 'pizzaria', 'açougue', 'hortifruti', 'carrefour', 'pao de acucar', 'extra', 'atacadao', 'assai'], category: 'Alimentação' },
   { keywords: ['uber', '99taxi', '99app', 'taxi', 'shell', 'ipiranga', 'posto', 'combustivel', 'gasolina', 'etanol', 'pedágio', 'estacionamento', 'onibus', 'metro', 'passagem'], category: 'Transporte' },
   { keywords: ['netflix', 'spotify', 'steam', 'cinema', 'ingresso', 'teatro', 'show', 'disney', 'hbo', 'amazon prime', 'youtube', 'twitch', 'game', 'playstation', 'xbox'], category: 'Lazer' },
   { keywords: ['aluguel', 'condominio', 'iptu', 'agua', 'energia', 'luz', 'gas', 'internet', 'telefone', 'celular', 'claro', 'vivo', 'tim', 'oi', 'net', 'comgas'], category: 'Moradia' },
   { keywords: ['farmacia', 'drogaria', 'hospital', 'clinica', 'medico', 'dentista', 'plano de saude', 'unimed', 'amil', 'remedios', 'exame'], category: 'Saúde' },
-  { keywords: ['salario', 'pagamento', 'transferencia recebida', 'pix recebido', 'credito em conta', 'rendimento', 'dividendo', 'freelance', 'honorarios'], category: 'Receita' },
+  // "pagamento" sozinho, no extrato, é quase sempre saída (boleto, conta); antes da FIN-119 ele nem chegava aqui (caía em Lazer).
+  { keywords: ['salario', 'pagamento recebido', 'transferencia recebida', 'pix recebido', 'credito em conta', 'rendimento', 'dividendo', 'freelance', 'honorarios'], category: 'Receita' },
   { keywords: ['faculdade', 'escola', 'curso', 'mensalidade', 'livro', 'material escolar', 'udemy', 'coursera', 'alura'], category: 'Educação' },
   { keywords: ['shopping', 'roupa', 'calçado', 'loja', 'magazine', 'americanas', 'amazon', 'mercado livre', 'ali express', 'zara', 'renner', 'c&a'], category: 'Compras' },
 ];
 
+// FIN-119 — minúsculas, sem acento e com a pontuação virando espaço, cercado de espaços para casar palavra inteira.
+const words = (text: string) => ` ${text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9&]+/g, ' ').trim()} `;
+
 export function autoCategory(description: string): string {
-  const lower = description.toLowerCase();
+  const text = words(description);
+  // Palavra inteira, aceitando o plural com "s" ("drogarias"): "game" não casa dentro de "pagamento", nem "net" em "neto".
+  // ponytail: nome colado ("UBERTRIP") deixa de casar; a regra do usuário (FIN-105), que casa por trecho, cobre esses casos.
   for (const rule of CATEGORY_RULES) {
-    if (rule.keywords.some(k => lower.includes(k))) {
+    if (rule.keywords.some(k => { const w = words(k); return text.includes(w) || text.includes(`${w.slice(0, -1)}s `); })) {
       return rule.category;
     }
   }

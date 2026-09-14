@@ -2418,7 +2418,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P3 — FIN-119 — Regras fixas do importador casam pedaços de palavra** (achado ao implementar FIN-104, 14/09/2026)
+- [x] **P3 — FIN-119 — Regras fixas do importador casam pedaços de palavra** (achado ao implementar FIN-104, 14/09/2026) ✅ Concluída (14/09/2026)
 
   **Objetivo**
   A categoria automática da importação manual casar palavras inteiras, e não pedaços delas.
@@ -2440,7 +2440,11 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes de `autoCategory` com as colisões conhecidas.
 
   **Critérios de aceite**
-  - [ ] "PAGAMENTO BOLETO" não vira Lazer, e "OI FIBRA" continua em Moradia.
+  - [x] "PAGAMENTO BOLETO" não vira Lazer, e "OI FIBRA" continua em Moradia.
+
+  **Nota de implementação (14/09/2026):** `autoCategory` passou a comparar palavras inteiras: descrição e palavra-chave vão para minúsculas, sem acento e com a pontuação virando espaço, e a palavra-chave precisa aparecer inteira, aceitando o plural com "s" ("drogarias"), que antes casava por acaso. "PAGAMENTO BOLETO" deixou de ir para Lazer, "PIX JOSE NETO" e "LUZIA COSMETICOS" deixaram de ir para Moradia, e palavras acentuadas no extrato ("FARMÁCIA", "PEDÁGIO") passaram a casar. A palavra-chave "pagamento" de Receita virou "pagamento recebido": nunca tinha valido (o "game" de Lazer vinha antes), e ligá-la agora classificaria boleto e conta pagos como receita. Limite conhecido: nome colado ("UBERTRIP") não casa mais — a regra do usuário (FIN-105), que casa por trecho, cobre esses casos.
+
+  **Validação executada:** `parsers.test.ts` — 2 testes novos: pedaço de palavra não casa ("PAGAMENTO BOLETO", "PIX JOSE NETO" e "LUZIA COSMETICOS" ficam em Outros); palavra inteira, plural, acento e pontuação casam ("OI FIBRA", "DROGARIAS PACHECO", "FARMÁCIA POPULAR", "PAG*PEDÁGIO SEM PARAR", "C&A MODAS", "PAGAMENTO RECEBIDO"). Os testes anteriores de `autoCategory`, `parseOFX` e `parseCSV` passam sem mudança. `npm run lint`, `npm run typecheck`, `npx vitest run` (47 arquivos, 650 testes) e `npm run build` limpos.
 
 ---
 
