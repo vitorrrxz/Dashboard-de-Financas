@@ -210,7 +210,7 @@
 - [x] Criar regra ao corrigir a categoria de uma transacao + tela de regras (FIN-106, depende de FIN-105)
 
 ### Uso no dia a dia
-- [ ] Sincronizacao automatica com a Pluggy ao abrir o app (FIN-107)
+- [x] Sincronizacao automatica com a Pluggy ao abrir o app (FIN-107)
 - [ ] Empacotar o app em Docker — frontend + API + banco em volume (FIN-108)
 - [ ] Acesso privado pelo celular via Tailscale com HTTPS — PWA instalado (FIN-109, depende de FIN-108)
 - [ ] Token de sessao em cookie httpOnly em vez do localStorage (FIN-110, depende de FIN-108)

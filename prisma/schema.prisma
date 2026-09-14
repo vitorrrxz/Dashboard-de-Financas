@@ -23,6 +23,7 @@ model User {
   investments  Investment[]
   twoFactor    UserTwoFactor?
   categoryRules CategoryRule[]
+  pluggyItems  PluggyItem[]
 }
 
 // FIN-078 — verificação em duas etapas (TOTP). Tabela própria, 1:1 com User, em vez de colunas
@@ -160,6 +161,22 @@ model CategoryRule {
   user      User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, match]) // também serve de índice por userId
+}
+
+// FIN-107 — conexão com um banco pela Pluggy (o "item"): o estado do login, que tira a conexão
+// expirada da sincronização automática, e a hora da última sincronização, mostrada na tela.
+model PluggyItem {
+  id           String    @id @default(uuid())
+  userId       String
+  pluggyId     String    // id do item na Pluggy
+  providerName String
+  status       String    // status do item na Pluggy (UPDATED, LOGIN_ERROR, OUTDATED...)
+  lastSyncAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  user         User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, pluggyId]) // também serve de índice por userId
 }
 
 // FIN-049 — meta financeira (Fase 4): quanto o usuário quer juntar até uma data.

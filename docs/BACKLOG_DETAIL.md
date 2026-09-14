@@ -2514,7 +2514,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P2 — FIN-107 — Sincronização automática com a Pluggy**
+- [x] **P2 — FIN-107 — Sincronização automática com a Pluggy** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Abrir o app e ver os dados do banco já atualizados.
@@ -2539,7 +2539,14 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes: conexão recente não sincroniza; conexão antiga sincroniza uma vez só, mesmo com duas abas abertas; erro de conexão não quebra a carga do dashboard.
 
   **Critérios de aceite**
-  - [ ] Sincronização automática ao abrir o app, com a hora da última sincronização visível.
+  - [x] Sincronização automática ao abrir o app, com a hora da última sincronização visível.
+
+  **Nota de implementação (14/09/2026):** a conexão com o banco não ficava gravada. O `connect-item` criava uma conta de saldo zero com o id do item, que a sincronização nunca atualizava, e o botão "Sincronizar" só existia até recarregar a página: para sincronizar, era preciso conectar o banco de novo. Agora a tabela `PluggyItem` guarda cada conexão do usuário, com o estado do login e a hora da última sincronização, e o `connect-item` a registra no lugar da conta de saldo zero — recusando a conexão cujo `clientUserId` é de outro usuário. O corpo da rota de sync virou `syncPluggyItem`, sem mudar o que faz; passou só a gravar o estado do item no começo e a hora no fim. A rota do botão aceita apenas a conexão registrada para o próprio usuário.
+  `POST /api/pluggy/auto-sync`, chamada quando a barra lateral monta — depois da carga inicial, então não disputa com ela —, sincroniza as conexões paradas há mais de 6 h, menos as de login expirado, e devolve a lista; se entrou algo, o App recarrega contas e transações. Uma sincronização por vez por usuário: uma fila em memória faz a segunda aba esperar a primeira e reler a conexão, já sincronizada. A falha de uma conexão vai para o log e não impede as outras nem a resposta. A conexão feita antes da tabela é achada pelas contas que já sincronizou (`fetchAccount` devolve o `itemId`), uma vez, enquanto o usuário não tem nenhuma conexão registrada: a que já existe no banco real passa a sincronizar sem conectar de novo. Pelo mesmo caminho a conexão volta depois de restaurar um backup, que por isso não a inclui.
+  Na barra lateral, cada conexão aparece com "Última sincronização: há 3 h" (`formatRelativeTime`, já existente) ou com o aviso de login expirado, e com um botão para sincronizar só ela; "Conectar Banco" fica sempre disponível, e fechar o widget sem conectar volta a liberar o botão. Migração `20260914210615_add_pluggy_items`, que só cria a tabela, aplicada ao `dev.db` depois de um backup, com as tabelas existentes conferidas por hash antes e depois.
+  Ficou de fora: reconectar a mesma conexão depois do login expirado (`updateItem` no widget) — hoje "Conectar Banco" cria uma conexão nova, e a antiga continua listada com o aviso — e remover uma conexão da lista. A fila vale para um processo só da API (comentário `ponytail:` no código).
+
+  **Validação executada:** `server.pluggy-sync.test.js` — 8 testes, com um cliente da Pluggy de mentira: conectar registra a conexão sem criar conta de saldo zero, e a automática a sincroniza; conexão sincronizada há 1 h não sincroniza, e há 7 h sincroniza; duas abas ao mesmo tempo sincronizam uma vez só (uma chamada à Pluggy, uma transação) — conferido que o teste falha sem a fila; login expirado fica de fora mesmo parado; erro da Pluggy responde 200, com a conexão listada e sem hora nova; pelo botão, a conexão de outro usuário dá 404, e o login expirado dá 409 e fica gravado; a conexão antiga é achada pela conta, sem duplicá-la; conexão com `clientUserId` de outro usuário não é registrada. `PluggyConnectButton.test.tsx` — 5 testes: ao abrir, pede a automática, mostra a hora e o login expirado e recarrega o App se algo entrou; sem nada novo, não recarrega; falha na automática não quebra o painel; o botão da conexão chama a rota dela e mostra "agora", e o 409 mostra o aviso; conectar registra e já sincroniza. `npm run lint`, `npm run typecheck`, `npx vitest run` (49 arquivos, 663 testes) e `npm run build` limpos.
 
 ---
 
