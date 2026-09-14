@@ -156,6 +156,18 @@ O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos se
 
 ---
 
+## 💾 Backup do banco
+
+Todos os dados ficam num único arquivo SQLite (`dev.db`), que não vai para o git. Para ter cópias:
+* **Automático:** defina `BACKUP_DIR` no `.env` — de preferência outro disco ou uma pasta sincronizada com a nuvem. O servidor grava uma cópia ao subir e outra a cada 24 horas, e mantém as `BACKUP_KEEP` mais recentes (padrão 30).
+* **Manual:** `npm run backup`.
+
+A cópia é feita com `VACUUM INTO`, segura com o servidor rodando, e conferida com `integrity_check` antes de as antigas serem apagadas.
+
+**Restaurar:** pare o servidor, guarde o `dev.db` atual com outro nome, copie o backup escolhido (`finflow-AAAA-MM-DDTHH-MM-SS.db`) para `dev.db`, apague `dev.db-wal` e `dev.db-shm` se existirem e suba o servidor de novo.
+
+---
+
 ## 📁 `sandbox-pluggy/`
 
 A pasta `sandbox-pluggy/` **não é parte do aplicativo principal** — é um protótipo isolado, sem autenticação real, usado para testar a integração com a Pluggy separadamente. Não confundir com o backend (`server.js` na raiz). Detalhes em [`sandbox-pluggy/README.md`](sandbox-pluggy/README.md).

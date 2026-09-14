@@ -200,7 +200,7 @@
 > Sugestoes discutidas em 12/09/2026, na ordem de prioridade combinada. Antes, a FIN-101 (acao do dono do repositorio, Fase 1). Nada multiusuario: o FinFlow e um dashboard pessoal (FIN-077).
 
 ### Protecao dos dados
-- [ ] Backup automatico diario do banco SQLite, fora do repositorio e com rotacao (FIN-102, depende de FIN-097)
+- [x] Backup automatico diario do banco SQLite, fora do repositorio e com rotacao (FIN-102, depende de FIN-097)
 
 ### Numeros certos
 - [ ] Tratar transferencia entre contas proprias e pagamento de fatura fora dos totais de receita e despesa (FIN-103)

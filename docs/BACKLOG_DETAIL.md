@@ -2308,7 +2308,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 > Sugestões discutidas em 12/09/2026, depois da verificação da Fase 9, na ordem de prioridade combinada: proteção dos dados, números certos, uso no dia a dia e engenharia. Nada aqui é multiusuário — o FinFlow é um dashboard pessoal (FIN-077). Antes de começar, a FIN-101 (ação do dono do repositório, seção 1).
 
-- [ ] **P1 — FIN-102 — Backup automático diário do banco SQLite**
+- [x] **P1 — FIN-102 — Backup automático diário do banco SQLite** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Ter cópias recentes e restauráveis do banco sem depender de lembrar de exportar.
@@ -2335,8 +2335,12 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Teste com banco temporário: o backup gera um SQLite íntegro, com as mesmas contagens por tabela; a rotação mantém só os N mais recentes; destino inexistente ou sem permissão não derruba o servidor.
 
   **Critérios de aceite**
-  - [ ] Backup diário automático fora do repositório, com rotação.
-  - [ ] Restauração documentada e testada.
+  - [x] Backup diário automático fora do repositório, com rotação.
+  - [x] Restauração documentada e testada.
+
+  **Nota de implementação (14/09/2026):** `scripts/backup-db.mjs` copia o banco com `VACUUM INTO` numa conexão somente leitura — consistente com o servidor rodando, sem copiar o arquivo aberto — para `BACKUP_DIR`, com o nome `finflow-AAAA-MM-DDTHH-MM-SS.db` (ordem alfabética = cronológica). A cópia é conferida (`integrity_check` e as mesmas tabelas) antes da rotação, que mantém as `BACKUP_KEEP` mais recentes (padrão 30) e só apaga arquivos com esse nome; cópia reprovada é descartada, e uma do mesmo segundo nunca é sobrescrita. O servidor faz uma cópia ao subir e outra a cada 24 h quando `BACKUP_DIR` está definido — sem a variável, fica desligado, e nunca roda nos testes —, e uma falha só vai para o log. `npm run backup` roda à mão, lendo o `.env` pelo `--env-file-if-exists` do próprio Node, sem dependência nova, e sai com código 1 na falha. A restauração está no README. Ficaram de fora, por decisão: aviso de pasta dentro do projeto e conferência da contagem de linhas, que daria alarme falso quando o servidor grava durante a cópia.
+
+  **Validação executada:** `test/backup-db.test.js` — 5 testes: cópia íntegra que, restaurada, tem os mesmos dados; rotação mantém as N mais recentes sem tocar em outros arquivos da pasta; `BACKUP_KEEP` inválido nunca apaga a cópia recém-gravada; não sobrescreve cópia do mesmo segundo; configuração inválida recusada, e no servidor a falha só vai para o log. `npm run backup` de ponta a ponta no banco real, numa pasta temporária apagada em seguida: 240 kB e código 0; sem `BACKUP_DIR`, código 1; `dev.db` com o mesmo sha256 antes e depois. `npm run lint`, `npm run typecheck`, `npx vitest run` (45 arquivos, 625 testes) e `npm run build` limpos.
 
 ---
 

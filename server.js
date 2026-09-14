@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { fileURLToPath } from 'url';
 import * as OTPAuth from 'otpauth';
 import qrcode from 'qrcode-generator';
+import { runBackupSafely } from './scripts/backup-db.mjs';
 
 dotenv.config();
 
@@ -2495,6 +2496,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   app.listen(PORT, () => {
     console.log(`Finance Dashboard API Proxy running on http://localhost:${PORT}`);
   });
+  // FIN-102 — cópia do banco ao subir e a cada 24 h; sem BACKUP_DIR, desligado.
+  if (process.env.BACKUP_DIR) {
+    runBackupSafely();
+    setInterval(runBackupSafely, 24 * 60 * 60 * 1000);
+  }
 }
 
 // `prisma` também exportado para que os testes possam chamar `$disconnect()` no
