@@ -236,6 +236,11 @@ function pluggyAmountInAccountCurrency(pluggyTx) {
 // (categoria normalizada em inglês, descrição no idioma do banco).
 const CREDIT_CARD_PAYMENT_MARKERS = ['credit card payment', 'pagamento de fatura', 'pagamento recebido'];
 
+// FIN-103 — transferência entre contas próprias e pagamento de fatura: nem receita nem despesa,
+// então também não geram alerta de gasto. Mesma lista de OWN_TRANSFER_CATEGORIES em
+// src/utils/categories.ts — server.notifications.test.js confere as duas.
+const OWN_TRANSFER_CATEGORIES = ['Transferência entre contas', 'Pagamento de fatura', 'Credit card payment', 'Same person transfer', 'Transfer - Internal'];
+
 // Um lançamento de cartão que é o pagamento da fatura, e não uma compra.
 //
 // Ele não é uma movimentação nova: o dinheiro já saiu da conta corrente (onde aparece como
@@ -246,6 +251,27 @@ const CREDIT_CARD_PAYMENT_MARKERS = ['credit card payment', 'pagamento de fatura
 function isCreditCardBillPayment(pluggyTx) {
   const haystack = ((pluggyTx.category ?? '') + ' ' + (pluggyTx.description ?? '')).toLowerCase();
   return CREDIT_CARD_PAYMENT_MARKERS.some(marker => haystack.includes(marker));
+}
+
+// FIN-104 — categoria de uma transação nova vinda da Pluggy. O pagamento de fatura visto da conta
+// corrente às vezes vem só como "Transfers"; pelo texto, vira "Pagamento de fatura", que fica fora
+// de receitas e despesas (FIN-103). No cartão, esses lançamentos nem chegam aqui (FIN-092). Só na
+// criação: numa nova sincronização, a categoria que o usuário escolheu fica. FIN-105: uma regra de
+// categoria do usuário vem antes de tudo.
+function pluggyTransactionCategory(pluggyTx, rules = []) {
+  return ruleCategory(rules, pluggyTx.description)
+    ?? (pluggyTx.amount < 0 && isCreditCardBillPayment(pluggyTx) ? 'Pagamento de fatura' : (pluggyTx.category || 'Outros'));
+}
+
+// FIN-105 — texto sem acento e em minúsculas: "Uber", "UBER" e "Úber" casam com a mesma regra.
+const foldText = text => String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/** Categoria da regra do usuário contida em `description` — a mais específica (texto mais longo) —, ou `null`. */
+function ruleCategory(rules, description) {
+  const text = foldText(description);
+  const hits = rules.filter(rule => text.includes(foldText(rule.match)));
+  if (hits.length === 0) return null;
+  return hits.reduce((best, rule) => (foldText(rule.match).length > foldText(best.match).length ? rule : best)).category;
 }
 
 // FIN-074 — moeda de uma conta vinda da Pluggy (`currencyCode`, ISO 4217). Código ausente ou
@@ -468,7 +494,7 @@ function detectUnusualSpending(transactions, today, { months, threshold, minCent
   // mês → (categoria → centavos gastos)
   const spendByMonth = new Map();
   for (const t of transactions) {
-    if (t.amount >= 0) continue;
+    if (t.amount >= 0 || OWN_TRANSFER_CATEGORIES.includes(t.category)) continue;
     const month = t.date.slice(0, 7);
     const counts = month === currentMonth ? t.date <= today : baselineMonths.includes(month);
     if (!counts) continue;
@@ -729,6 +755,13 @@ const budgetSchema = z.object({
   monthlyLimit: z.coerce.number().int('Limite mensal deve ser um inteiro em centavos.').min(1, 'Limite mensal deve ser maior que zero.'),
 });
 const budgetUpdateSchema = budgetSchema.partial();
+// FIN-105 — regra de categoria. Pelo menos 2 caracteres: uma letra só casaria com quase toda descrição.
+const categoryRuleSchema = z.object({
+  match: z.string({ error: 'Texto da regra é obrigatório.' }).trim().min(2, 'O texto da regra precisa de ao menos 2 caracteres.').max(100),
+  category: z.string({ error: 'Categoria é obrigatória.' }).trim().min(1, 'Categoria é obrigatória.').max(100),
+});
+// FIN-106 — só na rota: `applyToExisting` não é campo da regra (nem do backup).
+const categoryRuleRequestSchema = categoryRuleSchema.extend({ applyToExisting: z.boolean().optional() });
 // FIN-049/FIN-050 — metas financeiras (Fase 4). `targetAmount` exige > 0: uma meta de R$0
 // não tem sentido de negócio e tornaria o cálculo de progresso uma divisão por zero.
 // `currentAmount` é opcional no create (nasce em 0) para que o mesmo schema sirva de base
@@ -1316,9 +1349,11 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
       const accountIds = validation.data.transactions.map(t => t.accountId);
       const currencies = await accountCurrencies(userId, accountIds);
       if (hasForeignAccount(currencies, accountIds)) return res.status(400).json({ error: ACCOUNT_NOT_FOUND });
+      // FIN-105: a regra de categoria do usuário vale sobre o palpite do importador (`autoCategory`).
+      const categoryRules = await prisma.categoryRule.findMany({ where: { userId } });
       for (let i = 0; i < validation.data.transactions.length; i++) {
         const { externalId, ...t } = validation.data.transactions[i];
-        const data = { ...t, userId, currency: currencyForAccount(currencies, t.accountId) };
+        const data = { ...t, userId, currency: currencyForAccount(currencies, t.accountId), category: ruleCategory(categoryRules, t.name) ?? t.category };
         data.importHash = computeImportHash(userId, { ...t, externalId });
         try {
           await prisma.transaction.create({ data });
@@ -1666,6 +1701,60 @@ app.get('/api/exchange-rates', authenticateToken, async (req, res) => {
   }
 });
 
+// --- REGRAS DE CATEGORIA (FIN-105) ---
+app.get('/api/category-rules', authenticateToken, async (req, res) => {
+  try {
+    res.json(await prisma.categoryRule.findMany({ where: { userId: req.user.userId }, orderBy: { match: 'asc' } }));
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar as regras de categoria.');
+  }
+});
+
+// Criar e editar pela mesma rota: uma regra por texto, e mandar o mesmo texto troca a categoria.
+// FIN-106: com `applyToExisting`, recategoriza também as transações já gravadas em que esta regra
+// vence — uma regra mais longa, de outra categoria ("uber eats"), continua valendo nas dela.
+// `updated` diz quantas mudaram.
+app.post('/api/category-rules', authenticateToken, async (req, res) => {
+  const validation = validateBody(categoryRuleRequestSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
+  const { match, category, applyToExisting } = validation.data;
+  try {
+    const rule = await prisma.categoryRule.upsert({
+      where: { userId_match: { userId, match } },
+      create: { userId, match, category },
+      update: { category },
+    });
+    let updated = 0;
+    if (applyToExisting) {
+      const [rules, txs] = await Promise.all([
+        prisma.categoryRule.findMany({ where: { userId } }),
+        prisma.transaction.findMany({ where: { userId }, select: { id: true, name: true, category: true } }),
+      ]);
+      const folded = foldText(match);
+      const ids = txs
+        .filter(t => t.category !== category && foldText(t.name).includes(folded) && ruleCategory(rules, t.name) === category)
+        .map(t => t.id);
+      // Em lotes de 500 ids, abaixo do limite de parâmetros do SQLite.
+      for (let i = 0; i < ids.length; i += 500) {
+        updated += (await prisma.transaction.updateMany({ where: { userId, id: { in: ids.slice(i, i + 500) } }, data: { category } })).count;
+      }
+    }
+    res.json({ ...rule, updated });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao salvar a regra de categoria.');
+  }
+});
+
+app.delete('/api/category-rules/:id', authenticateToken, async (req, res) => {
+  try {
+    await prisma.categoryRule.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao excluir a regra de categoria.');
+  }
+});
+
 // --- RECURRING TRANSACTIONS (FIN-054) ---
 app.get('/api/recurring-transactions', authenticateToken, async (req, res) => {
   try {
@@ -1932,6 +2021,7 @@ const BACKUP_SECTIONS = {
   goals: ['meta', 'metas'],
   recurring: ['recorrência', 'recorrências'],
   investments: ['investimento', 'investimentos'],
+  categoryRules: ['regra de categoria', 'regras de categoria'],
 };
 
 async function buildBackup(userId) {
@@ -1939,7 +2029,7 @@ async function buildBackup(userId) {
   // Pluggy gravando ao mesmo tempo. O `id` no fim de cada ordenação desempata registros criados
   // no mesmo milissegundo, para dois backups dos mesmos dados saírem idênticos.
   const byCreation = [{ createdAt: 'asc' }, { id: 'asc' }];
-  const [user, accounts, transactions, debts, budgets, goals, recurring, investments] = await prisma.$transaction([
+  const [user, accounts, transactions, debts, budgets, goals, recurring, investments, categoryRules] = await prisma.$transaction([
     prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } }),
     prisma.account.findMany({ where: { userId }, orderBy: byCreation }),
     prisma.transaction.findMany({ where: { userId }, orderBy: [{ date: 'asc' }, ...byCreation] }),
@@ -1952,6 +2042,7 @@ async function buildBackup(userId) {
     prisma.goal.findMany({ where: { userId }, orderBy: byCreation }),
     prisma.recurringTransaction.findMany({ where: { userId }, orderBy: byCreation }),
     prisma.investment.findMany({ where: { userId }, orderBy: byCreation }),
+    prisma.categoryRule.findMany({ where: { userId }, orderBy: byCreation }),
   ]);
   if (!user) return null;
   const withoutUser = ({ userId: _userId, ...row }) => row;
@@ -1971,6 +2062,7 @@ async function buildBackup(userId) {
       goals: goals.map(withoutUser),
       recurring: recurring.map(withoutUser),
       investments: investments.map(withoutUser),
+      categoryRules: categoryRules.map(withoutUser),
     },
   };
 }
@@ -2027,6 +2119,8 @@ const backupInvestmentSchema = investmentSchema.extend({
   updatedAt: backupDateField,
 });
 
+const backupCategoryRuleSchema = categoryRuleSchema.extend({ id: backupIdField, createdAt: backupDateField });
+
 const backupRows = schema => z.array(schema).max(MAX_BACKUP_ROWS, `mais de ${MAX_BACKUP_ROWS} registros.`);
 const backupSchema = z.object({
   format: z.literal(BACKUP_FORMAT, { message: 'O arquivo não é um backup do FinFlow.' }),
@@ -2039,6 +2133,8 @@ const backupSchema = z.object({
     goals: backupRows(backupGoalSchema),
     recurring: backupRows(backupRecurringSchema),
     investments: backupRows(backupInvestmentSchema),
+    // FIN-105 — ausente nos backups de antes das regras de categoria: vale como lista vazia.
+    categoryRules: backupRows(backupCategoryRuleSchema).default([]),
   }),
 });
 
@@ -2092,6 +2188,7 @@ function backupConsistencyError(data) {
   }
   const uniqueKeys = [
     ['budgets', 'category', 'categoria repetida'],
+    ['categoryRules', 'match', 'regra repetida'],
     ['accounts', 'pluggyId', 'conta da Pluggy repetida'],
     ['transactions', 'pluggyId', 'transação da Pluggy repetida'],
     ['transactions', 'importHash', 'transação importada repetida'],
@@ -2116,7 +2213,7 @@ function backupConsistencyError(data) {
 async function backupIdsTakenByOthers(userId, data) {
   const models = {
     accounts: prisma.account, transactions: prisma.transaction, debts: prisma.debt, budgets: prisma.budget,
-    goals: prisma.goal, recurring: prisma.recurringTransaction, investments: prisma.investment,
+    goals: prisma.goal, recurring: prisma.recurringTransaction, investments: prisma.investment, categoryRules: prisma.categoryRule,
   };
   for (const [section, model] of Object.entries(models)) {
     const ids = data[section].map(row => row.id);
@@ -2167,6 +2264,7 @@ function buildRestoreRows(userId, data, reuseIds) {
     investments: data.investments.map(({ id, accountId, ...investment }) => ({
       ...investment, id: newId(id), userId, accountId: accountRef(accountId), currency: investment.currency ?? BASE_CURRENCY,
     })),
+    categoryRules: data.categoryRules.map(({ id, ...rule }) => ({ ...rule, id: newId(id), userId })),
   };
 }
 
@@ -2205,6 +2303,7 @@ app.post(BACKUP_IMPORT_PATH, authLimiter, authenticateToken, express.json({ limi
       prisma.investment.deleteMany({ where: { userId } }),
       prisma.budget.deleteMany({ where: { userId } }),
       prisma.goal.deleteMany({ where: { userId } }),
+      prisma.categoryRule.deleteMany({ where: { userId } }),
       // Avisos derivados dos dados antigos; os dos restaurados são gerados na próxima carga do app.
       prisma.notification.deleteMany({ where: { userId } }),
       prisma.account.deleteMany({ where: { userId } }),
@@ -2216,6 +2315,7 @@ app.post(BACKUP_IMPORT_PATH, authLimiter, authenticateToken, express.json({ limi
       prisma.goal.createMany({ data: rows.goals }),
       prisma.recurringTransaction.createMany({ data: rows.recurring }),
       prisma.investment.createMany({ data: rows.investments }),
+      prisma.categoryRule.createMany({ data: rows.categoryRules }),
     ]);
 
     const restored = Object.fromEntries(Object.keys(BACKUP_SECTIONS).map(section => [section, data[section].length]));
@@ -2301,6 +2401,8 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
     }
 
     let totalTxs = 0;
+    // FIN-105: regras de categoria do usuário, lidas uma vez para a sincronização inteira.
+    const categoryRules = await prisma.categoryRule.findMany({ where: { userId } });
 
     for (const pluggyAcc of accountsRes.results) {
       const accountType = mapPluggyAccountType(pluggyAcc);
@@ -2421,7 +2523,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
           accountId: localAccount.id,
           pluggyId: tx.id,
           name: tx.description,
-          category: tx.category || 'Outros',
+          category: pluggyTransactionCategory(tx, categoryRules),
           date: tx.date.toISOString().split('T')[0],
           amount: pluggyAmountToCents(tx, accountType),
           currency: accountCurrency, // FIN-074
@@ -2443,7 +2545,7 @@ app.post('/api/pluggy/sync/:itemId', authenticateToken, async (req, res) => {
               await prisma.transaction.upsert({
                 where: { userId_pluggyId: { userId, pluggyId: t.pluggyId } },
                 create: t,
-                update: { name: t.name, category: t.category, date: t.date, amount: t.amount, paymentType: t.paymentType, currency: t.currency },
+                update: { name: t.name, date: t.date, amount: t.amount, paymentType: t.paymentType, currency: t.currency },
               });
             }
           } else {
@@ -2507,8 +2609,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // `afterAll` — sem isso, better-sqlite3 mantém o arquivo aberto e a limpeza do banco de
 // teste (`unlink`) falha com `EBUSY` no Windows (ver FIN-031).
 export {
-  app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment,
+  app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment, pluggyTransactionCategory,
   nextBillDueDate, pluggyBillDueDay, buildDueNotifications, detectUnusualSpending,
   pluggyCurrency, formatCents, SUPPORTED_CURRENCIES, parseProviderRates, createExchangeRateCache,
-  encryptTwoFactorSecret, decryptTwoFactorSecret,
+  encryptTwoFactorSecret, decryptTwoFactorSecret, OWN_TRANSFER_CATEGORIES,
 };

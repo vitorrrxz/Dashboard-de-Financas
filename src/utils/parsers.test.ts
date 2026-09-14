@@ -194,3 +194,12 @@ describe('parseCSV', () => {
     expect(parseCSV('')).toEqual([]);
   });
 });
+
+describe('autoCategory — pagamento de fatura (FIN-104)', () => {
+  it('reconhece a fatura antes das outras regras', () => {
+    expect(autoCategory('PAGAMENTO DE FATURA NUBANK')).toBe('Pagamento de fatura');
+    // "claro" levaria a Moradia, e "pagamento" a Lazer (contém "game", FIN-119), se a regra da fatura não viesse antes.
+    expect(autoCategory('PGTO FATURA CARTAO CLARO')).toBe('Pagamento de fatura');
+    expect(autoCategory('SALARIO SETEMBRO')).toBe('Receita');
+  });
+});

@@ -2344,7 +2344,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P1 — FIN-103 — Transferência entre contas próprias fora dos totais de receita e despesa**
+- [x] **P1 — FIN-103 — Transferência entre contas próprias fora dos totais de receita e despesa** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Não contar como receita nem como despesa o dinheiro que só muda de uma conta sua para outra.
@@ -2372,12 +2372,17 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes das regras financeiras: uma transferência não altera receita, despesa nem orçamento; pagar a fatura não duplica a despesa das compras.
 
   **Critérios de aceite**
-  - [ ] Transferências e pagamento de fatura fora dos totais de receita e despesa.
-  - [ ] Totais conferidos contra os dados reais antes e depois.
+  - [x] Transferências e pagamento de fatura fora dos totais de receita e despesa.
+  - [x] Totais conferidos contra os dados reais antes e depois.
+
+  **Nota de implementação (14/09/2026):** a medição nos dados reais (148 transações, todas da Pluggy; 2 contas correntes e 2 cartões) mudou o desenho previsto: nenhuma transferência tinha os dois lados no app — a outra ponta fica quase sempre num banco não conectado —, então um `transferGroupId` ligando os lados não teria o que ligar. A marcação ficou na **categoria**, sem migração: as novas "Transferência entre contas" e "Pagamento de fatura" (no seletor do modal de edição) e as três com que a Pluggy já identifica esses lançamentos — "Credit card payment", "Same person transfer" e "Transfer - Internal" — ficam fora de receitas e despesas no dashboard (totais, despesas do mês, gastos por categoria e gráficos de evolução), nos totais e nos filtros Receitas/Despesas da aba Transações (aparecem em "Todas"), nos comparativos dos Relatórios e nos alertas de gasto incomum (FIN-069); também saem do seletor de categoria do Orçamento. PIX para outras pessoas continua contando: é dinheiro que sai de fato. A lista existe no frontend (`categories.ts`) e no `server.js`, e um teste confere que as duas batem. Backup e restauração não mudam — a categoria já faz parte deles.
+  Nos dados reais: receitas de R$ 6.594,90 para R$ 5.076,72 (−R$ 1.518,18) e despesas de R$ 11.575,58 para R$ 9.891,70 (−R$ 1.683,88). Fica para a FIN-104 o que a Pluggy não classifica: um pagamento de fatura de R$ 735,20, em 11/09, veio com a categoria genérica "Transfers" — até lá, basta trocar a categoria dele no modal.
+
+  **Validação executada:** testes novos — `useFinancialStats.test.ts` (transferências fora de receitas, despesas, despesas do mês, categorias e evolução, com receita e despesa comuns ainda contando), `transactions.test.ts` (3: totais, filtros Receitas/Despesas e seletor do Orçamento), `reports.test.ts` (comparativos mensal e anual) e `server.notifications.test.js` (sem alerta para as categorias de transferência, com o alerta comum ainda saindo, e as listas do frontend e do servidor iguais). O teste de tema já cobre o contraste das duas cores novas. Medição antes e depois no banco real, só leitura. `npm run lint`, `npm run typecheck`, `npx vitest run` (45 arquivos, 631 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P2 — FIN-104 — Detectar transferências e pagamento de fatura automaticamente**
+- [x] **P2 — FIN-104 — Detectar transferências e pagamento de fatura automaticamente** ✅ Concluída (14/09/2026), com escopo reduzido — ver a decisão
 
   **Objetivo**
   Não depender de marcar cada transferência à mão.
@@ -2402,11 +2407,44 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes da detecção: par exato casa; valores iguais em datas distantes não; três candidatos para um lado casam só um; descarte lembrado.
 
   **Critérios de aceite**
-  - [ ] Pares sugeridos para confirmação, sem falso positivo nos casos testados.
+  - [x] Pagamento de fatura reconhecido pelo texto na sincronização e na importação, sem falso positivo nos casos testados (critério ajustado pela decisão abaixo).
+
+  **Decisão (14/09/2026):** a medição da FIN-103 não achou nenhuma transferência com os dois lados no app, então a busca por pares, a confirmação e o "descarte lembrado" ficaram de fora — seriam código sem nada para mostrar. Vale reabrir se outro banco for conectado e os dois lados passarem a aparecer.
+
+  **Nota de implementação (14/09/2026):** o que os dados mostraram foi pagamento de fatura com categoria genérica ("Transfers"). Na sincronização Pluggy, `pluggyTransactionCategory` grava como "Pagamento de fatura" o débito cujo texto é de pagamento de fatura, reaproveitando `isCreditCardBillPayment` (FIN-092). Vale só na criação: numa sincronização seguinte, a categoria escolhida pelo usuário fica — o refresh normal já não mexia nela, e o caminho raro de corrida (o `upsert` quando duas sincronizações colidem) deixou de regravá-la. No importador manual, a regra de fatura passou a ser a primeira: antes, "Pagamento de fatura" virava Lazer, porque "pagamento" contém "game". A categoria é aplicada direto, sem confirmação: o texto é explícito, e trocar a categoria no modal desfaz. O lançamento de R$ 735,20 de 11/09 já está no banco como "Transfers" e não muda sozinho — a detecção vale para os novos; esse, basta trocar no modal.
+  Achado no caminho: as regras fixas do importador casam pedaços de palavra — registrado como FIN-119.
+
+  **Validação executada:** `server.pluggy-credit.test.js` — 2 testes novos: pagamento de fatura na conta corrente vira "Pagamento de fatura" mesmo vindo como "Transfers", e a categoria está na lista de FIN-103; entrada "pagamento recebido", compra comum e categoria ausente mantêm o comportamento. `parsers.test.ts` — 1 teste novo: fatura reconhecida antes das outras regras, inclusive com "claro" no texto, e salário continua Receita. `npm run lint`, `npm run typecheck`, `npx vitest run` (45 arquivos, 634 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P2 — FIN-105 — Regras de categorização do usuário**
+- [ ] **P3 — FIN-119 — Regras fixas do importador casam pedaços de palavra** (achado ao implementar FIN-104, 14/09/2026)
+
+  **Objetivo**
+  A categoria automática da importação manual casar palavras inteiras, e não pedaços delas.
+
+  **Problema**
+  `autoCategory` (`parsers.ts`) procura cada palavra-chave com `includes`, sem limite de palavra: "pagamento" contém "game" e vira Lazer, e "oi", "tim", "net", "gas" e "luz" aparecem dentro de outras palavras e puxam para Moradia. Hoje não pesa nos dados reais — todas as transações vêm da Pluggy —, mas todo extrato CSV/OFX importado herda o erro.
+
+  **Arquivos envolvidos**
+  - `src/utils/parsers.ts`, `src/utils/parsers.test.ts`
+
+  **Alterações necessárias**
+  - Casar por palavra inteira (com limite de palavra e sem acento), mantendo as expressões de mais de uma palavra.
+  - Pode ir junto com FIN-105, que mexe na mesma função.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  Testes de `autoCategory` com as colisões conhecidas.
+
+  **Critérios de aceite**
+  - [ ] "PAGAMENTO BOLETO" não vira Lazer, e "OI FIBRA" continua em Moradia.
+
+---
+
+- [x] **P2 — FIN-105 — Regras de categorização do usuário** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Cada transação chegar já com a categoria que você usa.
@@ -2431,11 +2469,15 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes das rotas (CRUD, validação, isolamento) e da aplicação: importação e sync usam a regra; sem regra, vale a lista fixa.
 
   **Critérios de aceite**
-  - [ ] Regras do usuário aplicadas na importação e no sync.
+  - [x] Regras do usuário aplicadas na importação e no sync.
+
+  **Nota de implementação (14/09/2026):** tabela `CategoryRule` (texto a procurar, categoria e `userId`, única por usuário e texto). A migração, só aditiva, foi aplicada ao `dev.db` depois de um backup (`backups/finflow-2026-09-14T16-36-49.db`) e da conferência, por hash de cada tabela, de que nada do que já existia mudou. Rotas `GET`, `POST` e `DELETE /api/category-rules`: o `POST` cria e também edita — mandar o mesmo texto troca a categoria —, com validação (texto de 2 a 100 caracteres, porque uma letra só casaria com quase toda descrição) e isolamento por usuário. As regras valem no servidor, na gravação: na importação em lote, sobre o palpite do importador (`autoCategory`), e na criação das transações da Pluggy, antes da detecção de fatura (FIN-104) e da categoria da própria Pluggy. Casam sem acento e sem diferenciar maiúsculas; em conflito, vence a de texto mais longo. Não valem na transação criada à mão, nem mudam transações já gravadas — recategorizar as existentes é da FIN-106. As regras entram no backup em JSON, e arquivos de antes delas, sem a seção, continuam restaurando. O resumo do backup na tela ainda não conta as regras: isso fica para quando a FIN-106 trouxer a tela delas.
+
+  **Validação executada:** `server.category-rules.test.js` — 5 testes: criar, editar pelo mesmo texto, listar e excluir; validação; isolamento; importação em lote com a regra casando sem acento e sem diferenciar maiúsculas, e a mais longa vencendo; transação criada à mão fica com a categoria escolhida. `server.pluggy-credit.test.js` — 1 teste novo: a regra vem antes da categoria da Pluggy e da detecção de fatura. `server.backup.test.js` — o backup leva e restaura as regras (ida e volta idêntica), e 1 teste novo: arquivo sem a seção continua restaurando. Migração: `migrate diff` vazio antes da mudança; depois do `migrate deploy`, as tabelas existentes com o mesmo hash e `migrate status` em dia. `npm run lint`, `npm run typecheck`, `npx vitest run` (46 arquivos, 641 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P2 — FIN-106 — Criar regra ao corrigir a categoria de uma transação**
+- [x] **P2 — FIN-106 — Criar regra ao corrigir a categoria de uma transação** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Ensinar o app no momento da correção, sem ir a outra tela.
@@ -2459,7 +2501,12 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes de componente: a oferta aparece só quando a categoria muda e mostra quantas transações casam; a recategorização em lote não toca transações de outro usuário.
 
   **Critérios de aceite**
-  - [ ] Regra criada a partir da correção e gerenciável em Configurações.
+  - [x] Regra criada a partir da correção e gerenciável em Configurações.
+
+  **Nota de implementação (14/09/2026):** no modal de edição, quando a categoria muda, aparece "Criar regra: as próximas transações com o texto abaixo entram como …", com o texto sugerido a partir da descrição sem o código do fim ("UBER *TRIP 12345" vira "UBER *TRIP") e editável, e a opção "Aplicar também às transações já gravadas". Ao salvar, a transação é gravada e a regra criada — ou atualizada, se o texto já existia. Com a opção marcada, o servidor recategoriza só as transações em que esta regra vence — uma regra mais longa de outra categoria, como "uber eats", continua valendo nas dela — e só as do próprio usuário, respondendo quantas mudaram; o app então recarrega as transações (`reloadTransactions`, agora o mesmo caminho da importação). Em Configurações, a seção "Regras de categoria" lista as regras, troca a categoria de cada uma, exclui e cria novas, com os rótulos associados aos campos e o erro do servidor em `role="alert"`. O resumo do backup na tela passou a contar as regras, e um backup antigo, sem a seção, conta zero.
+  Ficou de fora a prévia de quantas transações casam antes de salvar: o modal só recebe as linhas visíveis da tabela, e o resultado aparece na própria lista, recarregada.
+
+  **Validação executada:** `server.category-rules.test.js` — 2 testes novos: aplicar às já gravadas recategoriza só onde a regra vence (a mais longa, "uber eats", mantém a dela), não toca transações de outro usuário e informa quantas mudaram; sem a opção, nada já gravado muda. `CategoryRulesSettings.test.tsx` — 4 testes: listar e trocar a categoria pela mesma rota; criar pelo formulário e limpar o campo; exclusão que falha mostra o erro e mantém a regra; resposta fora do formato vira mensagem de erro. `App.test.tsx` — 1 teste novo: trocar a categoria oferece a regra com o texto sugerido e a aplica ao salvar, e sem trocar não oferece. Testes de backup atualizados com a seção nova. `npm run lint`, `npm run typecheck`, `npx vitest run` (47 arquivos, 648 testes) e `npm run build` limpos.
 
 ---
 

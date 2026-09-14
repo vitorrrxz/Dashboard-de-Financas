@@ -1,6 +1,7 @@
 import type { Account, Debt, Investment, Transaction } from '../types';
 import { isDebtPaid, todayISO } from './debts';
 import { computeInvestmentHoldings } from './investments';
+import { isOwnTransfer } from './categories';
 
 // FIN-062/FIN-063/FIN-064 — agregações da aba Relatórios. Funções puras (sem endpoint
 // novo), calculadas sobre os dados já carregados, no mesmo espírito de `useFinancialStats`
@@ -34,13 +35,14 @@ function monthLabel(period: string): string {
  * régua de meses vazios.
  */
 function groupByPeriod(
-  transactions: Pick<Transaction, 'amount' | 'date'>[],
+  transactions: Pick<Transaction, 'amount' | 'date' | 'category'>[],
   keyOf: (dateISO: string) => string,
   labelOf: (period: string) => string
 ): PeriodComparison[] {
   const buckets: Record<string, { income: number; expense: number }> = {};
 
   for (const tx of transactions) {
+    if (isOwnTransfer(tx)) continue; // FIN-103: nem receita nem despesa
     const period = keyOf(tx.date);
     if (!buckets[period]) buckets[period] = { income: 0, expense: 0 };
     if (tx.amount >= 0) {
@@ -67,7 +69,7 @@ function groupByPeriod(
  * de meses fica ilegível, e o corte é feito no fim (períodos recentes) de propósito.
  */
 export function computeMonthlyComparison(
-  transactions: Pick<Transaction, 'amount' | 'date'>[],
+  transactions: Pick<Transaction, 'amount' | 'date' | 'category'>[],
   months = 12
 ): PeriodComparison[] {
   const all = groupByPeriod(transactions, date => date.slice(0, 7), monthLabel);
@@ -76,7 +78,7 @@ export function computeMonthlyComparison(
 
 /** Comparativo ano a ano (FIN-063) — mesma agregação, com granularidade anual. */
 export function computeYearlyComparison(
-  transactions: Pick<Transaction, 'amount' | 'date'>[]
+  transactions: Pick<Transaction, 'amount' | 'date' | 'category'>[]
 ): PeriodComparison[] {
   return groupByPeriod(transactions, date => date.slice(0, 4), period => period);
 }

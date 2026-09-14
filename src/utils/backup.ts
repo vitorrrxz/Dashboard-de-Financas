@@ -16,6 +16,7 @@ const SECTIONS = [
   ['goals', 'meta', 'metas'],
   ['recurring', 'recorrência', 'recorrências'],
   ['investments', 'investimento', 'investimentos'],
+  ['categoryRules', 'regra de categoria', 'regras de categoria'],
 ] as const;
 
 export type BackupSection = (typeof SECTIONS)[number][0];
@@ -36,7 +37,9 @@ export function summarizeBackup(value: unknown): BackupSummary | null {
   }
   const counts = {} as BackupCounts;
   for (const [key] of SECTIONS) {
-    const rows = value.data[key];
+    // FIN-106 — as regras de categoria entraram depois da versão 1 do arquivo: num backup antigo,
+    // a seção não existe e conta como zero (o servidor também aceita).
+    const rows = value.data[key] ?? (key === 'categoryRules' ? [] : undefined);
     if (!Array.isArray(rows)) return null;
     counts[key] = rows.length;
   }

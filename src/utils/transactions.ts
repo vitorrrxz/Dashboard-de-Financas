@@ -6,6 +6,7 @@
 
 import type { Transaction } from '../types';
 import { monthsDescending } from './dates';
+import { isOwnTransfer } from './categories';
 
 /** Filtro de tipo aplicado pelos botões "Todas / Receitas / Despesas". */
 export type TransactionKind = 'all' | 'income' | 'expense';
@@ -55,8 +56,9 @@ export function filterByMonthAndSearch(
 
 /** Aplica o filtro "Todas / Receitas / Despesas" a um conjunto já recortado por mês/busca. */
 export function filterByKind(transactions: Transaction[], kind: TransactionKind): Transaction[] {
-  if (kind === 'income')  return transactions.filter(t => t.amount > 0);
-  if (kind === 'expense') return transactions.filter(t => t.amount < 0);
+  // FIN-103: transferência entre contas próprias aparece só em "Todas".
+  if (kind === 'income')  return transactions.filter(t => t.amount > 0 && !isOwnTransfer(t));
+  if (kind === 'expense') return transactions.filter(t => t.amount < 0 && !isOwnTransfer(t));
   return transactions;
 }
 
@@ -64,12 +66,14 @@ export function filterByKind(transactions: Transaction[], kind: TransactionKind)
  * Soma receitas, despesas e saldo de um conjunto de transações.
  *
  * Transações de valor zero não entram em nenhum dos dois lados (não são entrada nem
- * saída), mas continuam contadas em `count` — que descreve o recorte, não o dinheiro.
+ * saída), mas continuam contadas em `count` — que descreve o recorte, não o dinheiro. O mesmo
+ * vale para transferência entre contas próprias e pagamento de fatura (FIN-103).
  */
 export function summarizeTransactions(transactions: Transaction[]): TransactionTotals {
   let income = 0;
   let expense = 0;
   for (const t of transactions) {
+    if (isOwnTransfer(t)) continue;
     if (t.amount > 0) income += t.amount;
     else if (t.amount < 0) expense += Math.abs(t.amount);
   }

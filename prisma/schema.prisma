@@ -22,6 +22,7 @@ model User {
   notifications Notification[]
   investments  Investment[]
   twoFactor    UserTwoFactor?
+  categoryRules CategoryRule[]
 }
 
 // FIN-078 — verificação em duas etapas (TOTP). Tabela própria, 1:1 com User, em vez de colunas
@@ -145,6 +146,20 @@ model Budget {
 
   @@index([userId]) // ver FIN-019
   @@unique([userId, category])
+}
+
+// FIN-105 — regra de categoria do usuário: a transação nova (importação em lote ou Pluggy) cuja
+// descrição contém `match` — sem acento e sem diferenciar maiúsculas — entra com `category`.
+model CategoryRule {
+  id        String   @id @default(uuid())
+  userId    String
+  match     String
+  category  String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, match]) // também serve de índice por userId
 }
 
 // FIN-049 — meta financeira (Fase 4): quanto o usuário quer juntar até uma data.

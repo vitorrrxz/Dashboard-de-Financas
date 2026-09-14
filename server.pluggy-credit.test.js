@@ -9,12 +9,14 @@ describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
   let pluggyAmountToCents;
   let isCreditCardBillPayment;
   let pluggyCurrency;
+  let pluggyTransactionCategory;
+  let OWN_TRANSFER_CATEGORIES;
   let cleanup;
 
   beforeAll(async () => {
     const app = await createTestApp('pluggy_credit');
     cleanup = app.cleanup;
-    ({ pluggyAmountToCents, isCreditCardBillPayment, pluggyCurrency } = await import('./server.js'));
+    ({ pluggyAmountToCents, isCreditCardBillPayment, pluggyCurrency, pluggyTransactionCategory, OWN_TRANSFER_CATEGORIES } = await import('./server.js'));
   });
 
   afterAll(() => cleanup());
@@ -91,6 +93,27 @@ describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
       expect(pluggyCurrency('usd')).toBe('BRL');
       expect(pluggyCurrency('US')).toBe('BRL');
       expect(pluggyCurrency(986)).toBe('BRL');
+    });
+  });
+
+  describe('pluggyTransactionCategory (FIN-104)', () => {
+    it('pagamento de fatura na conta corrente vira "Pagamento de fatura", mesmo vindo como "Transfers"', () => {
+      const category = pluggyTransactionCategory({ amount: -735.2, category: 'Transfers', description: 'Pagamento de fatura' });
+      expect(category).toBe('Pagamento de fatura');
+      expect(OWN_TRANSFER_CATEGORIES).toContain(category); // fora de receitas e despesas (FIN-103)
+    });
+
+    it('entrada "pagamento recebido" e compras comuns mantêm a categoria da Pluggy', () => {
+      expect(pluggyTransactionCategory({ amount: 1200, category: 'Transfers', description: 'Pagamento recebido' })).toBe('Transfers');
+      expect(pluggyTransactionCategory({ amount: -35.49, category: 'Groceries', description: 'Mercado' })).toBe('Groceries');
+      expect(pluggyTransactionCategory({ amount: -10, description: 'Sem categoria' })).toBe('Outros');
+    });
+
+    it('a regra do usuário vem antes da categoria da Pluggy e da detecção de fatura (FIN-105)', () => {
+      const rules = [{ match: 'uber', category: 'Transporte' }, { match: 'fatura', category: 'Compras' }];
+      expect(pluggyTransactionCategory({ amount: -20, category: 'Taxi and ride-hailing', description: 'UBER *TRIP' }, rules)).toBe('Transporte');
+      expect(pluggyTransactionCategory({ amount: -735.2, category: 'Transfers', description: 'Pagamento de fatura' }, rules)).toBe('Compras');
+      expect(pluggyTransactionCategory({ amount: -10, category: 'Groceries', description: 'Mercado' }, rules)).toBe('Groceries');
     });
   });
 

@@ -4,6 +4,7 @@ import {
   ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions,
 } from './transactions';
 import type { Transaction } from '../types';
+import { EXPENSE_CATEGORIES } from './categories';
 
 function tx(overrides: Partial<Transaction>): Transaction {
   return { id: Math.random().toString(), name: 'Tx', category: 'Outros', date: '2026-09-01', amount: 0, ...overrides };
@@ -113,5 +114,28 @@ describe('summarizeTransactions', () => {
 
   it('devolve zeros para um recorte vazio', () => {
     expect(summarizeTransactions([])).toEqual({ income: 0, expense: 0, balance: 0, count: 0 });
+  });
+});
+
+describe('transferências entre contas e pagamento de fatura (FIN-103)', () => {
+  const dados = [
+    tx({ amount: 5000, category: 'Receita' }), tx({ amount: -300, category: 'Alimentação' }),
+    tx({ amount: -800, category: 'Pagamento de fatura' }), tx({ amount: 1200, category: 'Transfer - Internal' }),
+  ];
+
+  it('ficam fora dos totais, mas contam no recorte', () => {
+    expect(summarizeTransactions(dados)).toEqual({ income: 5000, expense: 300, balance: 4700, count: 4 });
+  });
+
+  it('aparecem em "Todas", não em Receitas nem em Despesas', () => {
+    expect(filterByKind(dados, 'income').map(t => t.amount)).toEqual([5000]);
+    expect(filterByKind(dados, 'expense').map(t => t.amount)).toEqual([-300]);
+    expect(filterByKind(dados, 'all')).toHaveLength(4);
+  });
+
+  it('ficam fora do seletor de categoria do orçamento', () => {
+    expect(EXPENSE_CATEGORIES).toContain('Alimentação');
+    expect(EXPENSE_CATEGORIES).not.toContain('Transferência entre contas');
+    expect(EXPENSE_CATEGORIES).not.toContain('Pagamento de fatura');
   });
 });

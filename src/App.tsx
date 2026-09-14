@@ -24,6 +24,7 @@ import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { TwoFactorSettings } from './components/TwoFactorSettings';
 import { BackupSettings } from './components/BackupSettings';
 import { ThemeSettings } from './components/ThemeSettings';
+import { CategoryRulesSettings } from './components/CategoryRulesSettings';
 import { toCents, toReais } from './utils/money';
 import { apiFetch, ApiError } from './services/api';
 import { useFinancialStats } from './hooks/useFinancialStats';
@@ -376,6 +377,13 @@ export default function App() {
     setDataVersion(v => v + 1);
   };
 
+  /** Busca de novo as transações (a primeira página), depois de uma mudança feita no servidor. */
+  const reloadTransactions = async () => {
+    const txsData = await fetchAPI('/api/transactions');
+    setTxs((txsData as Transaction[]).map(txFromApi));
+    setTxHasMore((txsData as Transaction[]).length >= 2000);
+  };
+
   /* --- API Mappers --- */
   const handleImport = async (newTxs: Transaction[], paymentType: PaymentType) => {
     try {
@@ -386,9 +394,7 @@ export default function App() {
         if (res.skipped > 0) {
           alert(`${res.count} transação(ões) importada(s). ${res.skipped} ignorada(s) por já existir (duplicata).`);
         }
-        const txsData = await fetchAPI('/api/transactions');
-        setTxs((txsData as Transaction[]).map(txFromApi));
-        setTxHasMore((txsData as Transaction[]).length >= 2000);
+        await reloadTransactions();
 
         // Auto-create debt for credit or pix_installment payments
         // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
@@ -478,6 +484,13 @@ export default function App() {
     try {
       await fetchAPI(`/api/transactions/${id}`, 'DELETE');
       setTxs(prev => prev.filter(t => t.id !== id));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+  // FIN-106: regra criada ao corrigir a categoria. Aplicada às já gravadas, recarrega as transações.
+  const createCategoryRule = async (rule: CategoryRuleDraft) => {
+    try {
+      const saved = await fetchAPI('/api/category-rules', 'POST', rule);
+      if (Number(saved?.updated) > 0) await reloadTransactions();
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
@@ -1364,6 +1377,7 @@ export default function App() {
                     accounts={accounts}
                     onUpdate={updateTransaction}
                     onDelete={deleteTransaction}
+                    onCreateRule={createCategoryRule}
                   />
                 )}
               </div>
@@ -1506,7 +1520,7 @@ export default function App() {
             <>
               <div className="mb-6">
                 <h1 className="text-3xl font-bold text-white mb-1">Configurações</h1>
-                <p className="text-textMuted text-sm">Aparência, segurança da conta e backup dos dados</p>
+                <p className="text-textMuted text-sm">Aparência, regras de categoria, segurança da conta e backup dos dados</p>
               </div>
               <div className="space-y-6 max-w-3xl">
                 {settingsNotice && (
@@ -1519,6 +1533,7 @@ export default function App() {
                   </div>
                 )}
                 <ThemeSettings preference={theme.preference} onChange={theme.setPreference} />
+                <CategoryRulesSettings token={token} />
                 <TwoFactorSettings token={token} />
                 <BackupSettings token={token} onRestored={handleRestored} />
               </div>
@@ -1570,27 +1585,43 @@ const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
   pix_installment: { label: 'PIX Parc.',    color: '#f59e0b' },
 };
 
+/** FIN-106 — regra de categoria nascida da correção de uma transação (ver `createCategoryRule`). */
+interface CategoryRuleDraft { match: string; category: string; applyToExisting: boolean }
+
+/** FIN-106 — texto sugerido para a regra: a descrição sem o código do fim ("UBER *TRIP 1234" → "UBER *TRIP"). */
+const suggestRuleMatch = (name: string) => name.replace(/[\d\s*#./-]+$/, '').trim() || name.trim();
+
 // FIN-022: edição/exclusão individual de transação. `rows` continua sendo o recorte já
 // filtrado/paginado calculado pelo componente pai — este componente só adiciona a UI de
 // ação por linha e o modal de edição. Exportado para o teste das ações (FIN-099).
-export function TxTable({ rows, accounts, onUpdate, onDelete }: {
+export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
   rows: Transaction[];
   accounts: Account[];
   onUpdate: (id: string, tx: Partial<Transaction>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onCreateRule?: (rule: CategoryRuleDraft) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [form, setForm] = useState<Partial<Transaction>>({});
   const [saving, setSaving] = useState(false);
   const fieldId = useId();
+  // FIN-106: ao trocar a categoria, a correção pode virar regra de categoria (FIN-105).
+  const [rule, setRule] = useState({ create: false, match: '', applyToExisting: false });
 
-  const openEdit = (t: Transaction) => { setEditing(t); setForm({ ...t }); };
+  const openEdit = (t: Transaction) => {
+    setEditing(t);
+    setForm({ ...t });
+    setRule({ create: false, match: suggestRuleMatch(t.name), applyToExisting: false });
+  };
 
   const handleSave = async () => {
     if (!editing || !form.name?.trim() || !form.date || form.amount === undefined) return;
     setSaving(true);
     try {
       await onUpdate(editing.id, form);
+      if (onCreateRule && rule.create && form.category && form.category !== editing.category) {
+        await onCreateRule({ match: rule.match.trim(), category: form.category, applyToExisting: rule.applyToExisting });
+      }
       setEditing(null);
     } catch (err) {
       console.error(err);
@@ -1716,6 +1747,29 @@ export function TxTable({ rows, accounts, onUpdate, onDelete }: {
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
+              {onCreateRule && form.category !== editing.category && (
+                <fieldset className="space-y-3 p-3 rounded-xl border border-white/10">
+                  <legend className="sr-only">Regra de categoria</legend>
+                  <label className="flex items-start gap-2 text-sm text-textMuted cursor-pointer">
+                    <input type="checkbox" className="mt-0.5" checked={rule.create}
+                      onChange={e => setRule(r => ({ ...r, create: e.target.checked }))} />
+                    <span>Criar regra: as próximas transações com o texto abaixo entram como {form.category}</span>
+                  </label>
+                  {rule.create && (
+                    <>
+                      <div>
+                        <label htmlFor={`${fieldId}-rule`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Texto na descrição</label>
+                        <input id={`${fieldId}-rule`} value={rule.match} onChange={e => setRule(r => ({ ...r, match: e.target.value }))} className="input-field" />
+                      </div>
+                      <label className="flex items-center gap-2 text-sm text-textMuted cursor-pointer">
+                        <input type="checkbox" checked={rule.applyToExisting}
+                          onChange={e => setRule(r => ({ ...r, applyToExisting: e.target.checked }))} />
+                        Aplicar também às transações já gravadas
+                      </label>
+                    </>
+                  )}
+                </fieldset>
+              )}
             </div>
 
             <div className="flex gap-3 mt-6">

@@ -16,6 +16,8 @@ export interface Transaction {
 }
 
 const CATEGORY_RULES: { keywords: string[]; category: string }[] = [
+  // FIN-104 — antes de todas: "pagamento" cairia em Lazer (contém "game", FIN-119), e "claro" ou "tim" em Moradia.
+  { keywords: ['pagamento de fatura', 'pagamento fatura', 'pgto fatura', 'pag fatura'], category: 'Pagamento de fatura' },
   { keywords: ['supermercado', 'mercado', 'padaria', 'restaurante', 'ifood', 'rappi', 'mcdonalds', 'burger', 'subway', 'lanchonete', 'pizzaria', 'açougue', 'hortifruti', 'carrefour', 'pao de acucar', 'extra', 'atacadao', 'assai'], category: 'Alimentação' },
   { keywords: ['uber', '99taxi', '99app', 'taxi', 'shell', 'ipiranga', 'posto', 'combustivel', 'gasolina', 'etanol', 'pedágio', 'estacionamento', 'onibus', 'metro', 'passagem'], category: 'Transporte' },
   { keywords: ['netflix', 'spotify', 'steam', 'cinema', 'ingresso', 'teatro', 'show', 'disney', 'hbo', 'amazon prime', 'youtube', 'twitch', 'game', 'playstation', 'xbox'], category: 'Lazer' },

@@ -27,7 +27,7 @@ const BACKUP = {
     recurring: [], investments: [],
   },
 };
-const RESTORED = { accounts: 2, transactions: 1, debts: 0, budgets: 0, goals: 1, recurring: 0, investments: 0 };
+const RESTORED = { accounts: 2, transactions: 1, debts: 0, budgets: 0, goals: 1, recurring: 0, investments: 0, categoryRules: 0 };
 
 function chooseFile(content: string) {
   fireEvent.change(screen.getByLabelText('Arquivo de backup'), {

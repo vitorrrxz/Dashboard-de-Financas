@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { isDebtOverdue, todayISO } from '../utils/debts';
 import { computeInvestmentHoldings } from '../utils/investments';
+import { isOwnTransfer } from '../utils/categories';
 import type { Account, Debt, Investment, Transaction } from '../types';
 
 // FIN-086 — lógica de cálculo financeiro extraída de dentro de `App.tsx` (onde vivia como
@@ -38,9 +39,10 @@ export function computeFinancialStats(
   dashboardAccountId: string | null,
   investments: Pick<Investment, 'accountId' | 'currentValue'>[] = NO_INVESTMENTS
 ): FinancialStats {
-  const activeTxs = dashboardAccountId
+  // FIN-103: transferência entre contas próprias e pagamento de fatura não são receita nem despesa.
+  const activeTxs = (dashboardAccountId
     ? transactions.filter(t => t.accountId === dashboardAccountId)
-    : transactions;
+    : transactions).filter(t => !isOwnTransfer(t));
 
   const activeAccs = dashboardAccountId
     ? accounts.filter(a => a.id === dashboardAccountId)

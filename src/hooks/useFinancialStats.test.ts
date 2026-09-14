@@ -2,6 +2,7 @@
 // função pura extraída em FIN-086 (não precisa renderizar componentes React).
 import { describe, it, expect } from 'vitest';
 import { computeFinancialStats } from './useFinancialStats';
+import { todayISO } from '../utils/debts';
 import type { Account, Debt, Transaction } from '../types';
 
 function tx(overrides: Partial<Transaction>): Transaction {
@@ -119,5 +120,25 @@ describe('computeFinancialStats', () => {
     ];
     const s = computeFinancialStats([], [], debts, 'a1');
     expect(s.activeDebts).toBe(800); // só a dívida de a1: 1000 - 200
+  });
+});
+
+describe('transferências entre contas e pagamento de fatura (FIN-103)', () => {
+  it('ficam fora de receitas, despesas, categorias e da evolução; o resto continua contando', () => {
+    const today = todayISO();
+    const txs = [
+      tx({ date: today, amount: 1000, category: 'Receita' }),
+      tx({ date: today, amount: -300, category: 'Alimentação' }),
+      tx({ date: today, amount: -500, category: 'Transferência entre contas' }),
+      tx({ date: today, amount: -400, category: 'Credit card payment' }),
+      tx({ date: today, amount: 200, category: 'Same person transfer' }),
+    ];
+    const s = computeFinancialStats(txs, [], [], null);
+    expect(s.income).toBe(1000);
+    expect(s.expense).toBe(300);
+    expect(s.monthExpense).toBe(300);
+    expect(s.expenseByCategory).toEqual([{ name: 'Alimentação', amount: 300 }]);
+    expect(s.balanceByMonth.map(m => m.balance)).toEqual([700]);
+    expect(s.dailyEvolution.map(d => d.balance)).toEqual([700]);
   });
 });

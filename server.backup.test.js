@@ -5,7 +5,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from './test/backend-test-utils.js';
 
-const SECTIONS = ['accounts', 'transactions', 'debts', 'budgets', 'goals', 'recurring', 'investments'];
+const SECTIONS = ['accounts', 'transactions', 'debts', 'budgets', 'goals', 'recurring', 'investments', 'categoryRules'];
 
 describe('Backup e restauração (FIN-079/FIN-080)', () => {
   let app;
@@ -59,6 +59,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       subItems: [{ name: 'Parcela 1', amount: 100000, date: '2026-08-10' }, { name: 'Parcela 2', amount: 100000, date: '2026-09-10' }],
     });
     await call(user, 'post', '/api/budgets', { category: 'Alimentação', monthlyLimit: 150000 });
+    await call(user, 'post', '/api/category-rules', { match: 'Uber', category: 'Transporte' });
     await call(user, 'post', '/api/goals', { name: 'Viagem', targetAmount: 1000000, currentAmount: 250000, targetDate: '2027-06-30' });
     await call(user, 'post', '/api/recurring-transactions', {
       name: 'Aluguel', category: 'Moradia', amount: -250000, frequency: 'monthly', nextOccurrence: '2099-01-05', accountId: checking.id,
@@ -113,7 +114,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       expect(backup).toMatchObject({ format: 'finflow-backup', version: 1, user: { name: 'Pessoa ' + counter, email: user.email } });
       expect(new Date(backup.exportedAt).toISOString()).toBe(backup.exportedAt);
       expect(Object.keys(backup.data)).toEqual(SECTIONS);
-      expect(SECTIONS.map(s => backup.data[s].length)).toEqual([3, 5, 1, 1, 1, 1, 1]);
+      expect(SECTIONS.map(s => backup.data[s].length)).toEqual([3, 5, 1, 1, 1, 1, 1, 1]);
 
       expect(backup.data.transactions.find(t => t.name === 'Mercado').amount).toBe(-35049);
       expect(backup.data.transactions.find(t => t.name === 'Livro')).toMatchObject({ currency: 'USD', accountId: usd.id });
@@ -133,7 +134,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       await seed(owner);
       const other = await newUser();
       const backup = await exportOf(other);
-      expect(SECTIONS.map(s => backup.data[s].length)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+      expect(SECTIONS.map(s => backup.data[s].length)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
     });
   });
 
@@ -158,9 +159,19 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
         success: true,
-        restored: { accounts: 3, transactions: 5, debts: 1, budgets: 1, goals: 1, recurring: 1, investments: 1 },
+        restored: { accounts: 3, transactions: 5, debts: 1, budgets: 1, goals: 1, recurring: 1, investments: 1, categoryRules: 1 },
       });
       expect((await exportOf(user)).data).toEqual(backup.data);
+    });
+
+    it('backup de antes das regras de categoria, sem a seção, continua restaurando (FIN-105)', async () => {
+      const user = await newUser();
+      await seed(user);
+      const backup = await exportOf(user);
+      delete backup.data.categoryRules;
+      const res = await restore(user, backup);
+      expect(res.status).toBe(200);
+      expect(res.body.restored.categoryRules).toBe(0);
     });
 
     it('senha errada: recusa e não muda nada', async () => {

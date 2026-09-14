@@ -206,3 +206,16 @@ describe('transactionsPeriod', () => {
     expect(p.from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
+
+describe('comparativos sem transferências (FIN-103)', () => {
+  it('transferência entre contas e pagamento de fatura não entram nos comparativos', () => {
+    const txs = [
+      tx({ date: '2026-06-05', amount: 5000, category: 'Receita' }),
+      tx({ date: '2026-06-10', amount: -1200, category: 'Moradia' }),
+      tx({ date: '2026-06-15', amount: -900, category: 'Pagamento de fatura' }),
+      tx({ date: '2026-06-20', amount: 700, category: 'Same person transfer' }),
+    ];
+    expect(computeMonthlyComparison(txs)[0]).toMatchObject({ income: 5000, expense: 1200, balance: 3800 });
+    expect(computeYearlyComparison(txs)[0]).toMatchObject({ income: 5000, expense: 1200, balance: 3800 });
+  });
+});

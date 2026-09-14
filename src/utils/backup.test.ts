@@ -3,7 +3,7 @@ import {
   backupUploadBytes, describeBackupCounts, describeBackupSummary, parseRestoreResult, summarizeBackup, type BackupCounts,
 } from './backup';
 
-const EMPTY: BackupCounts = { accounts: 0, transactions: 0, debts: 0, budgets: 0, goals: 0, recurring: 0, investments: 0 };
+const EMPTY: BackupCounts = { accounts: 0, transactions: 0, debts: 0, budgets: 0, goals: 0, recurring: 0, investments: 0, categoryRules: 0 };
 const data = { accounts: [{}, {}], transactions: [{}], debts: [], budgets: [], goals: [{}], recurring: [], investments: [] };
 
 describe('summarizeBackup (FIN-080)', () => {

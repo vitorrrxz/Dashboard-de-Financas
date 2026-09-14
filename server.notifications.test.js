@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from './test/backend-test-utils.js';
+import { OWN_TRANSFER_CATEGORIES as FRONTEND_OWN_TRANSFER_CATEGORIES } from './src/utils/categories.ts';
 
 /** Hoje deslocado em `days` dias (negativo = passado), em ISO local — mesma convenção do server. */
 function isoFromToday(days) {
@@ -173,6 +174,15 @@ describe('notificações (FIN-065 a FIN-069)', () => {
       spend('2026-07-10', 'Alimentação', 30000),
       spend('2026-08-10', 'Alimentação', 30000),
     ];
+
+    it('transferência entre contas e pagamento de fatura não geram alerta (FIN-103)', () => {
+      // Sem histórico nessas categorias, cada uma daria o alerta de "sem gasto nos meses anteriores".
+      const transfers = server.OWN_TRANSFER_CATEGORIES.map(category => spend('2026-09-05', category, 90000));
+      const alerts = server.detectUnusualSpending([...baseline, ...transfers, spend('2026-09-05', 'Alimentação', 50000)], TODAY, OPTIONS);
+      expect(alerts.map(a => a.dedupeKey)).toEqual(['unusual_spending:2026-09:Alimentação']);
+      // A tela e os alertas concordam sobre o que é transferência.
+      expect(server.OWN_TRANSFER_CATEGORIES).toEqual(FRONTEND_OWN_TRANSFER_CATEGORIES);
+    });
 
     it('alerta quando o gasto do mês passa da média pelo limiar', () => {
       const [n] = server.detectUnusualSpending([...baseline, spend('2026-09-05', 'Alimentação', 50000)], TODAY, OPTIONS);

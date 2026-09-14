@@ -2,7 +2,7 @@
 // visíveis com o foco do teclado e em tela de toque (não só com `group-hover`), e o modal de edição
 // com os rótulos associados aos campos.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { TxTable } from './App';
 import type { Transaction } from './types';
 
@@ -44,6 +44,25 @@ describe('TxTable — ações de cada transação (FIN-099)', () => {
     fireEvent.click(button);
     expect(confirm).toHaveBeenCalledWith('Excluir a transação "Uber"?');
     expect(onDelete).toHaveBeenCalledExactlyOnceWith('tx-1');
+  });
+
+  it('ao trocar a categoria, oferece criar a regra com o texto sugerido e a aplica ao salvar (FIN-106)', async () => {
+    const onUpdate = vi.fn<(id: string, tx: Partial<Transaction>) => Promise<void>>().mockResolvedValue(undefined);
+    const onDelete = vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined);
+    const onCreateRule = vi.fn<(rule: { match: string; category: string; applyToExisting: boolean }) => Promise<void>>().mockResolvedValue(undefined);
+    render(<TxTable rows={[{ ...uber, name: 'UBER *TRIP 12345' }]} accounts={[]} onUpdate={onUpdate} onDelete={onDelete} onCreateRule={onCreateRule} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Editar UBER *TRIP 12345' }));
+
+    // Sem trocar a categoria, não há regra a oferecer.
+    expect(screen.queryByLabelText(/Criar regra/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Categoria'), { target: { value: 'Lazer' } });
+    fireEvent.click(screen.getByLabelText(/Criar regra/));
+    expect(screen.getByLabelText('Texto na descrição')).toHaveValue('UBER *TRIP');
+    fireEvent.click(screen.getByLabelText('Aplicar também às transações já gravadas'));
+    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+
+    await waitFor(() => expect(onCreateRule).toHaveBeenCalledWith({ match: 'UBER *TRIP', category: 'Lazer', applyToExisting: true }));
+    expect(onUpdate).toHaveBeenCalledWith('tx-1', expect.objectContaining({ category: 'Lazer' }));
   });
 
   it('editar abre o modal com cada campo rotulado e preenchido; "Fechar" o fecha', () => {
