@@ -25,4 +25,9 @@ describe('server.js — smoke test', () => {
     const res = await request(app).get('/api/auth/me').set('Authorization', 'Bearer token-invalido');
     expect(res.status).toBe(403);
   });
+
+  it('sem FRONTEND_DIR, a API não serve o frontend — no desenvolvimento, é o Vite (FIN-108)', async () => {
+    const res = await request(app).get('/');
+    expect(res.status).toBe(404);
+  });
 });

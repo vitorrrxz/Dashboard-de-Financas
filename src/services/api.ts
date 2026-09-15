@@ -3,7 +3,9 @@
 // em 3 arquivos (App.tsx, AuthForm.tsx, PluggyConnectButton.tsx), cada um com sua própria
 // cópia quase idêntica de `fetchAPI` — impossível rodar o frontend contra outro host
 // (staging, produção) sem editar código-fonte.
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Vazia (`VITE_API_URL=""`), a API é a da própria origem da página: o build servido pela API no
+// contêiner (FIN-108). Por isso `??`, e não `||` — o valor vazio não cai no padrão do desenvolvimento.
+export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 
 export interface ApiFetchOptions {
   method?: string;

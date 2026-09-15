@@ -1,0 +1,13 @@
+# FIN-108 — fora do contexto da imagem: segredos e dados reais (o .env, o banco e seus backups) e o que o
+# build refaz.
+.env*
+**/*.db*
+backups
+**/node_modules
+dist
+.git
+.github
+.claude
+docs
+sandbox-pluggy
+lint_results.txt

@@ -19,7 +19,7 @@ export const TEST_JWT_SECRET = 'test_jwt_secret_' + 'x'.repeat(40); // >= 32 cha
 // chave poder restaurá-la depois.
 export const TEST_TWO_FACTOR_KEY = 'test_2fa_key_' + 'y'.repeat(40); // >= 32 chars
 
-export async function createTestApp(dbName, { authRateLimit } = {}) {
+export async function createTestApp(dbName, { authRateLimit, frontendDir } = {}) {
   const dbFile = `./test_${dbName}.db`;
   for (const suffix of ['', '-journal', '-wal', '-shm']) {
     if (existsSync(dbFile + suffix)) unlinkSync(dbFile + suffix);
@@ -36,6 +36,9 @@ export async function createTestApp(dbName, { authRateLimit } = {}) {
   // derrubaria a própria suíte de testes com 429. `authRateLimit` permite o inverso: um
   // teste dedicado a validar o rate limit em si passa um valor baixo proposital.
   process.env.AUTH_RATE_LIMIT = String(authRateLimit ?? 1000);
+  // FIN-108: pasta do build do frontend servida pela API. Sem `frontendDir`, vazia — mesmo que o .env de
+  // quem roda os testes defina FRONTEND_DIR, porque o dotenv não sobrescreve variável que já existe.
+  process.env.FRONTEND_DIR = frontendDir ?? '';
 
   // Sem `--accept-data-loss`: o arquivo acabou de ser apagado, então o push nunca tem dado a
   // perder — e, se um dia `DATABASE_URL` apontasse para um banco com dados, o Prisma recusaria a

@@ -7,6 +7,8 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PluggyClient } from 'pluggy-sdk';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -18,7 +20,29 @@ import { runBackupSafely } from './scripts/backup-db.mjs';
 dotenv.config();
 
 const app = express();
-app.use(helmet()); // cabeçalhos de segurança HTTP padrão (ver FIN-010)
+// FIN-108 — no contêiner, a API serve também o build do frontend (`FRONTEND_DIR`), na mesma origem (ver
+// o fim do arquivo). Sem a variável, como no desenvolvimento, quem serve o frontend é o Vite.
+const FRONTEND_DIR = process.env.FRONTEND_DIR ? path.resolve(process.env.FRONTEND_DIR) : null;
+const FRONTEND_INDEX = FRONTEND_DIR ? fs.readFileSync(path.join(FRONTEND_DIR, 'index.html'), 'utf8') : '';
+// Hash de cada script embutido no index.html (o do tema, FIN-083), tirado do próprio arquivo servido:
+// mudar o script não deixa a CSP para trás. O navegador faz a conta com as quebras de linha já em LF, e
+// um checkout no Windows traz o arquivo com CRLF.
+const inlineScriptHashes = [...FRONTEND_INDEX.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)]
+  .map(([, code]) => `'sha256-${crypto.createHash('sha256').update(code.replace(/\r\n?/g, '\n')).digest('base64')}'`);
+// Cabeçalhos de segurança HTTP (FIN-010). A CSP padrão do helmet barraria a página: o script de tema, o
+// widget da Pluggy — script no CDN dela, tela num iframe de connect.pluggy.ai — e, no acesso em HTTP pelo
+// IP da rede, todos os arquivos, que ela manda o navegador pedir por HTTPS.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      scriptSrc: ["'self'", 'https://cdn.pluggy.ai', ...inlineScriptHashes],
+      frameSrc: ['https://connect.pluggy.ai'],
+      upgradeInsecureRequests: null,
+    },
+  },
+  // O widget da Pluggy pode abrir o login do banco numa janela nova (`window.open`) e precisa falar com ela.
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+}));
 // CORS restrito à origem conhecida do frontend — evita que qualquer site de terceiros
 // consiga ler respostas desta API (ver FIN-009 em docs/BACKLOG_DETAIL.md).
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
@@ -2646,6 +2670,13 @@ app.post('/api/pluggy/auto-sync', authenticateToken, async (req, res) => {
     sendInternalError(res, error, 'Erro na sincronização automática.');
   }
 });
+
+// FIN-108 — o build do frontend, na mesma origem da API. Caminho sem extensão fora de /api recebe o
+// index.html (a SPA decide a tela); arquivo que não existe dá 404, e não a página no lugar de um script.
+if (FRONTEND_DIR) {
+  app.use(express.static(FRONTEND_DIR, { index: false }));
+  app.get(/^\/(?!api(?:\/|$))[^.]*$/i, (req, res) => res.type('html').send(FRONTEND_INDEX));
+}
 
 // Erros que escapam das rotas — em especial os do parser de JSON (corpo malformado ou grande
 // demais) — respondem em JSON, como o resto da API. Sem este tratador, iam para o padrão do

@@ -147,6 +147,24 @@ Após executar, abra o endereço exibido no terminal (geralmente `http://localho
 
 ---
 
+## 🐳 Rodando com Docker
+
+Para deixar o FinFlow rodando num computador ou servidor seu, sempre do mesmo jeito: frontend e API no mesmo contêiner, na mesma origem, e o banco num volume.
+
+1. Instale o [Docker](https://docs.docker.com/get-docker/), com o Compose.
+2. Crie o `.env` a partir do `.env.example`. O contêiner lê as mesmas variáveis (`JWT_SECRET`, Pluggy, `TWO_FACTOR_ENCRYPTION_KEY`…) a cada subida; o `.env` nunca entra na imagem.
+3. Rode `docker compose up -d --build` e abra `http://localhost:3001`.
+
+* **Banco:** fica no volume `finflow-data`. Reiniciar ou recriar o contêiner mantém os dados; só `docker compose down -v` apaga o volume. As migrações pendentes rodam sozinhas a cada subida (`prisma migrate deploy`).
+* **Backups:** o backup diário (seção abaixo) vai para a pasta `BACKUP_DIR` do `.env` ou, se ela estiver vazia, para `./backups`. No Linux, crie a pasta antes (`mkdir -p backups`): o contêiner roda como o usuário de id 1000.
+* **Levar o banco atual para o contêiner, ou restaurar um backup:** com o app parado (`docker compose stop`), rode
+  `docker compose run --rm finflow sh -c 'cp /backups/finflow-AAAA-MM-DDTHH-MM-SS.db /data/finflow.db && rm -f /data/finflow.db-wal /data/finflow.db-shm'`
+  e depois `docker compose up -d`. Para trazer o banco do desenvolvimento, grave antes uma cópia dele com `npm run backup`.
+* **Atualizar:** `git pull` e `docker compose up -d --build`.
+* **Acesso:** a porta só abre para este computador (`127.0.0.1:3001`). Para usar pelo celular sem expor os dados na internet, ver FIN-109 (Tailscale).
+
+---
+
 ## 🔒 Segurança de Repositório
 
 O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos sensíveis/locais não sejam rastreados pelo Git ou enviados ao repositório público no GitHub:
