@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, Legend,
 } from 'recharts';
-import { Wallet, TrendingUp, CreditCard, TrendingDown, Scale } from 'lucide-react';
-import type { Account, Debt, Investment, Transaction } from '../types';
-import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth, type NetWorth } from '../utils/reports';
+import { Wallet, TrendingUp, CreditCard, TrendingDown, Scale, LineChart } from 'lucide-react';
+import type { Account, Debt, Investment, NetWorthSnapshot, Transaction } from '../types';
+import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth, monthLabel, type NetWorth } from '../utils/reports';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -13,6 +13,8 @@ interface ReportsViewProps {
   debts: Debt[];
   /** Posições da carteira (FIN-072) — entram nos investimentos do patrimônio (FIN-073). */
   investments: Investment[];
+  /** Retratos mensais do patrimônio líquido (FIN-112), do mais antigo ao mais recente. */
+  netWorthHistory: NetWorthSnapshot[];
 }
 
 /** Formata um valor em reais para exibição (mesmo formato usado no Dashboard). */
@@ -58,12 +60,17 @@ function CompositionCard({ title, amount, icon, negative, detail }: {
  * receitas × despesas por mês e por ano. Tudo derivado no cliente a partir dos dados já
  * carregados (`src/utils/reports.ts`), sem endpoint dedicado.
  */
-export function ReportsView({ transactions, accounts, debts, investments }: ReportsViewProps) {
+export function ReportsView({ transactions, accounts, debts, investments, netWorthHistory }: ReportsViewProps) {
   const [granularity, setGranularity] = useState<'monthly' | 'yearly'>('monthly');
 
   const netWorth = useMemo(() => computeNetWorth(accounts, debts, investments), [accounts, debts, investments]);
   const monthly = useMemo(() => computeMonthlyComparison(transactions, 12), [transactions]);
   const yearly = useMemo(() => computeYearlyComparison(transactions), [transactions]);
+  // FIN-112 — só o rótulo do mês para o eixo do gráfico; os valores já vêm em reais (App.tsx converte).
+  const netWorthChart = useMemo(
+    () => netWorthHistory.map(h => ({ ...h, label: monthLabel(h.month) })),
+    [netWorthHistory]
+  );
 
   const comparison = granularity === 'monthly' ? monthly : yearly;
 
@@ -95,6 +102,68 @@ export function ReportsView({ transactions, accounts, debts, investments }: Repo
             icon={<TrendingDown size={18} className="text-amber-400" />} />
         </div>
       </section>
+
+      {/* ── Evolução do patrimônio (FIN-112) — só a partir do primeiro mês registrado. ── */}
+      {netWorthChart.length > 0 && (
+        <section className="glass-card rounded-2xl p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <LineChart size={20} style={{ color: 'var(--color-primary)' }} />
+            <h3 className="text-lg font-semibold text-white">Evolução do Patrimônio</h3>
+          </div>
+
+          <div className="h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={netWorthChart} margin={{ left: -10, right: 10 }}>
+                <defs>
+                  <linearGradient id="nwg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }}
+                  tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
+                <RechartsTooltip
+                  contentStyle={{ backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 12 }}
+                  labelStyle={{ color: 'var(--color-textMuted)' }}
+                  formatter={v => [fmt(Number(v)), 'Patrimônio']} />
+                <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2.5} fill="url(#nwg)" animationDuration={1000} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* A mesma leitura da tabela de baixo, para o valor exato de cada mês. */}
+          <div className="overflow-x-auto mt-6">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-textMuted">
+                  <th className="pb-3 font-semibold">Mês</th>
+                  <th className="pb-3 font-semibold text-right">Contas</th>
+                  <th className="pb-3 font-semibold text-right">Investimentos</th>
+                  <th className="pb-3 font-semibold text-right">Passivos</th>
+                  <th className="pb-3 font-semibold text-right">Patrimônio</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm divide-y divide-white/5">
+                {[...netWorthChart].reverse().map(snapshot => (
+                  <tr key={snapshot.month} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="py-3 text-white font-medium">{snapshot.label}</td>
+                    <td className={`py-3 text-right ${snapshot.liquid < 0 ? 'text-red-400' : 'text-textMuted'}`}>
+                      {snapshot.liquid < 0 ? '−' : ''}{fmt(snapshot.liquid)}
+                    </td>
+                    <td className="py-3 text-right text-teal-400">{fmt(snapshot.investments)}</td>
+                    <td className="py-3 text-right text-red-400">{snapshot.liabilities > 0 ? `−${fmt(snapshot.liabilities)}` : fmt(0)}</td>
+                    <td className={`py-3 text-right font-bold ${snapshot.total >= 0 ? 'text-white' : 'text-red-400'}`}>
+                      {snapshot.total < 0 ? '−' : ''}{fmt(snapshot.total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* ── Comparativo receitas × despesas (FIN-062 / FIN-063) ── */}
       <section className="glass-card rounded-2xl p-6">

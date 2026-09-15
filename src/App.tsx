@@ -33,10 +33,11 @@ import { useTheme } from './hooks/useTheme';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
 import { computeInvestmentHoldings, describeHoldings } from './utils/investments';
+import { linkedGoalAmount } from './utils/goals';
 import { todayISO } from './utils/debts';
 import { formatDateBR, formatMonthLabel } from './utils/dates';
 import { downloadCSV, downloadPDFReport, exportDateSuffix, formatCurrencyCSV } from './utils/export';
-import { TRANSACTION_REPORT_HEADERS, transactionsPeriod } from './utils/reports';
+import { TRANSACTION_REPORT_HEADERS, transactionsPeriod, computeNetWorth, type NetWorth } from './utils/reports';
 import {
   ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions,
 } from './utils/transactions';
@@ -49,8 +50,8 @@ import {
   type ExchangeRates,
 } from './utils/currency';
 import type {
-  Account, AppNotification, Budget, Debt, DebtCategory, Goal, Investment, InvestmentInput, NotificationType,
-  RecurringTransaction, Transaction, PaymentType,
+  Account, AppNotification, Budget, Debt, DebtCategory, Goal, Investment, InvestmentInput, NetWorthSnapshot,
+  NotificationType, RecurringTransaction, Transaction, PaymentType,
 } from './types';
 
 type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports' | 'settings';
@@ -133,9 +134,19 @@ function budgetToApi<T extends Partial<Budget>>(b: T): T {
  * dívidas e orçamentos do usuário autenticado, deriva as estatísticas do Dashboard e
  * renderiza a navegação e as abas (Dashboard, Transações, Contas, Dívidas, Orçamento).
  */
-/** Converte os valores da meta de centavos (API) para reais (UI) — ver conversão no topo deste bloco. */
+/**
+ * Converte os valores da meta de centavos (API) para reais (UI) — ver conversão no topo deste
+ * bloco. `accountId`/`investmentId` nulos (FIN-113: meta sem vínculo) viram ausentes, mesma
+ * convenção de `investmentFromApi`.
+ */
 function goalFromApi(g: Goal): Goal {
-  return { ...g, targetAmount: toReais(g.targetAmount), currentAmount: toReais(g.currentAmount) };
+  return {
+    ...g,
+    accountId: g.accountId ?? undefined,
+    investmentId: g.investmentId ?? undefined,
+    targetAmount: toReais(g.targetAmount),
+    currentAmount: toReais(g.currentAmount),
+  };
 }
 /** Converte os valores da meta de reais (UI) para centavos (API) — ver conversão no topo deste bloco. */
 function goalToApi<T extends Partial<Goal>>(g: T): T {
@@ -173,6 +184,25 @@ function investmentToApi(i: InvestmentInput) {
     accountId: i.accountId || null,
     amountInvested: toCents(i.amountInvested),
     currentValue: toCents(i.currentValue),
+  };
+}
+/** Converte um retrato do patrimônio (FIN-112) de centavos (API) para reais (UI). */
+function netWorthSnapshotFromApi(s: NetWorthSnapshot): NetWorthSnapshot {
+  return {
+    month: s.month,
+    liquid: toReais(s.liquid),
+    investments: toReais(s.investments),
+    liabilities: toReais(s.liabilities),
+    total: toReais(s.total),
+  };
+}
+/** Payload em centavos de `POST /api/net-worth/snapshot`, a partir do patrimônio já calculado em reais. */
+function netWorthSnapshotToApi(nw: NetWorth) {
+  return {
+    liquid: toCents(nw.liquid),
+    investments: toCents(nw.investments),
+    liabilities: toCents(nw.pendingBills + nw.debts),
+    total: toCents(nw.total),
   };
 }
 
@@ -216,6 +246,7 @@ export default function App() {
   const [goals, setGoals]             = useState<Goal[]>([]);
   const [recurring, setRecurring]     = useState<RecurringTransaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]); // FIN-072
+  const [netWorthHistory, setNetWorthHistory] = useState<NetWorthSnapshot[]>([]); // FIN-112
   // FIN-075: cotações para os totais em real — só buscadas quando há moeda estrangeira em uso.
   const [rates, setRates] = useState<ExchangeRates | null>(null);
   const [ratesFailed, setRatesFailed] = useState(false);
@@ -250,6 +281,7 @@ export default function App() {
     setGoals([]);
     setRecurring([]);
     setInvestments([]);
+    setNetWorthHistory([]);
     setRates(null);
     setRatesFailed(false);
     setSettingsNotice('');
@@ -275,7 +307,8 @@ export default function App() {
           fetchAPI('/api/goals'),
           fetchAPI('/api/recurring-transactions'),
           fetchAPI('/api/investments'),
-        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData, investmentsData]) => {
+          fetchAPI('/api/net-worth/history'),
+        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData, investmentsData, netWorthHistoryData]) => {
         setUser(meData.user);
         setAccounts((accsData as Account[]).map(accountFromApi));
         setTxs((txsData as Transaction[]).map(txFromApi));
@@ -285,6 +318,7 @@ export default function App() {
         setGoals((goalsData as Goal[]).map(goalFromApi));
         setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
         setInvestments((investmentsData as Investment[]).map(investmentFromApi));
+        setNetWorthHistory((netWorthHistoryData as NetWorthSnapshot[]).map(netWorthSnapshotFromApi));
       }).catch(err => {
         // FIN-082: só um token recusado (401/403) encerra a sessão. Sem conexão — o app instalado
         // aberto offline — ou com o servidor fora do ar, a sessão continua e a tela oferece tentar
@@ -668,6 +702,59 @@ export default function App() {
   const transactionsBase = useMemo(() => transactionsInBase(transactions, rates), [transactions, rates]);
   const investmentsBase = useMemo(() => investmentsInBase(investments, rates), [investments, rates]);
   const recurringBase = useMemo(() => recurringInBase(recurring, accounts, rates), [recurring, accounts, rates]);
+
+  // FIN-112: guarda um retrato do patrimônio líquido de hoje, para o gráfico de evolução em
+  // Relatórios. Roda de novo sempre que ele muda (contas, dívidas, investimentos ou a cotação que
+  // os converte para real) — mesmo padrão do efeito de notificações logo acima: idempotente no
+  // servidor (upsert no mês corrente), então repetir não duplica nada. Sem contas nem dívidas
+  // ainda (conta recém-criada), não há o que registrar.
+  useEffect(() => {
+    if (!token || loading || (accountsBase.items.length === 0 && debts.length === 0)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const netWorth = computeNetWorth(accountsBase.items, debts, investmentsBase.items);
+        await fetchAPI('/api/net-worth/snapshot', 'POST', netWorthSnapshotToApi(netWorth));
+        const history = await fetchAPI('/api/net-worth/history');
+        if (!cancelled) setNetWorthHistory((history as NetWorthSnapshot[]).map(netWorthSnapshotFromApi));
+      } catch (err) {
+        console.error('Falha ao salvar o retrato do patrimônio:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, loading, accountsBase.items, investmentsBase.items, debts]);
+
+  // FIN-113: mantém `currentAmount` das metas ligadas a conta/investimento em dia — o progresso
+  // anda sozinho, sem digitar (quem edita manualmente é GoalsManager, para uma meta sem vínculo).
+  // `linkedGoalAmount` devolve `null` para meta sem vínculo ou cujo vínculo sumiu (conta/
+  // investimento excluído — o `accountId`/`investmentId` já veio nulo da API): nada a fazer, o
+  // último valor gravado fica congelado. Um único `setGoals` no fim (não um por meta): `goals` é
+  // dependência deste efeito, e um `setGoals` a cada iteração de um `for` reiniciaria o efeito no
+  // meio do próprio laço.
+  useEffect(() => {
+    if (!token || loading) return;
+    const pending = goals
+      .map(goal => ({ id: goal.id, name: goal.name, amount: linkedGoalAmount(goal, accountsBase.items, investmentsBase.items) }))
+      .filter((p): p is { id: string; name: string; amount: number } => p.amount !== null)
+      .filter(p => p.amount !== goals.find(g => g.id === p.id)!.currentAmount);
+    if (pending.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled(
+        pending.map(p => fetchAPI(`/api/goals/${p.id}`, 'PUT', goalToApi({ currentAmount: p.amount })))
+      );
+      if (cancelled) return;
+      const synced = new Map(pending.filter((_, i) => results[i].status === 'fulfilled').map(p => [p.id, p.amount]));
+      if (synced.size > 0) setGoals(prev => prev.map(g => (synced.has(g.id) ? { ...g, currentAmount: synced.get(g.id)! } : g)));
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') console.error(`Falha ao atualizar o progresso da meta "${pending[i].name}":`, r.reason);
+      });
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, loading, goals, accountsBase.items, investmentsBase.items]);
+
   const missingCurrencies = useMemo(
     () => foreignCurrencies(accountsBase.missing, transactionsBase.missing, investmentsBase.missing),
     [accountsBase, transactionsBase, investmentsBase]
@@ -1456,6 +1543,8 @@ export default function App() {
               </div>
               <GoalsManager
                 goals={goals}
+                accounts={accountsBase.items}
+                investments={investmentsBase.items}
                 onAdd={addGoal}
                 onUpdate={updateGoal}
                 onDelete={deleteGoal}
@@ -1512,6 +1601,7 @@ export default function App() {
                 accounts={accountsBase.items}
                 debts={debts}
                 investments={investmentsBase.items}
+                netWorthHistory={netWorthHistory}
               />
             </>
           )}

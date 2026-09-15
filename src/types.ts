@@ -68,12 +68,17 @@ export interface Budget {
 
 // FIN-049 — meta financeira (Fase 4). `currentAmount` é o quanto já foi acumulado; o
 // progresso exibido na tela é derivado dele com `targetAmount` (ver GoalsManager.tsx).
+// FIN-113 — `accountId`/`investmentId` (nunca os dois) ligam a meta a uma conta ou a um
+// investimento: o App mantém `currentAmount` em dia sozinho enquanto ligada (ver
+// `linkedGoalAmount` em utils/goals.ts); sem nenhum dos dois, o valor continua manual.
 export interface Goal {
   id: string;
   name: string;
   targetAmount: number;
   currentAmount: number;
   targetDate: string;   // ISO date
+  accountId?: string;
+  investmentId?: string;
   createdAt: string;
 }
 
@@ -124,3 +129,14 @@ export interface Investment {
 
 /** Dados de uma posição como saem do formulário da carteira — sem os campos gerados pelo banco. */
 export type InvestmentInput = Omit<Investment, 'id' | 'createdAt' | 'updatedAt'>;
+
+// FIN-112 — retrato mensal do patrimônio líquido (Fase 10), para o gráfico de evolução em
+// Relatórios. Somente leitura pela tela: quem grava é o próprio App, ao carregar (ver
+// `computeNetWorth` em utils/reports.ts).
+export interface NetWorthSnapshot {
+  month: string; // "YYYY-MM"
+  liquid: number;
+  investments: number;
+  liabilities: number;
+  total: number;
+}

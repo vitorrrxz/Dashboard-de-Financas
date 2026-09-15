@@ -2676,7 +2676,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P3 — FIN-112 — Histórico mensal do patrimônio líquido**
+- [x] **P3 — FIN-112 — Histórico mensal do patrimônio líquido** ✅ Concluída (15/09/2026)
 
   **Objetivo**
   Ver o patrimônio mês a mês, e não só o valor de hoje.
@@ -2701,11 +2701,17 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes: o mês corrente é atualizado e os passados não; um registro por mês por usuário; isolamento entre usuários.
 
   **Critérios de aceite**
-  - [ ] Gráfico da evolução do patrimônio a partir do primeiro mês registrado.
+  - [x] Gráfico da evolução do patrimônio a partir do primeiro mês registrado.
+
+  **Nota de implementação (15/09/2026):** `NetWorthSnapshot` (migração `add_net_worth_snapshot`) guarda, por `(usuário, mês)`, os quatro números do patrimônio líquido em centavos — contas, investimentos, passivos (faturas em aberto + saldo devedor das dívidas) e o total. `POST /api/net-worth/snapshot` grava sempre no mês corrente do relógio do SERVIDOR (nunca um mês que o cliente informe) — é assim, e não com uma checagem extra, que os meses anteriores nunca são reescritos por ela; um `refine` do Zod recusa um `total` que não bata com `liquid + investments − liabilities`. Quem calcula continua sendo o cliente: `computeNetWorth` já existente (FIN-064/FIN-073), convertido para centavos na borda — a rota só valida e faz `upsert`, sem duplicar a lógica de câmbio/patrimônio no servidor. `GET /api/net-worth/history` devolve a lista em ordem crescente de mês.
+  No `App.tsx`, um efeito roda a cada mudança de contas, dívidas, investimentos ou cotação (mesmo padrão do efeito de notificações): calcula o patrimônio, grava o retrato do mês corrente e recarrega o histórico — como o servidor faz `upsert`, rodar de novo não duplica nada, e o retrato corrige sozinho depois que a cotação de câmbio chega (o efeito depende dela). Sem nenhuma conta nem dívida ainda, não grava nada — uma conta recém-criada não ganha um retrato zerado. Em Relatórios, "Evolução do Patrimônio" (só aparece a partir do primeiro retrato): a mesma área com gradiente das outras telas (Fluxo Financeiro, Projeção de Saldo), com uma tabela embaixo detalhando contas/investimentos/passivos/patrimônio de cada mês — mesmo par gráfico+tabela do comparativo de receitas/despesas logo abaixo, na mesma tela.
+  Ficou de fora: apagar um retrato indevido (não há como registrar um valor errado por esta rota — o cliente sempre manda o que `computeNetWorth` calculou) e um retrato retroativo a partir de dados históricos (o histórico só começa a existir a partir de quando o app tem esta versão rodando).
+
+  **Validação executada:** `server.networth.test.js` (novo) — 12 testes: cria o retrato do mês corrente; chamado de novo no mesmo mês atualiza em vez de duplicar; um mês passado, semeado direto no banco, continua intacto depois de um POST no mês corrente (e o histórico devolve os dois, em ordem crescente); rejeita `total` inconsistente, valores negativos onde não cabe e valor fracionário (reais em vez de centavos); isolamento entre usuários (histórico de B começa vazio mesmo com A tendo registros, e o retrato de um não aparece no do outro). `npm run lint`, `npm run typecheck`, `npx vitest run` (52 arquivos, 707 testes) e `npm run build` limpos. Migração aplicada ao `dev.db` depois de um backup, com as tabelas existentes conferidas (`integrity_check` e a lista de tabelas) antes e depois.
 
 ---
 
-- [ ] **P3 — FIN-113 — Metas ligadas a uma conta ou investimento**
+- [x] **P3 — FIN-113 — Metas ligadas a uma conta ou investimento** ✅ Concluída (15/09/2026)
 
   **Objetivo**
   O progresso da meta andar sozinho quando o dinheiro está numa conta ou aplicação.
@@ -2729,7 +2735,15 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes: o progresso acompanha o saldo; vínculo com conta de outro usuário recusado; excluir a conta não apaga a meta.
 
   **Critérios de aceite**
-  - [ ] Meta ligada mostra o progresso sem digitação.
+  - [x] Meta ligada mostra o progresso sem digitação.
+
+  **Nota de implementação (15/09/2026):** `Goal` ganhou `accountId`/`investmentId` (nunca os dois — checado na rota, não no schema Zod: um `.refine()` ali quebraria o `.extend()` do backup e o `.partial()` do update, nenhum dos dois existe em cima de um `ZodEffects`). A posse do vínculo é conferida na rota — `nonCreditAccountError`, extraído de `investmentAccountError` (FIN-071) e reaproveitado pelas duas features, e um novo `goalInvestmentError` para o investimento — e ligar a um desliga o outro (um PUT que só manda `accountId` já limpa `investmentId` sozinho). Excluir a conta ou o investimento não apaga a meta: a chave estrangeira é opcional com `ON DELETE SET NULL` (o padrão do Prisma para relação opcional, o mesmo que já vale para `Investment.accountId`), então o vínculo é desfeito sozinho, sem código de rota para isso.
+  Quem calcula o valor acumulado de uma meta ligada continua sendo o cliente (`linkedGoalAmount`, em `utils/goals.ts` — o saldo da conta ou o valor da posição, já convertidos para real): um efeito no `App.tsx`, a cada carga em que contas/investimentos/metas ou a cotação mudam, grava via `PUT /api/goals/:id` só as metas cujo valor calculado mudou (num único `setGoals` no fim, não um por meta — `goals` é dependência do próprio efeito). Sem vínculo, ou com o vínculo apontando para algo que já sumiu, `linkedGoalAmount` devolve `null` e a meta não é tocada — é assim, e não com um "congelamento" especial, que o último valor sincronizado sobra intacto depois de excluir a conta/investimento.
+  Em `GoalsManager`, um seletor "Acompanhar Progresso Por" (manual / conta / investimento) troca "Já Acumulado" por um valor somente leitura (a prévia do vínculo escolhido, antes mesmo de salvar) e mostra, no card, a quem a meta está ligada.
+  No backup (FIN-079/080): os dois vínculos entram no arquivo e são checados (conta/investimento no arquivo, sem cartão de crédito, nunca os dois) antes de restaurar; a restauração precisou de dois ajustes que não existiam para nenhum vínculo anterior — investimentos passaram a ser criados ANTES de metas (uma meta pode depender de um investimento que ainda não existiria no banco) e o id novo de um investimento restaurado passou a vir do mesmo mapa usado para remapear `investmentId` (chamar `newId()` de novo geraria um segundo uuid, diferente do que ficou gravado no vínculo).
+  Ficou de fora: mostrar a meta ligada como somente leitura fora do modal (a lista já mostra "Ligada a X", mas o card não impede excluir a meta) e uma central de "desfazer vínculo" fora da edição.
+
+  **Validação executada:** `server.goals.test.js` — 12 testes novos: cria ligada a conta/investimento; rejeita os dois ao mesmo tempo (sem criar nada), cartão de crédito, conta de outro usuário e investimento inexistente; troca de vínculo desliga o anterior; `accountId` vazio volta ao manual; excluir a conta ou o investimento ligado desfaz o vínculo e MANTÉM o último valor acumulado. `server.backup.test.js` — round-trip com os dois vínculos, remapeados para o id novo ao restaurar na conta de outra pessoa (e intactos ao restaurar na própria); 3 casos novos de arquivo inválido (cartão de crédito, investimento fantasma, vínculo duplo). `goals.test.ts` — 6 testes de `linkedGoalAmount` (conta, investimento, sem vínculo, vínculo apontando para algo excluído, e os dois presentes ao mesmo tempo — não deveria acontecer, mas a conta ganha). `npm run lint`, `npm run typecheck`, `npx vitest run` (52 arquivos, 724 testes) e `npm run build` limpos. Migração aplicada ao `dev.db` depois de um backup, com `integrity_check` antes e depois.
 
 ---
 

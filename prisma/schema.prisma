@@ -24,6 +24,7 @@ model User {
   twoFactor    UserTwoFactor?
   categoryRules CategoryRule[]
   pluggyItems  PluggyItem[]
+  netWorthSnapshots NetWorthSnapshot[]
 }
 
 // FIN-078 — verificação em duas etapas (TOTP). Tabela própria, 1:1 com User, em vez de colunas
@@ -69,6 +70,7 @@ model Account {
   debts       Debt[]
   recurring   RecurringTransaction[]
   investments Investment[]
+  goals       Goal[] // FIN-113
 
   // Toda listagem filtra por userId; o sync Pluggy busca por (userId, pluggyId) — ver FIN-019.
   @@index([userId])
@@ -180,18 +182,26 @@ model PluggyItem {
 }
 
 // FIN-049 — meta financeira (Fase 4): quanto o usuário quer juntar até uma data.
-// `currentAmount` é atualizado manualmente pelo usuário (aportes), não derivado de
-// transações — vincular meta a conta/transação específica ficou fora do escopo desta fase.
+// `currentAmount` é atualizado manualmente pelo usuário (aportes) por padrão; com FIN-113,
+// ligada a uma conta ou a um investimento (nunca os dois — checado na rota, não aqui: o Prisma
+// não faz "exatamente um dos dois" em nível de schema), o cliente mantém `currentAmount` em dia
+// sozinho, e a checagem de posse fica na rota (FIN-096). Excluir a conta/investimento apaga só o
+// vínculo (`SET NULL`, o padrão do Prisma para relação opcional): a meta volta ao modo manual,
+// com o último valor sincronizado — nunca é apagada.
 model Goal {
   id            String   @id @default(uuid())
   userId        String
+  accountId     String?
+  investmentId  String?
   name          String
   targetAmount  Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
   currentAmount Int      @default(0) // centavos já acumulados
   targetDate    String   // ISO YYYY-MM-DD, mesma convenção de Debt.nextDueDate
   createdAt     DateTime @default(now())
 
-  user          User     @relation(fields: [userId], references: [id])
+  user          User        @relation(fields: [userId], references: [id])
+  account       Account?    @relation(fields: [accountId], references: [id])
+  investment    Investment? @relation(fields: [investmentId], references: [id])
 
   @@index([userId]) // ver FIN-019
 }
@@ -216,6 +226,27 @@ model RecurringTransaction {
   account        Account? @relation(fields: [accountId], references: [id])
 
   @@index([userId]) // ver FIN-019
+}
+
+// FIN-112 — retrato mensal do patrimônio líquido (FIN-064/FIN-073), para o gráfico de evolução em
+// Relatórios: os saldos de contas/dívidas/investimentos são calculados na hora e nunca ficam
+// guardados, então sem isto não haveria como ver a evolução. Um registro por (usuário, mês) —
+// a rota sempre grava no mês corrente do relógio do servidor (nunca um mês que o cliente informe),
+// e por isso os meses anteriores nunca são reescritos por ela.
+model NetWorthSnapshot {
+  id          String   @id @default(uuid())
+  userId      String
+  month       String   // "YYYY-MM"
+  liquid      Int      // centavos — saldo em contas (FIN-018), pode ser negativo
+  investments Int      // centavos — investimentos (FIN-073)
+  liabilities Int      // centavos — faturas em aberto + saldo devedor das dívidas
+  total       Int      // centavos — patrimônio líquido (ativos − passivos), pode ser negativo
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, month])
 }
 
 model DebtItem {
@@ -270,6 +301,7 @@ model Investment {
 
   user           User     @relation(fields: [userId], references: [id])
   account        Account? @relation(fields: [accountId], references: [id])
+  goals          Goal[] // FIN-113
 
   @@index([userId]) // ver FIN-019
 }

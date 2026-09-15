@@ -790,11 +790,18 @@ const categoryRuleRequestSchema = categoryRuleSchema.extend({ applyToExisting: z
 // não tem sentido de negócio e tornaria o cálculo de progresso uma divisão por zero.
 // `currentAmount` é opcional no create (nasce em 0) para que o mesmo schema sirva de base
 // ao `partial()` usado no update — mesmo padrão de `paidAmount` em `debtSchema`.
+// FIN-113 — `accountId`/`investmentId` (nunca os dois) ligam a meta a uma conta ou a um
+// investimento: o cliente passa a manter `currentAmount` em dia sozinho, e a checagem de posse
+// (não pode ser conta de outro usuário, nem cartão de crédito) fica na rota, que também garante a
+// exclusividade — checar isso aqui, com `.refine()`, impediria `.extend()` no schema do backup e
+// `.partial()` no do update (nenhum dos dois existe em cima de um `ZodEffects`).
 const goalSchema = z.object({
   name: z.string({ error: 'Nome da meta é obrigatório.' }).trim().min(1, 'Nome da meta é obrigatório.'),
   targetAmount: z.coerce.number().int('Valor da meta deve ser um inteiro em centavos.').min(1, 'Valor da meta deve ser maior que zero.'),
   currentAmount: z.coerce.number().int('Valor acumulado deve ser um inteiro em centavos.').min(0, 'Valor acumulado não pode ser negativo.').optional(),
   targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data-alvo deve estar no formato YYYY-MM-DD.'),
+  accountId: accountIdField,
+  investmentId: accountIdField, // mesmo formato de id opcional; o nome do campo é que muda
 });
 const goalUpdateSchema = goalSchema.partial();
 
@@ -827,6 +834,19 @@ const investmentSchema = z.object({
   currency: currencyField, // FIN-074 — ausente no cadastro = real (padrão do banco)
 });
 const investmentUpdateSchema = investmentSchema.partial();
+
+// FIN-112 — retrato mensal do patrimônio líquido. O cliente já calculou tudo (mesma lógica de
+// `computeNetWorth`, em reais, convertida para centavos aqui) — a rota só valida e guarda; `total`
+// tem que bater com `liquid + investments - liabilities`, senão o retrato não corresponde ao que
+// `computeNetWorth` produziria e o gráfico mostraria um número que não existe em nenhuma tela.
+const netWorthSnapshotSchema = z.object({
+  liquid: z.coerce.number().int('Saldo em contas deve ser um inteiro em centavos.'),
+  investments: z.coerce.number().int('Investimentos devem ser um inteiro em centavos.').min(0, 'Investimentos não pode ser negativo.'),
+  liabilities: z.coerce.number().int('Passivos devem ser um inteiro em centavos.').min(0, 'Passivos não pode ser negativo.'),
+  total: z.coerce.number().int('Patrimônio líquido deve ser um inteiro em centavos.'),
+}).refine(d => d.total === d.liquid + d.investments - d.liabilities, {
+  message: 'Patrimônio líquido não corresponde a contas + investimentos − passivos.',
+});
 
 
 // Middleware de autenticação
@@ -1576,6 +1596,22 @@ app.delete('/api/budgets/:id', authenticateToken, async (req, res) => {
 });
 
 // --- GOALS (FIN-050) ---
+// FIN-113 — vínculo (opcional, nunca os dois) com conta ou investimento: mesma regra de posse de
+// FIN-096, feita aqui e não no schema (ver comentário de `goalSchema`).
+async function goalAccountError(userId, accountId) {
+  return nonCreditAccountError(userId, accountId, 'Uma meta não pode ser vinculada a um cartão de crédito.');
+}
+async function goalInvestmentError(userId, investmentId) {
+  if (!investmentId) return null;
+  const investment = await prisma.investment.findFirst({ where: { id: investmentId, userId }, select: { id: true } });
+  return investment ? null : 'Investimento não encontrado.';
+}
+/** Erro de posse do vínculo enviado, ou de ter os dois ao mesmo tempo — checados nas duas rotas de escrita. */
+async function goalLinkError(userId, accountId, investmentId) {
+  if (accountId && investmentId) return 'Uma meta só pode ser vinculada a uma conta OU a um investimento, não os dois.';
+  return (await goalAccountError(userId, accountId)) ?? (await goalInvestmentError(userId, investmentId));
+}
+
 app.get('/api/goals', authenticateToken, async (req, res) => {
   try {
     const goals = await prisma.goal.findMany({ where: { userId: req.user.userId } });
@@ -1588,10 +1624,14 @@ app.get('/api/goals', authenticateToken, async (req, res) => {
 app.post('/api/goals', authenticateToken, async (req, res) => {
   const validation = validateBody(goalSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
   try {
+    const linkError = await goalLinkError(userId, validation.data.accountId, validation.data.investmentId);
+    if (linkError) return res.status(400).json({ error: linkError });
     // `currentAmount` é opcional no schema (para servir ao update parcial); no create, uma
-    // meta nova sempre começa em 0 quando não informado.
-    const data = { currentAmount: 0, ...validation.data, userId: req.user.userId };
+    // meta nova sempre começa em 0 quando não informado (a menos que já nasça ligada — o
+    // cliente manda o saldo/valor atual já calculado, ver FIN-112 para o mesmo padrão).
+    const data = { currentAmount: 0, ...validation.data, userId };
     const goal = await prisma.goal.create({ data });
     res.json(goal);
   } catch (err) {
@@ -1602,11 +1642,17 @@ app.post('/api/goals', authenticateToken, async (req, res) => {
 app.put('/api/goals/:id', authenticateToken, async (req, res) => {
   const validation = validateBody(goalUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
   try {
-    const goal = await prisma.goal.updateMany({
-      where: { id: req.params.id, userId: req.user.userId },
-      data: validation.data,
-    });
+    const linkError = await goalLinkError(userId, validation.data.accountId, validation.data.investmentId);
+    if (linkError) return res.status(400).json({ error: linkError });
+    // Ligar a um dos dois desliga o outro — sem isto, um PUT que só manda `accountId` deixaria
+    // um `investmentId` antigo (de uma edição anterior) esquecido no banco, com os dois vínculos
+    // ativos ao mesmo tempo.
+    const data = { ...validation.data };
+    if (data.accountId) data.investmentId = null;
+    else if (data.investmentId) data.accountId = null;
+    const goal = await prisma.goal.updateMany({ where: { id: req.params.id, userId }, data });
     res.json({ success: true, changes: goal.count });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao atualizar meta.');
@@ -1622,20 +1668,26 @@ app.delete('/api/goals/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// --- INVESTMENTS (FIN-071) ---
 /**
- * Confere o `accountId` informado para um investimento: a conta precisa existir, ser do
- * próprio usuário e não ser um cartão de crédito. A chave estrangeira só garante que a conta
- * existe — sem esta checagem, o id de uma conta de outro usuário seria aceito e o investimento
- * ficaria vinculado a ela. E cartão não guarda aplicação: o saldo dele é uma fatura.
+ * Confere um `accountId` opcional que precisa existir, ser do próprio usuário e não ser cartão de
+ * crédito — usado tanto por investimentos (FIN-071) quanto por metas ligadas a conta (FIN-113). A
+ * chave estrangeira só garante que a conta existe; sem esta checagem, o id de uma conta de outro
+ * usuário seria aceito e o registro ficaria vinculado a ela. `notCreditMessage` é de quem chama,
+ * porque a concordância de gênero muda ("um investimento"/"uma meta").
  * Devolve a mensagem de erro, ou `null` quando o vínculo é válido ou não foi informado.
  */
-async function investmentAccountError(userId, accountId) {
+async function nonCreditAccountError(userId, accountId, notCreditMessage) {
   if (!accountId) return null;
   const account = await prisma.account.findFirst({ where: { id: accountId, userId }, select: { type: true } });
   if (!account) return ACCOUNT_NOT_FOUND;
-  if (account.type === 'credit') return 'Um investimento não pode ser vinculado a um cartão de crédito.';
+  if (account.type === 'credit') return notCreditMessage;
   return null;
+}
+
+// --- INVESTMENTS (FIN-071) ---
+// Cartão não guarda aplicação: o saldo dele é uma fatura, não dinheiro aplicado.
+async function investmentAccountError(userId, accountId) {
+  return nonCreditAccountError(userId, accountId, 'Um investimento não pode ser vinculado a um cartão de crédito.');
 }
 
 app.get('/api/investments', authenticateToken, async (req, res) => {
@@ -1722,6 +1774,39 @@ app.get('/api/exchange-rates', authenticateToken, async (req, res) => {
     // O detalhe fica no log: a resposta não repete a mensagem do provedor (FIN-011).
     console.error('Falha ao obter cotações de câmbio:', err);
     res.status(502).json({ error: 'Cotações indisponíveis no momento. Tente novamente mais tarde.' });
+  }
+});
+
+// --- PATRIMÔNIO LÍQUIDO — HISTÓRICO MENSAL (FIN-112) ---
+// Um retrato por mês. Esta rota sempre grava no mês corrente do relógio do SERVIDOR — nunca um mês
+// que o cliente informe —, então os meses anteriores nunca são reescritos por ela; é assim, e não
+// com uma checagem extra, que "só o mês corrente muda" fica garantido.
+app.post('/api/net-worth/snapshot', authenticateToken, async (req, res) => {
+  const validation = validateBody(netWorthSnapshotSchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  const userId = req.user.userId;
+  const month = todayISO().slice(0, 7);
+  try {
+    const snapshot = await prisma.netWorthSnapshot.upsert({
+      where: { userId_month: { userId, month } },
+      create: { userId, month, ...validation.data },
+      update: validation.data,
+    });
+    res.json(snapshot);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao salvar o retrato do patrimônio.');
+  }
+});
+
+app.get('/api/net-worth/history', authenticateToken, async (req, res) => {
+  try {
+    const history = await prisma.netWorthSnapshot.findMany({
+      where: { userId: req.user.userId },
+      orderBy: { month: 'asc' },
+    });
+    res.json(history);
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao buscar o histórico do patrimônio.');
   }
 });
 
@@ -2133,7 +2218,11 @@ const backupTransactionSchema = transactionSchema.omit({ externalId: true }).ext
 });
 const backupDebtSchema = debtSchema.extend({ id: backupIdField, accountId: backupAccountRef, createdAt: backupDateField });
 const backupBudgetSchema = budgetSchema.extend({ id: backupIdField, createdAt: backupDateField });
-const backupGoalSchema = goalSchema.extend({ id: backupIdField, createdAt: backupDateField });
+// FIN-113 — `investmentId` no arquivo passa pela mesma regra de `accountId` (id opcional, "" vira
+// null): o formato é genérico, só o campo que muda.
+const backupGoalSchema = goalSchema.extend({
+  id: backupIdField, accountId: backupAccountRef, investmentId: backupAccountRef, createdAt: backupDateField,
+});
 const backupRecurringSchema = recurringSchema.extend({ id: backupIdField, accountId: backupAccountRef, createdAt: backupDateField });
 const backupInvestmentSchema = investmentSchema.extend({
   id: backupIdField,
@@ -2185,9 +2274,10 @@ function backupIssueMessage(issues) {
 
 /**
  * Coerência interna do arquivo, conferida antes de apagar qualquer coisa: ids repetidos, vínculo
- * com conta que não está no arquivo, investimento em cartão de crédito (a mesma regra de
- * `investmentAccountError`) e as constraints únicas do banco — sem esta checagem, a violação só
- * apareceria no meio da gravação. Devolve a mensagem do primeiro problema, ou `null`.
+ * com conta ou investimento que não está no arquivo, investimento (ou meta, FIN-113) em cartão de
+ * crédito, meta vinculada aos dois ao mesmo tempo, e as constraints únicas do banco — sem esta
+ * checagem, a violação só apareceria no meio da gravação. Devolve a mensagem do primeiro
+ * problema, ou `null`.
  */
 function backupConsistencyError(data) {
   for (const section of Object.keys(BACKUP_SECTIONS)) {
@@ -2198,7 +2288,7 @@ function backupConsistencyError(data) {
     }
   }
   const accountTypes = new Map(data.accounts.map(account => [account.id, account.type]));
-  for (const section of ['transactions', 'debts', 'recurring', 'investments']) {
+  for (const section of ['transactions', 'debts', 'recurring', 'investments', 'goals']) {
     for (const [index, row] of data[section].entries()) {
       if (row.accountId && !accountTypes.has(row.accountId)) {
         return `${backupRowLabel(section, index)}: aponta para uma conta que não está no arquivo.`;
@@ -2208,6 +2298,19 @@ function backupConsistencyError(data) {
   for (const [index, investment] of data.investments.entries()) {
     if (investment.accountId && accountTypes.get(investment.accountId) === 'credit') {
       return `${backupRowLabel('investments', index)}: vinculado a um cartão de crédito.`;
+    }
+  }
+  // FIN-113 — mesmas checagens da rota para o vínculo (opcional) da meta com conta ou investimento.
+  const investmentIds = new Set(data.investments.map(investment => investment.id));
+  for (const [index, goal] of data.goals.entries()) {
+    if (goal.accountId && goal.investmentId) {
+      return `${backupRowLabel('goals', index)}: vinculada a uma conta e a um investimento ao mesmo tempo.`;
+    }
+    if (goal.accountId && accountTypes.get(goal.accountId) === 'credit') {
+      return `${backupRowLabel('goals', index)}: vinculada a um cartão de crédito.`;
+    }
+    if (goal.investmentId && !investmentIds.has(goal.investmentId)) {
+      return `${backupRowLabel('goals', index)}: aponta para um investimento que não está no arquivo.`;
     }
   }
   const uniqueKeys = [
@@ -2260,6 +2363,10 @@ function buildRestoreRows(userId, data, reuseIds) {
   const accountIds = new Map(data.accounts.map(account => [account.id, newId(account.id)]));
   const accountCurrency = new Map(data.accounts.map(account => [account.id, account.currency ?? BASE_CURRENCY]));
   const accountRef = accountId => (accountId ? accountIds.get(accountId) : null);
+  // FIN-113 — mesmo mapa de ids, para o vínculo (opcional) da meta com um investimento sobreviver
+  // à restauração (o investimento também ganha um id novo, calculado abaixo).
+  const investmentIds = new Map(data.investments.map(investment => [investment.id, newId(investment.id)]));
+  const investmentRef = investmentId => (investmentId ? investmentIds.get(investmentId) : null);
 
   const debtItems = [];
   return {
@@ -2281,12 +2388,17 @@ function buildRestoreRows(userId, data, reuseIds) {
     }),
     debtItems,
     budgets: data.budgets.map(({ id, ...budget }) => ({ ...budget, id: newId(id), userId })),
-    goals: data.goals.map(({ id, ...goal }) => ({ currentAmount: 0, ...goal, id: newId(id), userId })),
+    // FIN-113 — `investmentId` refeito pelo mapa (accountId já era); `id: investmentIds.get(id)`
+    // abaixo, e não outro `newId(id)`, é o que faz o vínculo apontar para o MESMO id novo do
+    // investimento — dois `newId(id)` para a mesma origem gerariam dois uuids diferentes.
+    goals: data.goals.map(({ id, accountId, investmentId, ...goal }) => ({
+      currentAmount: 0, ...goal, id: newId(id), userId, accountId: accountRef(accountId), investmentId: investmentRef(investmentId),
+    })),
     recurring: data.recurring.map(({ id, accountId, ...rec }) => ({
       active: true, ...rec, id: newId(id), userId, accountId: accountRef(accountId),
     })),
     investments: data.investments.map(({ id, accountId, ...investment }) => ({
-      ...investment, id: newId(id), userId, accountId: accountRef(accountId), currency: investment.currency ?? BASE_CURRENCY,
+      ...investment, id: investmentIds.get(id), userId, accountId: accountRef(accountId), currency: investment.currency ?? BASE_CURRENCY,
     })),
     categoryRules: data.categoryRules.map(({ id, ...rule }) => ({ ...rule, id: newId(id), userId })),
   };
@@ -2332,13 +2444,15 @@ app.post(BACKUP_IMPORT_PATH, authLimiter, authenticateToken, express.json({ limi
       prisma.notification.deleteMany({ where: { userId } }),
       prisma.account.deleteMany({ where: { userId } }),
       prisma.account.createMany({ data: rows.accounts }),
+      // FIN-113: investimentos antes de metas — uma meta pode apontar para um (`investmentId`), e
+      // a chave estrangeira exige que ele já exista na hora de inserir a meta.
+      prisma.investment.createMany({ data: rows.investments }),
       prisma.transaction.createMany({ data: rows.transactions }),
       prisma.debt.createMany({ data: rows.debts }),
       prisma.debtItem.createMany({ data: rows.debtItems }),
       prisma.budget.createMany({ data: rows.budgets }),
       prisma.goal.createMany({ data: rows.goals }),
       prisma.recurringTransaction.createMany({ data: rows.recurring }),
-      prisma.investment.createMany({ data: rows.investments }),
       prisma.categoryRule.createMany({ data: rows.categoryRules }),
     ]);
 

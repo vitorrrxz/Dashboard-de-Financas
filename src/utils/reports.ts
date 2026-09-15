@@ -25,7 +25,7 @@ function round2(value: number): number {
 }
 
 /** Rótulo "out/26" a partir de `YYYY-MM`; o dia 15 evita que o fuso empurre para outro mês. */
-function monthLabel(period: string): string {
+export function monthLabel(period: string): string {
   return new Date(period + '-15').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
 }
 

@@ -201,6 +201,10 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
         [b => { b.data.transactions[0].accountId = 'conta-que-nao-existe'; }, /transação nº 1: aponta para uma conta que não está no arquivo/],
         [b => { b.data.accounts[1].id = b.data.accounts[0].id; }, /conta nº 2: identificador repetido/],
         [b => { b.data.investments[0].accountId = card.id; }, /investimento nº 1: vinculado a um cartão de crédito/],
+        // FIN-113 — vínculo (opcional) da meta com conta ou investimento.
+        [b => { b.data.goals.push({ ...b.data.goals[0], id: 'meta-cartao', accountId: card.id }); }, /meta nº 2: vinculada a um cartão de crédito/],
+        [b => { b.data.goals.push({ ...b.data.goals[0], id: 'meta-fantasma', investmentId: 'investimento-que-nao-existe' }); }, /meta nº 2: aponta para um investimento que não está no arquivo/],
+        [b => { b.data.goals.push({ ...b.data.goals[0], id: 'meta-dupla', accountId: card.id, investmentId: b.data.investments[0].id }); }, /meta nº 2: vinculada a uma conta e a um investimento ao mesmo tempo/],
         [b => { b.data.budgets.push({ ...b.data.budgets[0], id: 'outro-orcamento' }); }, /orçamento nº 2: categoria repetida/],
         [b => { b.data.transactions[1].importHash = b.data.transactions[0].importHash; }, /transação nº 2: transação importada repetida/],
       ];
@@ -241,6 +245,34 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       }
       expect(withoutIds(received)).toEqual(withoutIds(ownerBackup.data));
       expect(received.goals.map(g => g.name)).toEqual(['Viagem']);
+    });
+
+    it('meta vinculada a conta ou investimento sobrevive à restauração, com os vínculos remapeados (FIN-113)', async () => {
+      const owner = await newUser();
+      const account = await call(owner, 'post', '/api/accounts', { name: 'Poupança', bank: 'Banco A', type: 'savings', balance: 500000, color: '#14b8a6' });
+      const investment = await call(owner, 'post', '/api/investments', { name: 'Tesouro Selic', type: 'fixed_income', amountInvested: 100000, currentValue: 110000 });
+      await call(owner, 'post', '/api/goals', { name: 'Reserva', targetAmount: 1000000, currentAmount: 500000, targetDate: '2027-01-01', accountId: account.id });
+      await call(owner, 'post', '/api/goals', { name: 'Aposentadoria', targetAmount: 2000000, currentAmount: 110000, targetDate: '2030-01-01', investmentId: investment.id });
+
+      const backup = await exportOf(owner);
+      expect(backup.data.goals.find(g => g.name === 'Reserva').accountId).toBe(account.id);
+      expect(backup.data.goals.find(g => g.name === 'Aposentadoria').investmentId).toBe(investment.id);
+
+      // Na própria conta: mesmos ids, vínculo intacto.
+      expect((await restore(owner, backup)).status).toBe(200);
+      expect((await exportOf(owner)).data).toEqual(backup.data);
+
+      // Na conta de outra pessoa: tudo ganha id novo — o vínculo tem que apontar para o novo id,
+      // nunca para o antigo (que nem existe mais nesta conta).
+      const receiver = await newUser();
+      expect((await restore(receiver, backup)).status).toBe(200);
+      const received = (await exportOf(receiver)).data;
+      const newAccount = received.accounts.find(a => a.name === 'Poupança');
+      const newInvestment = received.investments.find(i => i.name === 'Tesouro Selic');
+      expect(newAccount.id).not.toBe(account.id);
+      expect(newInvestment.id).not.toBe(investment.id);
+      expect(received.goals.find(g => g.name === 'Reserva')).toMatchObject({ accountId: newAccount.id, investmentId: null });
+      expect(received.goals.find(g => g.name === 'Aposentadoria')).toMatchObject({ investmentId: newInvestment.id, accountId: null });
     });
 
     it('a moeda da transação vem da conta, não do arquivo', async () => {

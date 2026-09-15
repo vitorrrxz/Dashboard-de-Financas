@@ -215,8 +215,8 @@
 - [ ] Acesso privado pelo celular via Tailscale com HTTPS — PWA instalado (FIN-109, depende de FIN-108)
 - [ ] Token de sessao em cookie httpOnly em vez do localStorage (FIN-110, depende de FIN-108)
 - [x] Detectar assinaturas nas transacoes e sugerir recorrencias (FIN-111)
-- [ ] Historico mensal do patrimonio liquido, com grafico de evolucao (FIN-112, depende de FIN-064, FIN-073)
-- [ ] Metas ligadas a uma conta ou investimento, com progresso automatico (FIN-113, depende de FIN-050, FIN-096)
+- [x] Historico mensal do patrimonio liquido, com grafico de evolucao (FIN-112, depende de FIN-064, FIN-073)
+- [x] Metas ligadas a uma conta ou investimento, com progresso automatico (FIN-113, depende de FIN-050, FIN-096)
 
 ### Engenharia
 - [ ] Acelerar a suite de testes — schema criado uma vez e copiado por arquivo (FIN-114)
