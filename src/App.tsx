@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
-  Search, TrendingDown, TrendingUp,
+  Search, TrendingDown, TrendingUp, Loader2,
   LogOut, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, BarChart3, Settings
 } from 'lucide-react';
 import { ImportModal } from './components/ImportModal';
@@ -9,17 +9,21 @@ import { NavItem } from './components/NavItem';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from './utils/paymentTypes';
 import { NotificationBell } from './components/NotificationBell';
 import { AuthForm } from './components/AuthForm';
-import { PluggyConnectButton } from './components/PluggyConnectButton';
 import { DashboardPage } from './pages/DashboardPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { AccountsPage } from './pages/AccountsPage';
 import { DebtsPage } from './pages/DebtsPage';
 import { BudgetsPage } from './pages/BudgetsPage';
 import { GoalsPage } from './pages/GoalsPage';
-import { InvestmentsPage } from './pages/InvestmentsPage';
 import { RecurringPage } from './pages/RecurringPage';
-import { ReportsPage } from './pages/ReportsPage';
-import { SettingsPage } from './pages/SettingsPage';
+// FIN-117 — carregadas sob demanda: cada uma vira um pedaço próprio no build (Reports/Investments
+// trazem o Recharts, Settings traz 2FA/backup/regras de categoria, e o widget da Pluggy só é
+// usado por quem conecta um banco). O pacote inicial fica menor; quem nunca abre essas abas nunca
+// baixa esse código.
+const InvestmentsPage = lazy(() => import('./pages/InvestmentsPage').then(m => ({ default: m.InvestmentsPage })));
+const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const PluggyConnectButton = lazy(() => import('./components/PluggyConnectButton').then(m => ({ default: m.PluggyConnectButton })));
 import { toCents, toReais } from './utils/money';
 import { apiFetch, ApiError } from './services/api';
 import { useFinancialStats } from './hooks/useFinancialStats';
@@ -65,6 +69,26 @@ interface NotificationsResponse {
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+}
+
+/** FIN-117 — estado de carregamento (acessível) de uma aba carregada sob demanda. */
+function PageLoadingFallback() {
+  return (
+    <div role="status" className="flex items-center justify-center gap-2 py-24 text-sm text-textMuted">
+      <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+      Carregando...
+    </div>
+  );
+}
+
+/** FIN-117 — mesmo papel de `PageLoadingFallback`, no tamanho do botão do widget da Pluggy. */
+function PluggyButtonLoadingFallback() {
+  return (
+    <div role="status" className="w-full py-3 flex items-center justify-center gap-2 text-xs text-textMuted">
+      <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+      Carregando...
+    </div>
+  );
 }
 
 /* --- Conversão centavos (API/banco) ↔ reais (UI) — ver FIN-015 em docs/BACKLOG_DETAIL.md ---
@@ -1062,6 +1086,7 @@ export default function App() {
             <Upload size={14}/> Importação Manual
           </button>
           {token && (
+            <Suspense fallback={<PluggyButtonLoadingFallback />}>
             <PluggyConnectButton
               token={token}
               onSyncComplete={async () => {
@@ -1074,6 +1099,7 @@ export default function App() {
                 setTxHasMore((txsData as Transaction[]).length >= 2000);
               }}
             />
+            </Suspense>
           )}
           {transactions.length > 0 && (
             <button onClick={async () => {
@@ -1228,14 +1254,16 @@ export default function App() {
           )}
 
           {activeTab === 'investments' && (
-            <InvestmentsPage
-              investments={investments}
-              accounts={accounts}
-              onAdd={addInvestment}
-              onUpdate={updateInvestment}
-              onDelete={deleteInvestment}
-              rates={rates}
-            />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <InvestmentsPage
+                investments={investments}
+                accounts={accounts}
+                onAdd={addInvestment}
+                onUpdate={updateInvestment}
+                onDelete={deleteInvestment}
+                rates={rates}
+              />
+            </Suspense>
           )}
 
           {activeTab === 'recurring' && (
@@ -1251,23 +1279,27 @@ export default function App() {
           )}
 
           {activeTab === 'reports' && (
-            <ReportsPage
-              transactions={transactionsBase.items}
-              accounts={accountsBase.items}
-              debts={debts}
-              investments={investmentsBase.items}
-              netWorthHistory={netWorthHistory}
-            />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <ReportsPage
+                transactions={transactionsBase.items}
+                accounts={accountsBase.items}
+                debts={debts}
+                investments={investmentsBase.items}
+                netWorthHistory={netWorthHistory}
+              />
+            </Suspense>
           )}
 
           {activeTab === 'settings' && (
-            <SettingsPage
-              settingsNotice={settingsNotice}
-              onDismissNotice={() => setSettingsNotice('')}
-              theme={theme}
-              token={token}
-              onRestored={handleRestored}
-            />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <SettingsPage
+                settingsNotice={settingsNotice}
+                onDismissNotice={() => setSettingsNotice('')}
+                theme={theme}
+                token={token}
+                onRestored={handleRestored}
+              />
+            </Suspense>
           )}
         </div>
       </main>

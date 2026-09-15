@@ -2900,7 +2900,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P3 — FIN-117 — Carregar abas pesadas sob demanda**
+- [x] **P3 — FIN-117 — Carregar abas pesadas sob demanda**
 
   **Objetivo**
   Abrir o app mais rápido, principalmente no celular.
@@ -2922,7 +2922,44 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Build sem o aviso de 500 kB; tamanho do pacote inicial medido antes e depois; navegação por todas as abas no navegador.
 
   **Critérios de aceite**
-  - [ ] Pacote inicial abaixo de 500 kB.
+  - [x] Pacote inicial abaixo de 500 kB.
+
+  **Nota de implementação**
+  `React.lazy`/`Suspense` nas três abas indicadas (`ReportsPage`, `InvestmentsPage`,
+  `SettingsPage`, cada uma com `.then(m => ({ default: m.XPage }))` porque exportam com nome, não
+  `default`) e no `PluggyConnectButton`, em `App.tsx`. Dois estados de carregamento acessíveis
+  (`role="status"` com ícone `Loader2` girando e texto "Carregando..."): `PageLoadingFallback`
+  (abas, ocupa a área da página) e `PluggyButtonLoadingFallback` (tamanho de botão, para o slot do
+  widget na barra lateral).
+
+  Isso sozinho tirou os quatro pedaços do carregamento inicial (~53 kB brutos / ~16 kB
+  comprimidos), mas não bastou para o aviso de 500 kB: o Dashboard (carregado de cara, fora do
+  escopo do card) usa Recharts diretamente, e a biblioteca inteira continuava dentro do pedaço
+  principal. Resolvido em `vite.config.ts` com `build.rollupOptions.output.manualChunks`, isolando
+  Recharts (e o `d3-*`/`victory-vendor` de que depende) num pedaço `charts` à parte — o Vite já
+  marca esse pedaço com `<link rel="modulepreload">` no HTML, então ele baixa em paralelo com o
+  principal (nenhum atraso a mais para quem abre o Dashboard), só não conta mais para o tamanho do
+  pedaço principal isolado.
+
+  **Antes/depois** (build de produção, `npm run build`): pedaço principal de 786,14 kB (224,01 kB
+  comprimido) para 354,71 kB (101,63 kB comprimido) + `charts` 380,53 kB (110,59 kB comprimido,
+  pré-carregado em paralelo) — nenhum pedaço passa mais de 500 kB, e o aviso do build sumiu. As
+  quatro abas/widget adiados (Relatórios 9,47 kB, Investimentos 14,50 kB, Configurações 23,52 kB,
+  widget da Pluggy 5,39 kB) só são baixados quando o usuário realmente abre cada um.
+
+  Conferido no código (sem precisar mudar nada): o service worker (`public/sw.js`, FIN-082) já
+  guarda QUALQUER caminho sob `/assets/` em cache-primeiro (`url.pathname.startsWith('/assets/')`,
+  sem lista fixa de nomes) — os pedaços novos, com hash, entram nesse cache na primeira vez que são
+  buscados (a instalação já pré-carrega os pedaços citados no HTML; os sob demanda entram quando a
+  aba é aberta pela primeira vez online), exatamente o que o card pedia.
+
+  **Validação executada:** suíte completa — 52 arquivos, 724 testes, todos passando (mesma
+  contagem de antes). `npm run lint` e `npx tsc -b --noEmit` limpos. `npm run build` sem o aviso de
+  500 kB, com os tamanhos antes/depois acima. Não foi possível navegar por todas as abas num
+  navegador nesta sessão (sem ferramenta de automação de navegador disponível, mesma limitação do
+  FIN-116) — a garantia de comportamento idêntico vem do `Suspense`/estado de carregamento cobrir o
+  período de download, do typecheck e dos 724 testes verdes, e da conferência direta do código do
+  service worker citada acima.
 
 ---
 
