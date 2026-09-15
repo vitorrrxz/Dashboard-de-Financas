@@ -2845,7 +2845,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P3 — FIN-116 — Dividir `App.tsx` em páginas e componentes**
+- [x] **P3 — FIN-116 — Dividir `App.tsx` em páginas e componentes**
 
   **Objetivo**
   Um componente por tela, fácil de testar e de carregar sob demanda.
@@ -2868,7 +2868,35 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Suíte, lint, typecheck e build limpos; app conferido no navegador.
 
   **Critérios de aceite**
-  - [ ] `App.tsx` reduzido à orquestração, sem mudança de comportamento.
+  - [x] `App.tsx` reduzido à orquestração, sem mudança de comportamento.
+
+  **Nota de implementação**
+  `App.tsx` caiu de 1.898 para 1.278 linhas — continua com a sessão (login/token), a carga e
+  mutação de dados (efeitos, handlers de CRUD, mapeadores de/para a API) e a navegação (barra
+  lateral, cabeçalho, troca de aba), exatamente como o backlog pedia. O conteúdo de cada aba virou
+  um componente de página em `src/pages/` (`DashboardPage`, `TransactionsPage`, `AccountsPage`,
+  `DebtsPage`, `BudgetsPage`, `GoalsPage`, `InvestmentsPage`, `RecurringPage`, `ReportsPage`,
+  `SettingsPage`), recebendo como props os dados já calculados e os handlers que já existiam — o
+  mesmo padrão que `AccountsManager`/`DebtManager`/etc. já usavam, só que agora para a aba inteira,
+  não só o formulário. `TxTable` foi para `src/components/TxTable.tsx` e `NavItem` para
+  `src/components/NavItem.tsx`, como o card já previa.
+
+  Um detalhe pego pelo ESLint (`react-refresh/only-export-components`): um arquivo de componente só
+  pode exportar componentes, então `PAYMENT_TYPE_META` (rótulo/cor de cada forma de pagamento, usado
+  tanto pelo badge do `TxTable` quanto pelo relatório CSV/PDF em `App.tsx`) e o tipo
+  `CategoryRuleDraft` foram para um módulo novo, `src/utils/paymentTypes.ts` — mesmo padrão que
+  `CATEGORY_COLORS`/`OWN_TRANSFER_CATEGORIES` já usam em `src/utils/categories.ts`.
+
+  `App.test.tsx` só teve o import do `TxTable` atualizado (`./App` → `./components/TxTable`); os
+  testes em si não mudaram uma linha, porque só exercitam o `TxTable` diretamente, não o `App`
+  inteiro.
+
+  **Validação executada:** suíte completa — 52 arquivos, 724 testes, todos passando (mesma
+  contagem de antes). `npm run lint`, `npx tsc -b --noEmit` e `npm run build` limpos (o aviso de
+  chunk > 500 kB é preexistente, ver FIN-117). `vite preview` do build servindo a página sem erro;
+  não foi possível clicar em cada aba no navegador nesta sessão (sem ferramenta de automação de
+  navegador disponível) — a garantia de comportamento idêntico vem de a mudança ter sido só mover
+  JSX/handlers para as páginas novas, sem tocar em lógica, mais o typecheck e os 724 testes verdes.
 
 ---
 

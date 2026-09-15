@@ -1,30 +1,25 @@
-import { useState, useEffect, useMemo, useRef, useId } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
-  Search, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  LogOut, Edit2, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, BarChart3, Download, FileText, Settings
+  Search, TrendingDown, TrendingUp,
+  LogOut, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, BarChart3, Settings
 } from 'lucide-react';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, BarChart, Bar, Cell,
-} from 'recharts';
 import { ImportModal } from './components/ImportModal';
-import { AccountsManager } from './components/AccountsManager';
-import { DebtManager } from './components/DebtManager';
-import { BudgetManager } from './components/BudgetManager';
-import { GoalsManager } from './components/GoalsManager';
-import { RecurringManager } from './components/RecurringManager';
-import { InvestmentsManager } from './components/InvestmentsManager';
-import { ReportsView } from './components/ReportsView';
-import { InstallmentsPanel } from './components/InstallmentsPanel';
-import { MonthNavigator, MonthTotal } from './components/MonthNavigator';
+import { NavItem } from './components/NavItem';
+import { PAYMENT_TYPE_META, type CategoryRuleDraft } from './utils/paymentTypes';
 import { NotificationBell } from './components/NotificationBell';
 import { AuthForm } from './components/AuthForm';
 import { PluggyConnectButton } from './components/PluggyConnectButton';
-import { TwoFactorSettings } from './components/TwoFactorSettings';
-import { BackupSettings } from './components/BackupSettings';
-import { ThemeSettings } from './components/ThemeSettings';
-import { CategoryRulesSettings } from './components/CategoryRulesSettings';
+import { DashboardPage } from './pages/DashboardPage';
+import { TransactionsPage } from './pages/TransactionsPage';
+import { AccountsPage } from './pages/AccountsPage';
+import { DebtsPage } from './pages/DebtsPage';
+import { BudgetsPage } from './pages/BudgetsPage';
+import { GoalsPage } from './pages/GoalsPage';
+import { InvestmentsPage } from './pages/InvestmentsPage';
+import { RecurringPage } from './pages/RecurringPage';
+import { ReportsPage } from './pages/ReportsPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { toCents, toReais } from './utils/money';
 import { apiFetch, ApiError } from './services/api';
 import { useFinancialStats } from './hooks/useFinancialStats';
@@ -32,7 +27,7 @@ import { useMobileDrawer } from './hooks/useMobileDrawer';
 import { useTheme } from './hooks/useTheme';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
-import { computeInvestmentHoldings, describeHoldings } from './utils/investments';
+import { computeInvestmentHoldings } from './utils/investments';
 import { linkedGoalAmount } from './utils/goals';
 import { todayISO } from './utils/debts';
 import { formatDateBR, formatMonthLabel } from './utils/dates';
@@ -42,11 +37,9 @@ import {
   ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions,
 } from './utils/transactions';
 import { isInstallmentTransaction } from './utils/installments';
-import { CATEGORY_COLORS } from './utils/categories';
-import { readableColor } from './utils/theme';
 import {
-  BASE_CURRENCY, accountsInBase, currencyOf, currencySymbol, describeConversion, foreignCurrencies,
-  formatMoney, investmentsInBase, parseExchangeRates, recurringInBase, transactionsInBase,
+  BASE_CURRENCY, accountsInBase, currencyOf, foreignCurrencies,
+  investmentsInBase, parseExchangeRates, recurringInBase, transactionsInBase,
   type ExchangeRates,
 } from './utils/currency';
 import type {
@@ -54,7 +47,7 @@ import type {
   NotificationType, RecurringTransaction, Transaction, PaymentType,
 } from './types';
 
-type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports' | 'settings';
+export type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports' | 'settings';
 
 // FIN-066: aba para onde o clique numa notificação leva, por tipo.
 const NOTIFICATION_TAB: Record<NotificationType, Tab> = {
@@ -128,12 +121,6 @@ function budgetToApi<T extends Partial<Budget>>(b: T): T {
   if (out.monthlyLimit != null) out.monthlyLimit = toCents(out.monthlyLimit);
   return out;
 }
-
-/**
- * Componente raiz do FinFlow — gerencia sessão (login/token), carrega contas, transações,
- * dívidas e orçamentos do usuário autenticado, deriva as estatísticas do Dashboard e
- * renderiza a navegação e as abas (Dashboard, Transações, Contas, Dívidas, Orçamento).
- */
 /**
  * Converte os valores da meta de centavos (API) para reais (UI) — ver conversão no topo deste
  * bloco. `accountId`/`investmentId` nulos (FIN-113: meta sem vínculo) viram ausentes, mesma
@@ -206,6 +193,14 @@ function netWorthSnapshotToApi(nw: NetWorth) {
   };
 }
 
+/**
+ * Componente raiz do FinFlow — gerencia sessão (login/token), carrega contas, transações,
+ * dívidas e orçamentos do usuário autenticado, deriva as estatísticas do Dashboard e
+ * renderiza a navegação e as abas (Dashboard, Transações, Contas, Dívidas, Orçamento).
+ *
+ * FIN-116 — o conteúdo de cada aba mora em `src/pages/*.tsx`; este componente fica só com a
+ * sessão, a carga/mutação de dados e a navegação (barra lateral, cabeçalho, troca de aba).
+ */
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
   const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
@@ -238,7 +233,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]); // FIN-066
   const [unreadCount, setUnreadCount] = useState(0);
   const [exportingPDF, setExportingPDF] = useState(false); // FIN-061
-  
+
   const [transactions, setTxs]        = useState<Transaction[]>([]);
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
@@ -394,17 +389,17 @@ export default function App() {
     setUser(newUser);
   };
 
-  /**
-   * FIN-080: depois de restaurar um backup, todos os dados mudaram no servidor — refaz a carga
-   * completa (a mesma do login) e guarda o resumo para a aba Configurações mostrar. O filtro de
-   * conta do Dashboard volta para "todas", porque a conta escolhida pode não existir mais.
-   */
   /** FIN-082: nova tentativa depois de uma carga que falhou sem conexão. */
   const retryLoad = () => {
     setLoadError('');
     setDataVersion(v => v + 1);
   };
 
+  /**
+   * FIN-080: depois de restaurar um backup, todos os dados mudaram no servidor — refaz a carga
+   * completa (a mesma do login) e guarda o resumo para a aba Configurações mostrar. O filtro de
+   * conta do Dashboard volta para "todas", porque a conta escolhida pode não existir mais.
+   */
   const handleRestored = (summary: string) => {
     setSettingsNotice(summary);
     setDashboardAccountId(null);
@@ -1134,765 +1129,150 @@ export default function App() {
         </header>
 
         <div className="p-8 max-w-7xl mx-auto pb-24">
-          
-          {/* ══════════ DASHBOARD TAB ══════════ */}
+
           {activeTab === 'dashboard' && (
-            <>
-              <div className="mb-8 flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-white tracking-tight">Visão Geral</h1>
-                
-                {/* ACCOUNT SELECTOR */}
-                {accounts.length > 0 && (
-                  <select 
-                    value={dashboardAccountId || ''}
-                    onChange={(e) => setDashboardAccountId(e.target.value || null)}
-                    className="bg-white/5 border border-white/10 text-sm text-white py-2 px-4 rounded-xl focus:outline-none focus:border-primary/50"
-                  >
-                    <option value="" className="bg-dashboard">Todas as Contas</option>
-                    {accounts.map(a => (
-                      <option key={a.id} value={a.id} className="bg-dashboard">{a.name} - {a.bank}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              {stats.overdueDebts.length > 0 && (
-                <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)' }}>
-                  <AlertCircle size={18} className="text-red-400 shrink-0"/>
-                  <p className="text-sm text-red-300">
-                    Você tem <strong>{stats.overdueDebts.length}</strong> dívida(s) com vencimento vencido:
-                    {' '}{stats.overdueDebts.map(d => d.name).join(', ')}
-                  </p>
-                </div>
-              )}
-
-              {/* FIN-047: mesmo padrão de alerta usado para dívidas vencidas, acima. */}
-              {overBudget.length > 0 && (
-                <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)' }}>
-                  <AlertCircle size={18} className="text-red-400 shrink-0"/>
-                  <p className="text-sm text-red-300">
-                    Você ultrapassou o limite de <strong>{overBudget.length}</strong> orçamento(s) este mês:
-                    {' '}{overBudget.map(b => b.category).join(', ')}
-                  </p>
-                </div>
-              )}
-
-              {/* FIN-076: com moeda estrangeira em uso, os totais são convertidos para real. Uma linha
-                  discreta diz de que cotação; o aviso âmbar aparece quando algo ficou de fora (moeda
-                  sem cotação) ou a cotação é antiga. Antes da primeira resposta, nada é exibido. */}
-              {usedCurrencies.length > 0 && (rates !== null || ratesFailed) && (
-                conversionIssue ? (
-                  <div role="status" className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)' }}>
-                    <AlertCircle size={18} className="text-amber-400 shrink-0"/>
-                    <p className="text-sm text-amber-200">{describeConversion(usedCurrencies, missingCurrencies, rates)}</p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-textMuted -mt-4 mb-6">{describeConversion(usedCurrencies, missingCurrencies, rates)}</p>
-                )
-              )}
-
-              {/* Summary Cards Row 1 — Real Accounts */}
-              {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem conta de
-                  investimento ou posição na carteira (FIN-073), o total aparece separado ao lado. */}
-              <div className={`grid grid-cols-1 md:grid-cols-3 ${hasInvestments ? 'lg:grid-cols-4' : ''} gap-5 mb-5`}>
-                <SummaryCard title="Saldo Real (Contas)" amount={fmt(stats.realBalance)} isPositive={stats.realBalance >= 0}
-                  icon={<Wallet size={22} style={{ color:'var(--color-primary)' }}/>} badge="Saldo atual" />
-                {hasInvestments && (
-                  <SummaryCard title="Investimentos" amount={fmt(stats.investmentBalance)} isPositive={stats.investmentBalance >= 0}
-                    icon={<TrendingUp size={22} className="text-teal-400"/>}
-                    badge={describeHoldings(investmentHoldings)} />
-                )}
-                <SummaryCard title="Fatura Pendente" amount={fmt(stats.pendingBills)} isPositive={false}
-                  icon={<CreditCard size={22} className="text-pink-400"/>} badge={`${accounts.filter(a=>a.type==='credit').length} cartão(ões)`} />
-                <SummaryCard title="Dívidas Ativas" amount={fmt(stats.activeDebts)} isPositive={false}
-                  icon={<TrendingDown size={22} className="text-amber-400"/>}
-                  badge={`${debts.filter(d=>d.paidInstallments < d.totalInstallments).length} pendente(s)`} />
-              </div>
-
-              {/* Summary Cards Row 2 — Transactions */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-                <SummaryCard title="Total de Receitas" amount={fmt(stats.income)} isPositive={true}
-                  icon={<ArrowUpRight size={22} style={{ color:'var(--color-accent)' }}/>} badge={`${stats.income > 0 ? (transactions.filter(t=>t.amount>0).length) : 0} entradas`}
-                  onClick={() => { setTxFilter('income'); setActiveTab('transactions'); }} />
-                <SummaryCard title="Total de Despesas" amount={fmt(stats.expense)} isPositive={false}
-                  icon={<ArrowDownRight size={22} className="text-red-400"/>} badge={`${stats.expense > 0 ? (transactions.filter(t=>t.amount<0).length) : 0} saídas`}
-                  onClick={() => { setTxFilter('expense'); setActiveTab('transactions'); }} />
-                <SummaryCard title="Este Mês (Gastos)" amount={fmt(stats.monthExpense)} isPositive={false}
-                  icon={<ArrowDownRight size={22} className="text-orange-400"/>} badge="Mês corrente" />
-              </div>
-
-              {/* FIN-046: indicador de orçamento do mês corrente no Dashboard. */}
-              {budgetProgress.length > 0 && (
-                <div className="glass-card rounded-2xl p-6 mb-8">
-                  <div className="flex justify-between items-center mb-5">
-                    <h3 className="text-lg font-semibold text-white">Orçamento do Mês</h3>
-                    <button onClick={() => setActiveTab('budgets')} className="text-xs text-textMuted hover:text-white transition-colors">Ver tudo →</button>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {budgetProgress.map(b => (
-                      <div key={b.id}>
-                        <div className="flex justify-between text-xs mb-1.5">
-                          <span className="text-white font-medium">{b.category}</span>
-                          <span className={b.isOverLimit ? 'text-red-400' : 'text-textMuted'}>{fmt(b.spent)} / {fmt(b.limit)}</span>
-                        </div>
-                        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
-                          <div className={`h-full rounded-full transition-all ${b.isOverLimit ? 'bg-red-400' : 'bg-primary'}`}
-                            style={{ width: `${Math.min(100, b.percentage)}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {isEmpty && !hasAccounts && (
-                <div className="glass-card rounded-2xl p-16 flex flex-col items-center text-center">
-                  <div className="w-20 h-20 rounded-2xl flex items-center justify-center mb-6"
-                    style={{ background:'linear-gradient(135deg,rgba(99,102,241,0.2),rgba(168,85,247,0.2))', border:'1px solid rgba(99,102,241,0.2)' }}>
-                    <Wallet size={36} style={{ color:'var(--color-primary)' }}/>
-                  </div>
-                  <h2 className="text-2xl font-bold text-white mb-3">Bem-vindo ao FinFlow!</h2>
-                  <p className="text-textMuted max-w-md mb-8">
-                    Seu painel financeiro pessoal! 
-                    Adicione suas contas na aba <strong>Contas</strong> e importe seus extratos bancários (CSV/OFX) para acompanhar suas finanças.
-                  </p>
-                  <div className="flex gap-3">
-                    <button onClick={() => setActiveTab('accounts')}
-                      className="px-6 py-3 rounded-xl text-on-accent font-semibold text-sm shadow-md"
-                      style={{ background:'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow:'0 4px 24px rgba(99,102,241,0.35)' }}>
-                      <span className="flex items-center gap-2"><Wallet size={16}/> Adicionar Conta</span>
-                    </button>
-                    <button onClick={() => setShowImport(true)}
-                      className="px-6 py-3 rounded-xl text-textMuted text-sm font-medium border border-white/10 hover:bg-white/5 hover:text-white transition-colors">
-                      <span className="flex items-center gap-2"><Upload size={16}/> Importar Extrato</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {(!isEmpty || hasAccounts) && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-                  <div className="lg:col-span-2 glass-card rounded-2xl p-6">
-                    <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-lg font-semibold text-white">Fluxo Financeiro</h3>
-                      <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
-                        <button 
-                          onClick={() => setChartPeriod('30d')}
-                          className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === '30d' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}
-                        >
-                          30 Dias
-                        </button>
-                        <button 
-                          onClick={() => setChartPeriod('all')}
-                          className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === 'all' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}
-                        >
-                          Histórico
-                        </button>
-                      </div>
-                    </div>
-                    <div className="h-60">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={chartPeriod === '30d' ? stats.dailyEvolution : stats.balanceByMonth}>
-                          <defs>
-                            <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                          <XAxis 
-                            dataKey="name" 
-                            axisLine={false} 
-                            tickLine={false} 
-                            tick={{ fontSize:10 }} 
-                            interval={chartPeriod === '30d' ? 4 : 0}
-                          />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
-                          <RechartsTooltip 
-                            contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                            formatter={(v) => [fmt(Number(v)), chartPeriod === '30d' ? 'Evolução' : 'Saldo']}
-                            labelStyle={{ color:'var(--color-textMuted)' }}
-                          />
-                          <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2.5} fill="url(#cg)" animationDuration={1000}/>
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {stats.expenseByCategory.length > 0 && (
-                    <div className="glass-card rounded-2xl p-6">
-                      <h3 className="text-lg font-semibold text-white mb-6">Por Categoria</h3>
-                      <div className="h-60">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={stats.expenseByCategory} layout="vertical" margin={{ left:-10, right:10 }}>
-                            <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
-                            <XAxis type="number" hide/>
-                            <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize:11 }} width={80}/>
-                            <RechartsTooltip
-                              contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                              formatter={(v) => [fmt(Number(v)),'Gasto']}/>
-                            <Bar dataKey="amount" radius={[0,4,4,0]} barSize={14}>
-                              {stats.expenseByCategory.map(e => (
-                                <Cell key={e.name} fill={CATEGORY_COLORS[e.name] || '#6366f1'}/>
-                              ))}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* FIN-059: projeção de saldo — só aparece quando há algo a projetar
-                  (recorrência ativa ou dívida em aberto), senão seria uma linha reta. */}
-              {(recurring.some(r => r.active) || debts.length > 0) && (
-                <div className="glass-card rounded-2xl p-6 mb-8">
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-lg font-semibold text-white">Projeção de Saldo</h3>
-                    <span className="text-[10px] uppercase tracking-wider font-bold text-textMuted bg-white/5 px-2.5 py-1 rounded-full border border-white/5">
-                      Próximos 6 meses
-                    </span>
-                  </div>
-                  <div className="h-60">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={projection}>
-                        <defs>
-                          <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#14b8a6" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize:10 }}/>
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
-                        <RechartsTooltip
-                          contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                          formatter={(v) => [fmt(Number(v)), 'Saldo projetado']}
-                          labelStyle={{ color:'var(--color-textMuted)' }}
-                        />
-                        <Area type="monotone" dataKey="balance" stroke="#14b8a6" strokeWidth={2.5} fill="url(#pg)" animationDuration={1000}/>
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <p className="text-xs text-textMuted mt-3">
-                    Saldo real de hoje somado às recorrências ativas e descontadas as parcelas de dívidas em aberto.
-                  </p>
-                </div>
-              )}
-            </>
+            <DashboardPage
+              accounts={accounts}
+              dashboardAccountId={dashboardAccountId}
+              onChangeDashboardAccount={setDashboardAccountId}
+              stats={stats}
+              overBudget={overBudget}
+              budgetProgress={budgetProgress}
+              usedCurrencies={usedCurrencies}
+              rates={rates}
+              ratesFailed={ratesFailed}
+              conversionIssue={conversionIssue}
+              missingCurrencies={missingCurrencies}
+              hasInvestments={hasInvestments}
+              investmentHoldings={investmentHoldings}
+              debts={debts}
+              transactions={transactions}
+              isEmpty={isEmpty}
+              hasAccounts={hasAccounts}
+              chartPeriod={chartPeriod}
+              onChangeChartPeriod={setChartPeriod}
+              recurring={recurring}
+              projection={projection}
+              onNavigate={setActiveTab}
+              onFilterTransactions={setTxFilter}
+              onShowImport={() => setShowImport(true)}
+            />
           )}
 
-          {/* ══════════ TRANSACTIONS TAB ══════════ */}
           {activeTab === 'transactions' && (
-            <>
-              <div className="mb-6 flex justify-between items-end">
-                <div>
-                  <h1 className="text-3xl font-bold text-white mb-1">Transações</h1>
-                  <p className="text-textMuted text-sm">{filtered.length} registros</p>
-                </div>
-                <div className="flex gap-2">
-                  {/* FIN-060/FIN-061: exportam exatamente o recorte visível (busca + filtro). */}
-                  <button onClick={exportTransactionsCSV} disabled={filtered.length === 0}
-                    title={filtered.length === 0 ? 'Nenhuma transação para exportar' : 'Exportar as transações filtradas em CSV'}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                    <Download size={15}/> CSV
-                  </button>
-                  <button onClick={exportTransactionsPDF} disabled={filtered.length === 0 || exportingPDF}
-                    title={filtered.length === 0 ? 'Nenhuma transação para exportar' : 'Exportar as transações filtradas em PDF'}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                    <FileText size={15}/> {exportingPDF ? 'Gerando...' : 'PDF'}
-                  </button>
-                  <button onClick={() => setShowImport(true)}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-on-accent font-medium transition-colors"
-                    style={{ backgroundColor:'var(--color-primary)' }}>
-                    <Upload size={15}/> Importar
-                  </button>
-                </div>
-              </div>
-
-              {/* FIN-093: mês de referência + total do recorte. Fica acima dos filtros de
-                  tipo porque delimita o conjunto sobre o qual eles atuam. */}
-              <div className="glass-card rounded-2xl p-4 mb-5 flex flex-wrap items-end justify-between gap-4">
-                <MonthNavigator id="tx-month" value={txMonth} months={txMonths} onChange={setTxMonth} allowAll/>
-
-                <div className="flex flex-wrap items-end gap-6">
-                  <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-accent)"/>
-                  <MonthTotal label="Despesas" value={monthTotals.expense} color="var(--text-negative)"/>
-                  <MonthTotal label="Valor total" value={monthTotals.balance} signed
-                    color={monthTotals.balance >= 0 ? 'var(--color-textMain)' : 'var(--text-negative)'}/>
-                </div>
-              </div>
-
-              {/* FIN-094: os parcelados não aparecem nesta aba — em vez de sumir com eles, avisa
-                  quantos ficaram de fora e leva direto para a aba onde estão. */}
-              {hiddenInstallments > 0 && (
-                <p className="text-xs text-textMuted -mt-2 mb-5">
-                  {hiddenInstallments} {hiddenInstallments === 1 ? 'lançamento parcelado' : 'lançamentos parcelados'}
-                  {txMonth === ALL_MONTHS ? '' : ' deste mês'} {hiddenInstallments === 1 ? 'está' : 'estão'} em{' '}
-                  <button type="button" onClick={() => setActiveTab('debts')}
-                    className="text-primary font-medium hover:underline">
-                    Dívidas e Parcelamentos
-                  </button>.
-                </p>
-              )}
-              <div className="flex gap-2 mb-5">
-                {([
-                  { key: 'all',     label: 'Todas',     color: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)',  text: 'var(--text-indigo)' },
-                  { key: 'income',  label: '↑ Receitas', color: 'rgba(20,184,166,0.12)', border: 'rgba(20,184,166,0.4)', text: 'var(--text-positive)' },
-                  { key: 'expense', label: '↓ Despesas', color: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.4)',  text: 'var(--text-negative)' },
-                ] as const).map(f => (
-                  <button key={f.key} onClick={() => setTxFilter(f.key)}
-                    className="px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200"
-                    style={{
-                      backgroundColor: txFilter === f.key ? f.color : 'var(--fg-4)',
-                      borderColor: txFilter === f.key ? f.border : 'var(--fg-8)',
-                      color: txFilter === f.key ? f.text : 'var(--color-textMuted)',
-                      borderWidth: 1
-                    }}>
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="glass-card rounded-2xl p-6">
-                {filtered.length === 0 ? (
-                  <p className="text-center text-textMuted py-12 text-sm">Nenhuma transação encontrada.</p>
-                ) : (
-                  <TxTable
-                    rows={filtered.slice(0, 200)}
-                    accounts={accounts}
-                    onUpdate={updateTransaction}
-                    onDelete={deleteTransaction}
-                    onCreateRule={createCategoryRule}
-                  />
-                )}
-              </div>
-
-              {/* FIN-023: a carga inicial busca no máximo 2000 transações — este botão só
-                  aparece quando esse limite foi atingido, permitindo acessar o restante. */}
-              {txHasMore && (
-                <button onClick={loadMoreTransactions} disabled={txLoadingMore}
-                  className="w-full mt-4 py-3 rounded-xl border border-white/10 text-sm text-textMuted hover:text-white hover:bg-white/5 transition-all disabled:opacity-50">
-                  {txLoadingMore ? 'Carregando...' : 'Carregar transações mais antigas'}
-                </button>
-              )}
-            </>
+            <TransactionsPage
+              filtered={filtered}
+              txMonth={txMonth}
+              onChangeTxMonth={setTxMonth}
+              txMonths={txMonths}
+              monthTotals={monthTotals}
+              hiddenInstallments={hiddenInstallments}
+              onGoToDebts={() => setActiveTab('debts')}
+              txFilter={txFilter}
+              onChangeTxFilter={setTxFilter}
+              accounts={accounts}
+              onUpdateTransaction={updateTransaction}
+              onDeleteTransaction={deleteTransaction}
+              onCreateRule={createCategoryRule}
+              txHasMore={txHasMore}
+              txLoadingMore={txLoadingMore}
+              onLoadMore={loadMoreTransactions}
+              onExportCSV={exportTransactionsCSV}
+              onExportPDF={exportTransactionsPDF}
+              exportingPDF={exportingPDF}
+              onShowImport={() => setShowImport(true)}
+            />
           )}
 
-          {/* ══════════ ACCOUNTS TAB ══════════ */}
           {activeTab === 'accounts' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Contas e Cartões</h1>
-                <p className="text-textMuted text-sm">Seu saldo real e faturas pendentes</p>
-              </div>
-              <AccountsManager 
-                accounts={accounts} 
-                onAdd={addAccount}
-                onUpdate={updateAccount}
-                onDelete={deleteAccount}
-                rates={rates}
-              />
-            </>
+            <AccountsPage
+              accounts={accounts}
+              onAdd={addAccount}
+              onUpdate={updateAccount}
+              onDelete={deleteAccount}
+              rates={rates}
+            />
           )}
 
-          {/* ══════════ DEBTS TAB ══════════ */}
           {activeTab === 'debts' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Dívidas e Parcelamentos</h1>
-                <p className="text-textMuted text-sm">Compras parceladas no cartão, dívidas cadastradas e o que vence em cada mês</p>
-              </div>
-              {/* FIN-094: mês de referência, vencimentos do mês e compras parceladas no cartão. */}
-              <InstallmentsPanel transactions={transactionsBase.items} debts={debts} accounts={accounts}/>
-              <DebtManager
-                debts={debts}
-                onAdd={addDebt}
-                onUpdate={updateDebt}
-                onDelete={deleteDebt}
-                accounts={accounts}
-              />
-            </>
+            <DebtsPage
+              transactionsBase={transactionsBase.items}
+              debts={debts}
+              accounts={accounts}
+              onAdd={addDebt}
+              onUpdate={updateDebt}
+              onDelete={deleteDebt}
+            />
           )}
 
-          {/* ══════════ BUDGETS TAB (FIN-045) ══════════ */}
           {activeTab === 'budgets' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Orçamento</h1>
-                <p className="text-textMuted text-sm">Limite de gasto mensal por categoria</p>
-              </div>
-              <BudgetManager
-                budgetProgress={budgetProgress}
-                onAdd={addBudget}
-                onUpdate={updateBudget}
-                onDelete={deleteBudget}
-                existingCategories={budgets.map(b => b.category)}
-                transactionCategories={transactionCategories}
-              />
-            </>
+            <BudgetsPage
+              budgetProgress={budgetProgress}
+              onAdd={addBudget}
+              onUpdate={updateBudget}
+              onDelete={deleteBudget}
+              existingCategories={budgets.map(b => b.category)}
+              transactionCategories={transactionCategories}
+            />
           )}
 
-          {/* ══════════ GOALS TAB (FIN-051) ══════════ */}
           {activeTab === 'goals' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Metas</h1>
-                <p className="text-textMuted text-sm">Quanto você quer juntar e até quando</p>
-              </div>
-              <GoalsManager
-                goals={goals}
-                accounts={accountsBase.items}
-                investments={investmentsBase.items}
-                onAdd={addGoal}
-                onUpdate={updateGoal}
-                onDelete={deleteGoal}
-              />
-            </>
+            <GoalsPage
+              goals={goals}
+              accounts={accountsBase.items}
+              investments={investmentsBase.items}
+              onAdd={addGoal}
+              onUpdate={updateGoal}
+              onDelete={deleteGoal}
+            />
           )}
 
-          {/* ══════════ INVESTMENTS TAB (FIN-072) ══════════ */}
           {activeTab === 'investments' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Investimentos</h1>
-                <p className="text-textMuted text-sm">Quanto você aplicou, quanto vale hoje e como a carteira está distribuída</p>
-              </div>
-              <InvestmentsManager
-                investments={investments}
-                accounts={accounts}
-                onAdd={addInvestment}
-                onUpdate={updateInvestment}
-                onDelete={deleteInvestment}
-                rates={rates}
-              />
-            </>
+            <InvestmentsPage
+              investments={investments}
+              accounts={accounts}
+              onAdd={addInvestment}
+              onUpdate={updateInvestment}
+              onDelete={deleteInvestment}
+              rates={rates}
+            />
           )}
 
-          {/* ══════════ RECURRING TAB (FIN-056) ══════════ */}
           {activeTab === 'recurring' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Recorrências</h1>
-                <p className="text-textMuted text-sm">Lançamentos que se repetem — salário, aluguel, assinaturas</p>
-              </div>
-              <RecurringManager
-                recurring={recurring}
-                accounts={accounts}
-                onAdd={addRecurring}
-                onUpdate={updateRecurring}
-                onDelete={deleteRecurring}
-                transactionCategories={transactionCategories}
-                transactions={transactions}
-              />
-            </>
+            <RecurringPage
+              recurring={recurring}
+              accounts={accounts}
+              onAdd={addRecurring}
+              onUpdate={updateRecurring}
+              onDelete={deleteRecurring}
+              transactionCategories={transactionCategories}
+              transactions={transactions}
+            />
           )}
 
-          {/* ══════════ REPORTS TAB (FIN-062/FIN-063/FIN-064) ══════════ */}
           {activeTab === 'reports' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Relatórios</h1>
-                <p className="text-textMuted text-sm">Patrimônio líquido e comparativos de receitas e despesas</p>
-              </div>
-              <ReportsView
-                transactions={transactionsBase.items}
-                accounts={accountsBase.items}
-                debts={debts}
-                investments={investmentsBase.items}
-                netWorthHistory={netWorthHistory}
-              />
-            </>
+            <ReportsPage
+              transactions={transactionsBase.items}
+              accounts={accountsBase.items}
+              debts={debts}
+              investments={investmentsBase.items}
+              netWorthHistory={netWorthHistory}
+            />
           )}
 
-          {/* ══════════ SETTINGS TAB (FIN-078) ══════════ */}
           {activeTab === 'settings' && (
-            <>
-              <div className="mb-6">
-                <h1 className="text-3xl font-bold text-white mb-1">Configurações</h1>
-                <p className="text-textMuted text-sm">Aparência, regras de categoria, segurança da conta e backup dos dados</p>
-              </div>
-              <div className="space-y-6 max-w-3xl">
-                {settingsNotice && (
-                  <div role="status" className="p-4 rounded-xl flex items-start justify-between gap-3 border border-teal-500/25 bg-teal-500/10">
-                    <p className="text-sm text-teal-300">{settingsNotice}</p>
-                    <button type="button" onClick={() => setSettingsNotice('')} aria-label="Fechar aviso"
-                      className="p-1 rounded-lg text-teal-300 hover:bg-white/10 transition-colors shrink-0">
-                      <X size={14}/>
-                    </button>
-                  </div>
-                )}
-                <ThemeSettings preference={theme.preference} onChange={theme.setPreference} />
-                <CategoryRulesSettings token={token} />
-                <TwoFactorSettings token={token} />
-                <BackupSettings token={token} onRestored={handleRestored} />
-              </div>
-            </>
+            <SettingsPage
+              settingsNotice={settingsNotice}
+              onDismissNotice={() => setSettingsNotice('')}
+              theme={theme}
+              token={token}
+              onRestored={handleRestored}
+            />
           )}
         </div>
       </main>
 
       {showImport && <ImportModal accounts={accounts} onClose={() => setShowImport(false)} onImport={(txs, pt) => handleImport(txs, pt)} />}
     </div>
-  );
-}
-
-/* --- UI Helpers --- */
-
-function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { title: string; amount: string; icon: React.ReactNode; badge?: string; isPositive: boolean; onClick?: () => void }) {
-  return (
-    <div onClick={onClick} className={`glass-card rounded-2xl p-6 transition-all ${onClick ? 'cursor-pointer hover:bg-white/5 hover:-translate-y-1' : ''}`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-2.5 rounded-xl" style={{ backgroundColor:'var(--fg-3)', border:'1px solid var(--fg-5)' }}>
-          {icon}
-        </div>
-        {badge && <span className="text-[10px] uppercase tracking-wider font-bold text-textMuted bg-white/5 px-2.5 py-1 rounded-full border border-white/5">{badge}</span>}
-      </div>
-      <p className="text-sm font-medium text-textMuted mb-1">{title}</p>
-      <h3 className={`text-2xl font-bold tracking-tight ${isPositive ? 'text-white' : 'text-white'}`}>
-        {!isPositive && amount !== 'R$ 0,00' ? '-' : ''}{amount}
-      </h3>
-    </div>
-  );
-}
-
-/**
- * Valor de uma transação na lista (FIN-076): em real, como sempre ("-35,49"); em outra moeda,
- * com o símbolo dela ("-US$ 12,00"), para um dólar nunca parecer um real.
- */
-function formatTxAmount(t: Transaction): string {
-  const currency = currencyOf(t);
-  if (currency === BASE_CURRENCY) {
-    return `${t.amount >= 0 ? '+' : ''}${t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-  }
-  return `${t.amount < 0 ? '-' : '+'}${formatMoney(t.amount, currency)}`;
-}
-
-const PAYMENT_TYPE_META: Record<string, { label: string; color: string }> = {
-  debit:           { label: 'Débito',       color: '#3b82f6' },
-  credit:          { label: 'Crédito',      color: '#ec4899' },
-  pix:             { label: 'PIX',          color: '#10b981' },
-  pix_installment: { label: 'PIX Parc.',    color: '#f59e0b' },
-};
-
-/** FIN-106 — regra de categoria nascida da correção de uma transação (ver `createCategoryRule`). */
-interface CategoryRuleDraft { match: string; category: string; applyToExisting: boolean }
-
-/** FIN-106 — texto sugerido para a regra: a descrição sem o código do fim ("UBER *TRIP 1234" → "UBER *TRIP"). */
-const suggestRuleMatch = (name: string) => name.replace(/[\d\s*#./-]+$/, '').trim() || name.trim();
-
-// FIN-022: edição/exclusão individual de transação. `rows` continua sendo o recorte já
-// filtrado/paginado calculado pelo componente pai — este componente só adiciona a UI de
-// ação por linha e o modal de edição. Exportado para o teste das ações (FIN-099).
-export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
-  rows: Transaction[];
-  accounts: Account[];
-  onUpdate: (id: string, tx: Partial<Transaction>) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onCreateRule?: (rule: CategoryRuleDraft) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState<Transaction | null>(null);
-  const [form, setForm] = useState<Partial<Transaction>>({});
-  const [saving, setSaving] = useState(false);
-  const fieldId = useId();
-  // FIN-106: ao trocar a categoria, a correção pode virar regra de categoria (FIN-105).
-  const [rule, setRule] = useState({ create: false, match: '', applyToExisting: false });
-
-  const openEdit = (t: Transaction) => {
-    setEditing(t);
-    setForm({ ...t });
-    setRule({ create: false, match: suggestRuleMatch(t.name), applyToExisting: false });
-  };
-
-  const handleSave = async () => {
-    if (!editing || !form.name?.trim() || !form.date || form.amount === undefined) return;
-    setSaving(true);
-    try {
-      await onUpdate(editing.id, form);
-      if (onCreateRule && rule.create && form.category && form.category !== editing.category) {
-        await onCreateRule({ match: rule.match.trim(), category: form.category, applyToExisting: rule.applyToExisting });
-      }
-      setEditing(null);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (t: Transaction) => {
-    if (confirm(`Excluir a transação "${t.name}"?`)) await onDelete(t.id);
-  };
-
-  return (
-    <div className="overflow-x-auto min-h-[400px]">
-      <table className="w-full text-left border-collapse">
-        <thead>
-          <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-textMuted">
-            <th className="pb-3 font-semibold w-24">Data</th>
-            <th className="pb-3 font-semibold">Descrição</th>
-            <th className="pb-3 font-semibold">Categoria</th>
-            <th className="pb-3 font-semibold">Tipo</th>
-            <th className="pb-3 font-semibold text-right">Valor</th>
-            <th className="pb-3 font-semibold w-20 text-right">Ações</th>
-          </tr>
-        </thead>
-        <tbody className="text-sm divide-y divide-white/5">
-          {rows.map(t => {
-            const pt = PAYMENT_TYPE_META[t.paymentType ?? 'debit'] ?? PAYMENT_TYPE_META['debit'];
-            return (
-              <tr key={t.id} className="group hover:bg-white/[0.02] transition-colors">
-                <td className="py-4 text-textMuted">{formatDateBR(t.date)}</td>
-                <td className="py-4 font-medium text-white">{t.name}</td>
-                <td className="py-4">
-                  <span className="px-2.5 py-1 rounded-full text-xs border"
-                    style={{
-                      backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'var(--fg-5)',
-                      borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'var(--fg-10)',
-                      color: CATEGORY_COLORS[t.category] ? readableColor(CATEGORY_COLORS[t.category]) : 'var(--color-textMuted)'
-                    }}>
-                    {t.category}
-                  </span>
-                </td>
-                <td className="py-4">
-                  <span
-                    className="px-2.5 py-1 rounded-full text-xs font-semibold border"
-                    style={{
-                      backgroundColor: `${pt.color}15`,
-                      borderColor: `${pt.color}35`,
-                      color: readableColor(pt.color),
-                    }}
-                  >
-                    {pt.label}
-                  </span>
-                </td>
-                <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
-                  {formatTxAmount(t)}
-                </td>
-                <td className="py-4">
-                  {/* FIN-099: tela de toque não tem "passar o mouse" — lá as ações ficam sempre visíveis,
-                      e em qualquer tela aparecem quando o foco do teclado chega a elas. */}
-                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
-                    <button type="button" onClick={() => openEdit(t)} aria-label={`Editar ${t.name}`}
-                      className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
-                      <Edit2 size={13} aria-hidden="true" />
-                    </button>
-                    <button type="button" onClick={() => handleDelete(t)} aria-label={`Excluir ${t.name}`}
-                      className="p-1.5 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
-                      <Trash2 size={13} aria-hidden="true" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-
-      {editing && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setEditing(null)}>
-          <div className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-white">Editar Transação</h3>
-              <button type="button" onClick={() => setEditing(null)} aria-label="Fechar" className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
-                <X size={18} aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label htmlFor={`${fieldId}-name`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Descrição</label>
-                <input id={`${fieldId}-name`} value={form.name ?? ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor={`${fieldId}-date`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Data</label>
-                  <input id={`${fieldId}-date`} type="date" value={form.date ?? ''} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="input-field" />
-                </div>
-                <div>
-                  <label htmlFor={`${fieldId}-amount`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">
-                    Valor ({currencySymbol(currencyOf(accounts.find(a => a.id === form.accountId) ?? {}))})
-                  </label>
-                  <input id={`${fieldId}-amount`} type="number" step="0.01" value={form.amount ?? 0} onChange={e => setForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className="input-field" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label htmlFor={`${fieldId}-category`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Categoria</label>
-                  <select id={`${fieldId}-category`} value={form.category ?? ''} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="input-field">
-                    {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor={`${fieldId}-type`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Tipo</label>
-                  <select id={`${fieldId}-type`} value={form.paymentType ?? 'debit'} onChange={e => setForm(f => ({ ...f, paymentType: e.target.value as PaymentType }))} className="input-field">
-                    {Object.entries(PAYMENT_TYPE_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label htmlFor={`${fieldId}-account`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Conta</label>
-                <select id={`${fieldId}-account`} value={form.accountId ?? ''} onChange={e => setForm(f => ({ ...f, accountId: e.target.value }))} className="input-field">
-                  <option value="">Sem conta vinculada</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
-              </div>
-              {onCreateRule && form.category !== editing.category && (
-                <fieldset className="space-y-3 p-3 rounded-xl border border-white/10">
-                  <legend className="sr-only">Regra de categoria</legend>
-                  <label className="flex items-start gap-2 text-sm text-textMuted cursor-pointer">
-                    <input type="checkbox" className="mt-0.5" checked={rule.create}
-                      onChange={e => setRule(r => ({ ...r, create: e.target.checked }))} />
-                    <span>Criar regra: as próximas transações com o texto abaixo entram como {form.category}</span>
-                  </label>
-                  {rule.create && (
-                    <>
-                      <div>
-                        <label htmlFor={`${fieldId}-rule`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Texto na descrição</label>
-                        <input id={`${fieldId}-rule`} value={rule.match} onChange={e => setRule(r => ({ ...r, match: e.target.value }))} className="input-field" />
-                      </div>
-                      <label className="flex items-center gap-2 text-sm text-textMuted cursor-pointer">
-                        <input type="checkbox" checked={rule.applyToExisting}
-                          onChange={e => setRule(r => ({ ...r, applyToExisting: e.target.checked }))} />
-                        Aplicar também às transações já gravadas
-                      </label>
-                    </>
-                  )}
-                </fieldset>
-              )}
-            </div>
-
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setEditing(null)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
-                {saving ? 'Salvando...' : 'Salvar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NavItem({ icon, label, active, badge, badgeColor, onClick, isSubItem }: { icon: React.ReactNode; label: string; active: boolean; badge?: number; badgeColor?: string; onClick: () => void; isSubItem?: boolean }) {
-  return (
-    <button type="button" onClick={onClick} aria-current={active ? 'page' : undefined}
-      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${
-        active ? 'bg-white/10 text-white shadow-sm' : 'text-textMuted hover:bg-white/5 hover:text-white'
-      } ${isSubItem ? 'text-sm py-2' : ''}`}>
-      <div className="flex items-center gap-3">
-        <span className={active ? 'text-primary' : ''}>{icon}</span>
-        <span className="font-medium">{label}</span>
-      </div>
-      {badge !== undefined && (
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-          style={{ backgroundColor: badgeColor || 'var(--fg-10)', color: badgeColor ? '#fff' : 'inherit' }}>
-          {badge}
-        </span>
-      )}
-    </button>
   );
 }

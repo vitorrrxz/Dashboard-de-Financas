@@ -4,7 +4,7 @@
 // com os rótulos associados aos campos.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { TxTable } from './App';
+import { TxTable } from './components/TxTable';
 import type { Transaction } from './types';
 
 const uber: Transaction = {
