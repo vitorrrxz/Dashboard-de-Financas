@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-083 — preferência de tema: leitura e gravação no navegador, tema efetivo e aplicação.
 import { describe, it, expect, afterEach } from 'vitest';
 import {

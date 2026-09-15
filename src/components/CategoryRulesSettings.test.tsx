@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-106 — tela de regras de categoria: listar, trocar a categoria, criar e excluir.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';

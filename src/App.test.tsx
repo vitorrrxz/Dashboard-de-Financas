@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-099 — as ações de cada transação precisam funcionar sem mouse: nome acessível nos botões,
 // visíveis com o foco do teclado e em tela de toque (não só com `group-hover`), e o modal de edição
 // com os rótulos associados aos campos.

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-082 — registro do service worker.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { registerServiceWorker } from './pwa';

@@ -1,15 +1,15 @@
 // Utilitário compartilhado pelos testes de integração do backend (FIN-031 em
 // docs/BACKLOG_DETAIL.md). Cada arquivo de teste chama `createTestApp(nomeUnico)` UMA VEZ
 // em `beforeAll`, o que: (1) aponta `DATABASE_URL` para um arquivo SQLite isolado,
-// nunca `dev.db`; (2) aplica o schema atual via `prisma db push`; (3) importa `server.js`
-// dinamicamente — import dinâmico, não `import` estático no topo do arquivo, porque os
-// módulos ESM avaliam `import`s antes de qualquer código do teste rodar, e `server.js` lê
-// `DATABASE_URL`/`JWT_SECRET` do ambiente no momento em que é carregado. O Vitest isola o
-// registro de módulos por arquivo de teste (por padrão), então cada arquivo de teste que
-// chama isto recebe sua própria instância de `server.js`/Prisma, sem vazar estado entre
-// suítes.
-import { execSync } from 'child_process';
-import { unlinkSync, existsSync } from 'fs';
+// nunca `dev.db`; (2) aplica o schema atual, copiando o banco-modelo já pronto (ver FIN-114
+// e `global-setup.js`, que cria esse modelo uma vez com `prisma db push`, no início da
+// suíte inteira); (3) importa `server.js` dinamicamente — import dinâmico, não `import`
+// estático no topo do arquivo, porque os módulos ESM avaliam `import`s antes de qualquer
+// código do teste rodar, e `server.js` lê `DATABASE_URL`/`JWT_SECRET` do ambiente no
+// momento em que é carregado. O Vitest isola o registro de módulos por arquivo de teste
+// (por padrão), então cada arquivo de teste que chama isto recebe sua própria instância de
+// `server.js`/Prisma, sem vazar estado entre suítes.
+import { copyFileSync, existsSync, unlinkSync } from 'fs';
 
 // Exportado para que testes que precisam assinar seus próprios tokens (ex.: token
 // expirado/forjado em server.auth.test.js) usem o MESMO segredo que `server.js` valida em
@@ -18,6 +18,11 @@ export const TEST_JWT_SECRET = 'test_jwt_secret_' + 'x'.repeat(40); // >= 32 cha
 // Chave que cifra os segredos TOTP (FIN-078). Exportada para o teste que simula o servidor sem
 // chave poder restaurá-la depois.
 export const TEST_TWO_FACTOR_KEY = 'test_2fa_key_' + 'y'.repeat(40); // >= 32 chars
+// FIN-114 — banco com o schema já aplicado (sem nenhuma linha), criado uma vez por
+// `global-setup.js` antes de qualquer arquivo de teste rodar. Caminho fixo: é o único jeito de
+// `global-setup.js` (roda isolado, fora do grafo de módulos dos testes) e este arquivo
+// concordarem em onde ele está, sem um terceiro lugar para configurar o mesmo valor duas vezes.
+export const TEST_TEMPLATE_DB = './test_template.db';
 
 export async function createTestApp(dbName, { authRateLimit, frontendDir } = {}) {
   const dbFile = `./test_${dbName}.db`;
@@ -40,14 +45,12 @@ export async function createTestApp(dbName, { authRateLimit, frontendDir } = {})
   // quem roda os testes defina FRONTEND_DIR, porque o dotenv não sobrescreve variável que já existe.
   process.env.FRONTEND_DIR = frontendDir ?? '';
 
-  // Sem `--accept-data-loss`: o arquivo acabou de ser apagado, então o push nunca tem dado a
-  // perder — e, se um dia `DATABASE_URL` apontasse para um banco com dados, o Prisma recusaria a
-  // mudança destrutiva em vez de aplicá-la. Desde o Prisma 7.10 a flag também exige consentimento
-  // explícito quando o comando é disparado por um agente de IA (FIN-100).
-  execSync('npx prisma db push', {
-    env: process.env,
-    stdio: 'pipe',
-  });
+  // FIN-114 — copiar o banco-modelo (`-wal`/`-shm` inclusive, se sobrou algum do `db push` que o
+  // criou) é ordens de magnitude mais rápido que rodar `npx prisma db push` de novo por arquivo de
+  // teste: uma cópia de arquivo, em vez de subir o CLI e o schema engine do Prisma a cada suíte.
+  for (const suffix of ['', '-wal', '-shm']) {
+    if (existsSync(TEST_TEMPLATE_DB + suffix)) copyFileSync(TEST_TEMPLATE_DB + suffix, dbFile + suffix);
+  }
 
   // Import estático (não dinâmico com variável) — o Vite não consegue analisar
   // estaticamente `import(`../server.js?x=${var}`)` para seu grafo de módulos. O Vitest já

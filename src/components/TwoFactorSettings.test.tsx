@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-078 — tela de ativação/desativação da verificação em duas etapas.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';

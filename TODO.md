@@ -219,8 +219,8 @@
 - [x] Metas ligadas a uma conta ou investimento, com progresso automatico (FIN-113, depende de FIN-050, FIN-096)
 
 ### Engenharia
-- [ ] Acelerar a suite de testes — schema criado uma vez e copiado por arquivo (FIN-114)
-- [ ] Dividir `server.js` em rotas por dominio, sem mudar comportamento (FIN-115)
+- [x] Acelerar a suite de testes — schema criado uma vez e copiado por arquivo (FIN-114)
+- [x] Dividir `server.js` em rotas por dominio, sem mudar comportamento (FIN-115)
 - [ ] Dividir `App.tsx` em paginas e componentes, sem mudar comportamento (FIN-116)
 - [ ] Carregar abas pesadas sob demanda — pacote inicial abaixo de 500 kB (FIN-117, depende de FIN-116)
 - [ ] Dependabot e `npm audit` semanal no CI (FIN-118, depende de FIN-036, FIN-100)

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-076 — moeda por conta na aba Contas.
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';

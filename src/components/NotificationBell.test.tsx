@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-066 — sino do header com a central de notificações.
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';

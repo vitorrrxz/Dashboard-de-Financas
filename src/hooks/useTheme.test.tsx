@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-083 — hook do tema: padrão, escolha persistida, "igual ao sistema" acompanhando o sistema.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';

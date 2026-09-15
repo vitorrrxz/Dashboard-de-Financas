@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-083 — escolha de tema em Configurações.
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';

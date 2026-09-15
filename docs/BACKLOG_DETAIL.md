@@ -2747,7 +2747,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P2 — FIN-114 — Acelerar a suíte de testes**
+- [x] **P2 — FIN-114 — Acelerar a suíte de testes** ✅ Concluída (15/09/2026)
 
   **Objetivo**
   Rodar a suíte completa em bem menos tempo — ela roda a cada tarefa.
@@ -2770,11 +2770,17 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   A mesma contagem de testes antes e depois, todos passando; tempo total registrado; nenhum `test_*.db` sobrando.
 
   **Critérios de aceite**
-  - [ ] Suíte completa mais rápida, sem perder nenhum teste.
+  - [x] Suíte completa mais rápida, sem perder nenhum teste.
+
+  **Nota de implementação (15/09/2026):** `test/global-setup.js` (novo, registrado em `test.globalSetup`) roda `prisma db push` UMA vez, contra um banco-modelo (`test_template.db`) só com o schema, sem nenhuma linha — antes, cada um dos ~20 arquivos de teste de backend rodava o próprio `db push`, subindo o CLI e o schema engine do Prisma de novo a cada vez. `createTestApp` (`test/backend-test-utils.js`) agora copia esse arquivo (com os `-wal`/`-shm`, se sobrou algum) em vez de rodar `db push`, o que é uma cópia de arquivo, não um processo novo. `vitest.config.ts` trocou o ambiente padrão de `jsdom` para `node`: a maioria dos testes (regras de negócio puras e os de backend, que já usavam `node` via `// @vitest-environment node`) não toca em DOM nenhum, e criar um `jsdom` para cada um era quase um terço do tempo da suíte à toa. Os 14 arquivos que de fato renderizam componentes ou usam `window`/`document` (9 componentes, `App.test.tsx`, 2 hooks, `pwa.test.ts` e `utils/theme.test.ts` — achados com um grep por `render(`/`document.`/`window.`, não só pelo nome do arquivo) ganharam `// @vitest-environment jsdom` no topo, o oposto do que valia antes.
+  Ficou de fora, deliberadamente: `isolate: false` (a própria Vitest sugere, e economizaria mais alguns segundos) quebraria a premissa de `backend-test-utils.js` de que cada arquivo de teste recebe sua PRÓPRIA instância de `server.js`/Prisma — com workers reaproveitados entre arquivos, o `import('../server.js')` de um teste poderia devolver o módulo já carregado (e conectado a outro banco) por um teste anterior no mesmo worker.
+  **Antes/depois** (mesma máquina, `npm test`, 52 arquivos e 724 testes nos dois): de 228s (medido nesta sessão, antes da mudança) para 43–117s depois (variação entre execuções, provavelmente cache de disco do SO) — pelo menos ~2x mais rápido, chegando a ~5x na melhor execução. Nenhum `test_*.db` sobra depois (conferido com `ls` após duas execuções seguidas).
+
+  **Validação executada:** duas execuções completas de `npx vitest run` — 52 arquivos, 724 testes, todos passando nas duas (mesma contagem de antes). `npm run lint`, `npm run typecheck` e `npm run build` limpos.
 
 ---
 
-- [ ] **P3 — FIN-115 — Dividir `server.js` em rotas por domínio**
+- [x] **P3 — FIN-115 — Dividir `server.js` em rotas por domínio**
 
   **Objetivo**
   Mudanças menores e mais fáceis de revisar no backend.
@@ -2797,7 +2803,45 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Suíte completa, lint e build limpos a cada passo, sem alterar nenhum teste.
 
   **Critérios de aceite**
-  - [ ] `server.js` reduzido à montagem do app, sem mudança de comportamento.
+  - [x] `server.js` reduzido à montagem do app, sem mudança de comportamento.
+
+  **Nota de implementação**
+  `server.js` caiu de ~2.840 para 150 linhas: só a criação do `app`, os middlewares globais
+  (helmet/CORS/parser JSON com o desvio de `isBackupImportPath` para a restauração de backup), a
+  montagem de um router por domínio, o assentamento do build do frontend (FIN-108), o tratador de
+  erro final e o bloco de `listen`. Cada domínio (autenticação e 2FA, contas, transações, dívidas,
+  orçamento, metas, investimentos, câmbio, patrimônio líquido, regras de categoria, recorrências,
+  notificações, backup, Pluggy) foi para `server/routes/<domínio>.js`, um `express.Router()`
+  exportado e montado em `server.js` com `app.use('/api/<prefixo>', router)` — mesmos caminhos e
+  mesma ordem de registro de antes (ex.: `/bulk` antes de `/:id` em transações, `/process` antes de
+  `/:id` em recorrências), então nenhuma rota mudou de comportamento por causa da ordem de
+  correspondência do Express.
+
+  Os utilitários usados por mais de um domínio foram para `server/lib/*.js`: `prisma.js` (cliente
+  Prisma), `auth.js` (JWT + `authenticateToken` + `authLimiter`), `http.js`
+  (`sendInternalError`/`validateBody`), `dates.js` e `money.js` (aritmética de data ISO e
+  centavos/moeda, espelhando `src/utils/`), `categorization.js` (`foldText`/`ruleCategory`, usadas
+  por transações, regras de categoria e Pluggy), `accountAccess.js` (posse/moeda de conta,
+  compartilhada por transações, dívidas, recorrências, metas e investimentos),
+  `pluggyHelpers.js`, `exchangeRates.js`, `notificationsCore.js` e `schemas.js` (todos os schemas
+  Zod). Um efeito colateral sutil teve que ser resolvido: `server.js` chamava `dotenv.config()`
+  antes de ler `process.env` para montar o cliente Prisma — mas em módulos ES os `import`s de UM
+  arquivo são avaliados antes do corpo desse arquivo rodar, então um `lib/prisma.js` importado por
+  `server.js` executaria antes do `dotenv.config()` de `server.js`. Resolvido com `server/lib/env.js`
+  (só o `dotenv.config()`, sem exports) importado no topo de todo módulo que lê `process.env` no
+  carregamento (`prisma.js`, `auth.js`, `pluggyHelpers.js`, `exchangeRates.js`,
+  `notificationsCore.js`) — como cada um importa `env.js` como sua PRÓPRIA primeira dependência, a
+  ordem de avaliação garante que o `.env` já foi lido, não importa em que ordem `server.js` os
+  importe.
+
+  `server.js` continua exportando exatamente os mesmos nomes de antes (`app`, `prisma`,
+  `pluggyReauthMessage`, `encryptTwoFactorSecret` etc.) — os testes que importam funções puras
+  direto de `server.js` (`server.pluggy-credit.test.js`, `server.two-factor.test.js`,
+  `server.currency.test.js`, `server.notifications.test.js` etc.) não precisaram mudar uma linha.
+
+  **Validação executada:** suíte completa (`npx vitest run`) — 52 arquivos, 724 testes, todos
+  passando, mesma contagem de antes da divisão. `npm run lint`, `npx tsc -b --noEmit` e `npm run
+  build` limpos (o aviso de chunk > 500 kB é preexistente, ver FIN-117). Nenhum `test_*.db` sobrando.
 
 ---
 

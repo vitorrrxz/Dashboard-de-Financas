@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-030 (base de testes do frontend) e FIN-078 (segundo passo do login quando a conta tem
 // verificação em duas etapas).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

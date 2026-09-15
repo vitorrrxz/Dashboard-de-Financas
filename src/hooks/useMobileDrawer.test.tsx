@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-081 — gaveta do menu em telas pequenas: foco, Esc, Tab circular, deslize e largura de tela.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';

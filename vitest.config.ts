@@ -2,28 +2,27 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // Config de teste separada de `vite.config.ts` (dev/build do frontend) — ver FIN-030 em
-// docs/BACKLOG_DETAIL.md. Ambiente padrão `jsdom` (necessário para os testes de
-// componente React); os testes de backend (raiz do repo, `server.*.test.js`) sobrescrevem
-// para `node` via `// @vitest-environment node` no topo do arquivo, ver FIN-031.
+// docs/BACKLOG_DETAIL.md.
+//
+// FIN-114 — ambiente padrão `node`: a maioria dos testes (regras de negócio puras, os de
+// backend) não toca em DOM nenhum, e criar um `jsdom` para cada um deles era quase um minuto
+// da suíte à toa. Só os testes de componente/hook React que de fato renderizam algo pedem
+// `jsdom`, com `// @vitest-environment jsdom` no topo do arquivo — o oposto do que valia antes
+// (backend pedindo `node` explicitamente), porque agora `node` é que é o padrão.
 export default defineConfig({
   plugins: [react()],
   test: {
-    environment: 'jsdom',
+    environment: 'node',
     setupFiles: ['./src/test/setup.ts'],
+    // FIN-114 — cria o banco-modelo (schema aplicado, sem linhas) uma vez para a suíte inteira;
+    // cada teste de backend copia esse arquivo em vez de rodar `prisma db push` de novo (ver
+    // test/global-setup.js e test/backend-test-utils.js).
+    globalSetup: ['./test/global-setup.js'],
     globals: true,
     css: false,
-    // Os testes de backend (server.*.test.js) rodam `npx prisma db push` num `beforeAll`
-    // para preparar um banco SQLite isolado, e cada execução custa dezenas de segundos
-    // nesta máquina (resolução do npx + inicialização do engine do Prisma). O timeout
-    // padrão de 10s é insuficiente, e mesmo 30s ficava no limite conforme novos arquivos
-    // de teste de backend foram sendo adicionados à fila sequencial (ver FIN-031).
+    // Preparar um banco de teste (antes: `db push` por arquivo; agora: cópia do modelo) ainda
+    // soma ao tempo de cada `beforeAll`, e o timeout padrão de 10s é insuficiente — mantido por
+    // segurança mesmo com a cópia sendo bem mais rápida que o `db push` que ela substituiu.
     hookTimeout: 60000,
-    // Mesmo com 30s de hookTimeout, rodar 5+ arquivos de backend em paralelo (cada um
-    // disparando seu próprio `npx prisma db push` via `execSync`) satura CPU/IO o
-    // suficiente para estourar o timeout de qualquer forma nesta máquina — não é uma
-    // race condition no código, é contenção de recursos do próprio ambiente de teste.
-    // Roda os arquivos de teste sequencialmente (mais lento no total, mas confiável) em
-    // vez de tentar compensar com um timeout ainda maior.
-    fileParallelism: false,
   },
 });

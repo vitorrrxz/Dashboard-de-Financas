@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-079/FIN-080 — tela de backup: baixar o arquivo e restaurar um backup.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';

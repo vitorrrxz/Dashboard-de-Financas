@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-072 — tela da carteira de investimentos (e FIN-076 — moeda por posição).
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';

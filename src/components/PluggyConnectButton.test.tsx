@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 // FIN-107 — Open Finance na barra lateral: sincronização automática ao abrir, hora da última
 // sincronização de cada conexão e sincronização pelo botão de cada uma.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
