@@ -83,6 +83,19 @@ export function advanceYear(dateString: string): string {
   return formatISO(year, parsed.month, Math.min(parsed.day, daysInMonth(year, parsed.month)));
 }
 
+/**
+ * Diferença em dias entre duas datas ISO (`b - a`; negativa se `b` vem antes). `Date.UTC` dos dois
+ * lados, nunca `getDate()`/`getMonth()` locais — não há conversão de fuso a acertar, então é seguro
+ * (ver FIN-111, que usa isto para medir o intervalo entre ocorrências de uma possível assinatura).
+ */
+export function daysBetween(a: string, b: string): number {
+  const pa = parseISO(a);
+  const pb = parseISO(b);
+  if (!pa || !pb) return 0;
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.round((Date.UTC(pb.year, pb.month - 1, pb.day) - Date.UTC(pa.year, pa.month - 1, pa.day)) / msPerDay);
+}
+
 /** Frequências suportadas por uma transação recorrente (ver FIN-053). */
 export type RecurrenceFrequency = 'weekly' | 'monthly' | 'yearly';
 

@@ -1,9 +1,13 @@
-import { useState } from 'react';
-import { X, Plus, Trash2, Edit2, Repeat, Pause, Play } from 'lucide-react';
-import type { Account, RecurrenceFrequency, RecurringTransaction } from '../types';
+import { useMemo, useState } from 'react';
+import { X, Plus, Trash2, Edit2, Repeat, Pause, Play, Sparkles } from 'lucide-react';
+import type { Account, RecurrenceFrequency, RecurringTransaction, Transaction } from '../types';
 import { CATEGORY_COLORS, EXPENSE_CATEGORIES } from '../utils/categories';
 import { todayISO } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
+import {
+  detectSubscriptions, monthlySubscriptionCost, readDismissedSubscriptions, dismissSubscription,
+  type DetectedSubscription,
+} from '../utils/subscriptions';
 import { FormField } from './shared/FormField';
 
 type RecurringFormData = Omit<RecurringTransaction, 'id' | 'createdAt'>;
@@ -28,6 +32,8 @@ interface RecurringManagerProps {
   onDelete: (id: string) => Promise<void>;
   /** Categorias vindas das transações reais, além das curadas — mesmo motivo de BudgetManager. */
   transactionCategories: string[];
+  /** Histórico completo, para a detecção de assinaturas (FIN-111) — não só o mês em exibição em Transações. */
+  transactions: Transaction[];
 }
 
 /**
@@ -35,10 +41,39 @@ interface RecurringManagerProps {
  * assinaturas). Não lança nada por conta própria: quem gera as `Transaction` reais é o
  * endpoint `/api/recurring-transactions/process`, disparado no carregamento do app (FIN-055).
  */
-export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelete, transactionCategories }: RecurringManagerProps) {
+export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelete, transactionCategories, transactions }: RecurringManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<RecurringFormData>(EMPTY_RECURRING);
+
+  // FIN-111 — sugestões de assinatura, descartadas só neste navegador (ver utils/subscriptions.ts).
+  const [dismissed, setDismissed] = useState<Set<string>>(() => readDismissedSubscriptions());
+  const suggestions = useMemo(
+    () => detectSubscriptions(transactions, recurring, dismissed),
+    [transactions, recurring, dismissed]
+  );
+  const suggestionsMonthlyTotal = useMemo(
+    () => suggestions.reduce((sum, s) => sum + monthlySubscriptionCost(s), 0),
+    [suggestions]
+  );
+
+  /** Cria a recorrência a partir da sugestão — some da lista assim que `recurring` for atualizado pelo pai. */
+  const handleCreateFromSuggestion = async (sub: DetectedSubscription) => {
+    try {
+      await onAdd({
+        name: sub.name, category: sub.category, amount: sub.amount,
+        frequency: sub.frequency, nextOccurrence: sub.nextOccurrence, active: true,
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  /** Ignora a sugestão — persiste no navegador (FIN-077: sem sincronização entre dispositivos). */
+  const handleDismissSuggestion = (key: string) => {
+    dismissSubscription(key);
+    setDismissed(prev => new Set(prev).add(key));
+  };
 
   // O valor é digitado sempre positivo; o sinal vem deste seletor (mesma convenção de
   // `Transaction.amount`: negativo = despesa). Sem isso, o usuário teria que digitar "-350".
@@ -112,6 +147,43 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
 
   return (
     <div>
+      {suggestions.length > 0 && (
+        <div className="glass-card rounded-xl p-4 mb-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles size={16} className="text-amber-300 shrink-0" />
+            <h3 className="text-sm font-semibold text-white">Assinaturas encontradas</h3>
+          </div>
+          <p className="text-xs text-textMuted mb-3">
+            Total mensal aproximado: R$ {suggestionsMonthlyTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </p>
+          <div className="space-y-2">
+            {suggestions.map(sub => (
+              <div key={sub.key} className="flex items-center gap-3 rounded-lg p-3" style={{ backgroundColor: 'var(--fg-5)' }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">{sub.name}</p>
+                  <p className="text-xs text-textMuted">
+                    {FREQUENCY_LABELS[sub.frequency]} · {sub.occurrences}x · {sub.category}
+                  </p>
+                </div>
+                <p className="text-sm font-semibold text-red-400 shrink-0">
+                  R$ {Math.abs(sub.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+                <button onClick={() => handleCreateFromSuggestion(sub)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg text-on-accent shrink-0 whitespace-nowrap"
+                  style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                  Criar recorrência
+                </button>
+                <button onClick={() => handleDismissSuggestion(sub.key)} title="Ignorar sugestão"
+                  aria-label={`Ignorar sugestão de assinatura ${sub.name}`}
+                  className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white shrink-0">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-3 mb-4">
         {recurring.length === 0 && (
           <div className="glass-card rounded-xl p-8 flex flex-col items-center text-center">

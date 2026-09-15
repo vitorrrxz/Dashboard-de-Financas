@@ -1495,6 +1495,7 @@ export default function App() {
                 onUpdate={updateRecurring}
                 onDelete={deleteRecurring}
                 transactionCategories={transactionCategories}
+                transactions={transactions}
               />
             </>
           )}

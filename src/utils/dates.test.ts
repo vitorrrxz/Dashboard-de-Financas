@@ -3,7 +3,7 @@
 // a função, quando ela foi extraída para `dates.ts`.
 import { describe, it, expect } from 'vitest';
 import {
-  isLeapYear, daysInMonth, advanceMonth, advanceDays, advanceYear, advanceOccurrence,
+  isLeapYear, daysInMonth, advanceMonth, advanceDays, advanceYear, advanceOccurrence, daysBetween,
   shiftMonth, dateInMonth, monthsDescending, formatMonthLabel, formatRelativeTime,
 } from './dates';
 
@@ -98,6 +98,24 @@ describe('advanceOccurrence', () => {
         expect(advanceOccurrence(date, freq) > date).toBe(true);
       }
     }
+  });
+});
+
+describe('daysBetween', () => {
+  it('conta os dias entre duas datas no mesmo mês', () => {
+    expect(daysBetween('2026-03-01', '2026-03-08')).toBe(7);
+  });
+  it('é negativo quando a segunda data vem antes', () => {
+    expect(daysBetween('2026-03-08', '2026-03-01')).toBe(-7);
+  });
+  it('atravessa mês e ano', () => {
+    expect(daysBetween('2026-12-20', '2027-01-05')).toBe(16);
+  });
+  it('conta o 29/fev de ano bissexto', () => {
+    expect(daysBetween('2024-02-28', '2024-03-01')).toBe(2);
+  });
+  it('data em formato inválido devolve 0', () => {
+    expect(daysBetween('não-é-data', '2026-03-01')).toBe(0);
   });
 });
 

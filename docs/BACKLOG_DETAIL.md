@@ -2643,7 +2643,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P3 — FIN-111 — Detectar assinaturas e sugerir recorrências**
+- [x] **P3 — FIN-111 — Detectar assinaturas e sugerir recorrências** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Mostrar as cobranças que se repetem e que você talvez nem lembre mais.
@@ -2666,7 +2666,13 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes da detecção: mensal com reajuste pequeno é detectada; compras frequentes em datas irregulares não; menos de 3 ocorrências não.
 
   **Critérios de aceite**
-  - [ ] Assinaturas sugeridas, cada uma a um clique de virar recorrência.
+  - [x] Assinaturas sugeridas, cada uma a um clique de virar recorrência.
+
+  **Nota de implementação (14/09/2026):** `detectSubscriptions` (função pura) agrupa despesas — receita, transferência entre contas e pagamento de fatura (FIN-103) ficam de fora — pelo nome normalizado (minúsculas, sem acento, espaços colapsados; mesma dobra de `autoCategory`), e reconhece assinatura no grupo com 3+ ocorrências cujos intervalos caibam todos numa mesma janela (semanal 5–9 dias, mensal 24–35, anual 355–376 — a folga cobre o dia de cobrança escorregar por fim de semana) e cujos valores fiquem a 15% da mediana do grupo (cobre um reajuste normal sem juntar duas despesas diferentes que só coincidem no nome). Ganhou `daysBetween` em `utils/dates.ts` (`Date.UTC` dos dois lados, sem hora local) para medir os intervalos. Ficam de fora o grupo que já vira uma recorrência cadastrada — comparando o nome normalizado, ativa ou pausada — e o que o usuário descartou, guardado só neste navegador (`localStorage`, mesmo padrão de `utils/theme.ts`; o FinFlow é pessoal, sem sincronização entre aparelhos, FIN-077).
+  Na aba Recorrências, acima da lista, "Assinaturas encontradas" com o total mensal (semanal e anual convertidos, para comparar com o mensal) e, por sugestão, nome, frequência, quantas vezes apareceu, categoria, valor, botão "Criar recorrência" (o `onAdd` já existente, com os dados da sugestão) e um X para descartar; a sugestão criada some da lista assim que `recurring` é atualizado pelo pai, sem lógica extra de esconder.
+  Ficou de fora: sugerir a conta a vincular (a detecção não sabe de qual conta veio a despesa) e "desfazer" um descarte pela tela (dá para limpar removendo a chave `finflow_dismissed_subscriptions` do navegador).
+
+  **Validação executada:** `subscriptions.test.ts` (novo) — 26 testes: mensal com reajuste pequeno detectado (e a próxima ocorrência prevista certa); datas irregulares e menos de 3 ocorrências não detectadas; reajuste maior que a tolerância não detectado; semanal e anual reconhecidos; receita, transferência e pagamento de fatura fora; grupo com recorrência (mesmo pausada) e chave descartada ficam de fora; ordenação por quantidade de ocorrências; `normalizeSubscriptionName` e `monthlySubscriptionCost`; descarte persistido e lido do `localStorage`, com conteúdo corrompido e armazenamento indisponível sem lançar; e os casos de borda — 24 dias (aceito) contra 23 (nenhuma frequência bate), e valor a exatos 15% da mediana (estável) contra 15% + 1 centavo (não). `dates.test.ts` — 5 testes novos de `daysBetween`, incluindo o 29/fev. `npm run lint`, `npm run typecheck`, `npx vitest run` (51 arquivos, 691 testes) e `npm run build` limpos.
 
 ---
 
