@@ -2988,6 +2988,31 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   **Critérios de aceite**
   - [ ] Auditoria semanal e PRs de atualização automáticos.
 
+  **Nota de implementação**
+  `.github/dependabot.yml`: `npm` e `github-actions`, semanal, cada um com um grupo
+  `*-minor-patch` (`update-types: minor, patch`) — essas atualizações entram num PR só; major fica
+  de fora do grupo, um PR por vez, porque costuma exigir revisão (é o caso dos `overrides` do
+  Prisma em `package.json`, da FIN-100, que precisam ser revistos quando o Prisma atualizar as
+  dependências dele).
+
+  `.github/workflows/audit.yml`: `schedule` semanal (segunda, 06:00 UTC) + `workflow_dispatch`,
+  `permissions: contents: read` e `persist-credentials: false` no checkout — mesmo padrão de
+  `ci.yml` (FIN-036). Roda `npm audit --audit-level=high` num job separado do CI de push, para uma
+  vulnerabilidade nova (que ninguém introduziu agora) não travar o trabalho do dia com uma falha
+  vermelha num push sem relação com ela.
+
+  **Validação executada:** as duas configurações passam por um parser YAML (`js-yaml`, já presente
+  no projeto) sem erro, com a estrutura esperada conferida campo a campo. `npm audit
+  --audit-level=high` rodado localmente (mesmo comando do workflow) devolve "found 0
+  vulnerabilities" — o estado atual do lockfile passaria no workflow.
+
+  **Falta:** confirmar a execução real no GitHub Actions (`workflow_dispatch`) e o primeiro PR do
+  Dependabot — os arquivos precisam estar no branch padrão do repositório remoto para o Dependabot
+  ler a configuração e para o workflow aparecer na aba Actions, e isso exige um `git push` que não
+  foi pedido nesta tarefa. Antes de marcar o critério de aceite: dar push/merge nestes arquivos,
+  disparar `audit.yml` à mão pela aba Actions e conferir que roda verde, e esperar (ou provocar,
+  atualizando uma dependência de propósito) o primeiro PR do Dependabot.
+
 ---
 
 # 📊 Resumo

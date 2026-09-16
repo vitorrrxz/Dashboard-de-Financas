@@ -1,0 +1,31 @@
+name: Audit
+
+# FIN-118 — auditoria de dependências semanal. Separado do CI de push (FIN-036, `ci.yml`) para uma
+# vulnerabilidade nova (que ninguém introduziu agora, só ficou conhecida) não travar o trabalho do
+# dia com uma falha vermelha num push que não tem nada a ver com ela. `workflow_dispatch` permite
+# disparar à mão, para validar o workflow sem esperar o agendamento.
+on:
+  schedule:
+    - cron: '0 6 * * 1' # toda segunda-feira, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: npm audit (high/critical)
+        run: npm audit --audit-level=high

@@ -1,0 +1,28 @@
+version: 2
+
+# FIN-118 — atualizações semanais de dependências (npm) e das próprias GitHub Actions (FIN-036,
+# `ci.yml`). Atualizações menores (minor/patch) entram agrupadas num só PR — a maioria é segura e
+# de baixo risco; um PR por pacote nesse caso só daria ruído. Major fica de fora do grupo,
+# um PR por vez, porque costuma exigir revisão (ex.: os `overrides` do Prisma em package.json,
+# criados na Fase 9/FIN-100, precisam ser revistos quando o Prisma atualizar as dependências dele).
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
