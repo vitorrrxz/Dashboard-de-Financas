@@ -165,6 +165,18 @@ Para deixar o FinFlow rodando num computador ou servidor seu, sempre do mesmo je
 
 ---
 
+## 🚀 Rodando sem Docker (nativo)
+
+Sem Docker disponível (ex: máquina sem permissão de administrador para instalar o Docker/WSL), o mesmo resultado — build e API na mesma origem, migrações automáticas — roda direto com Node, sem contêiner:
+
+1. Crie o `.env` a partir do `.env.example`. Deixe `VITE_API_URL=""` e defina `FRONTEND_DIR=dist`.
+2. `npm ci && npm run build` — gera `dist/` com o frontend já apontando para a própria origem.
+3. `npm start` — aplica as migrações pendentes (`prisma migrate deploy`) e sobe a API em `http://localhost:3001`, servindo o frontend.
+
+O banco (`DATABASE_URL` do `.env`, um arquivo SQLite) e os backups ficam onde estiverem configurados — não há volume nem imagem, é o mesmo processo Node que já roda em desenvolvimento. Para manter rodando entre reinícios do computador, use o Agendador de Tarefas do Windows ou um gerenciador de processos como o [PM2](https://pm2.keymetrics.io/).
+
+---
+
 ## 🔒 Segurança de Repositório
 
 O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos sensíveis/locais não sejam rastreados pelo Git ou enviados ao repositório público no GitHub:
