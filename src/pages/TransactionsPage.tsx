@@ -1,5 +1,6 @@
 import { Download, FileText, Upload } from 'lucide-react';
 import { MonthNavigator, MonthTotal } from '../components/MonthNavigator';
+import { AccountFilter } from '../components/AccountFilter';
 import { TxTable } from '../components/TxTable';
 import { ALL_MONTHS } from '../utils/transactions';
 import type { TransactionTotals } from '../utils/transactions';
@@ -17,6 +18,9 @@ interface TransactionsPageProps {
   txFilter: 'all' | 'income' | 'expense';
   onChangeTxFilter: (filter: 'all' | 'income' | 'expense') => void;
   accounts: Account[];
+  /** Conta do filtro (null = todas); `filtered` e os totais já chegam recortados por ela. */
+  accountId: string | null;
+  onChangeAccount: (accountId: string | null) => void;
   onUpdateTransaction: (id: string, tx: Partial<Transaction>) => Promise<void>;
   onDeleteTransaction: (id: string) => Promise<void>;
   onCreateRule: (rule: CategoryRuleDraft) => Promise<void>;
@@ -37,7 +41,7 @@ const TX_FILTERS = [
 
 export function TransactionsPage({
   filtered, txMonth, onChangeTxMonth, txMonths, monthTotals, hiddenInstallments, onGoToDebts,
-  txFilter, onChangeTxFilter, accounts, onUpdateTransaction, onDeleteTransaction, onCreateRule,
+  txFilter, onChangeTxFilter, accounts, accountId, onChangeAccount, onUpdateTransaction, onDeleteTransaction, onCreateRule,
   txHasMore, txLoadingMore, onLoadMore, onExportCSV, onExportPDF, exportingPDF, onShowImport,
 }: TransactionsPageProps) {
   return (
@@ -70,7 +74,10 @@ export function TransactionsPage({
       {/* FIN-093: mês de referência + total do recorte. Fica acima dos filtros de
           tipo porque delimita o conjunto sobre o qual eles atuam. */}
       <div className="glass-card rounded-2xl p-4 mb-5 flex flex-wrap items-end justify-between gap-4">
-        <MonthNavigator id="tx-month" value={txMonth} months={txMonths} onChange={onChangeTxMonth} allowAll/>
+        <div className="flex flex-wrap items-end gap-4">
+          <MonthNavigator id="tx-month" value={txMonth} months={txMonths} onChange={onChangeTxMonth} allowAll/>
+          <AccountFilter id="tx-account" accounts={accounts} value={accountId} onChange={onChangeAccount}/>
+        </div>
 
         <div className="flex flex-wrap items-end gap-6">
           <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-accent)"/>

@@ -231,7 +231,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
   const handleDeleteAll = async () => {
     if (debts.length === 0) return;
-    if (!confirm('TEM CERTEZA? Isso excluirá todas as dívidas permanentemente.')) return;
+    // A lista pode estar filtrada por conta (DebtsPage): a confirmação diz quantas saem, não "todas".
+    if (!confirm(`TEM CERTEZA? Isso excluirá ${debts.length} dívida(s) da lista permanentemente.`)) return;
 
     const results = await Promise.allSettled(debts.map(d => onDelete(d.id)));
 
