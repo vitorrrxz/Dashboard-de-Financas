@@ -136,7 +136,7 @@ Gere as classes de cliente do Prisma e aplique as migrations no banco SQLite loc
 npx prisma generate
 npx prisma migrate dev
 ```
-> O projeto usa histórico de migrations versionado em `prisma/migrations` (não apenas `db push`) — isso torna mudanças de schema explícitas, reproduzíveis em qualquer ambiente e revisáveis antes de aplicar, reduzindo (mas não eliminando) o risco de mudanças destrutivas silenciosas.
+> O projeto usa histórico de migrations versionado em `Backend/prisma/migrations` (não apenas `db push`) — isso torna mudanças de schema explícitas, reproduzíveis em qualquer ambiente e revisáveis antes de aplicar, reduzindo (mas não eliminando) o risco de mudanças destrutivas silenciosas.
 
 ### Passo 4: Executar o Projeto
 O projeto está configurado para iniciar o servidor backend (API Express na porta `3001`) e o servidor frontend (Vite na porta padrão) de forma simultânea e concorrente usando apenas um comando:
@@ -169,8 +169,8 @@ Para deixar o FinFlow rodando num computador ou servidor seu, sempre do mesmo je
 
 Sem Docker disponível (ex: máquina sem permissão de administrador para instalar o Docker/WSL), o mesmo resultado — build e API na mesma origem, migrações automáticas — roda direto com Node, sem contêiner:
 
-1. Crie o `.env` a partir do `.env.example`. Deixe `VITE_API_URL=""` e defina `FRONTEND_DIR=dist`.
-2. `npm ci && npm run build` — gera `dist/` com o frontend já apontando para a própria origem.
+1. Crie o `.env` a partir do `.env.example`. Deixe `VITE_API_URL=""` e defina `FRONTEND_DIR=Frontend/dist`.
+2. `npm ci && npm run build` — gera `Frontend/dist/` com o frontend já apontando para a própria origem.
 3. `npm start` — aplica as migrações pendentes (`prisma migrate deploy`) e sobe a API em `http://localhost:3001`, servindo o frontend.
 
 O banco (`DATABASE_URL` do `.env`, um arquivo SQLite) e os backups ficam onde estiverem configurados — não há volume nem imagem, é o mesmo processo Node que já roda em desenvolvimento. Para manter rodando entre reinícios do computador, use o Agendador de Tarefas do Windows ou um gerenciador de processos como o [PM2](https://pm2.keymetrics.io/).
@@ -198,6 +198,6 @@ A cópia é feita com `VACUUM INTO`, segura com o servidor rodando, e conferida 
 
 ---
 
-## 📁 `sandbox-pluggy/`
+## 📁 `Backend/sandbox-pluggy/`
 
-A pasta `sandbox-pluggy/` **não é parte do aplicativo principal** — é um protótipo isolado, sem autenticação real, usado para testar a integração com a Pluggy separadamente. Não confundir com o backend (`server.js` na raiz). Detalhes em [`sandbox-pluggy/README.md`](sandbox-pluggy/README.md).
+A pasta `Backend/sandbox-pluggy/` **não é parte do aplicativo principal** — é um protótipo isolado, sem autenticação real, usado para testar a integração com a Pluggy separadamente. Não confundir com o backend (`Backend/server.js`). Detalhes em [`Backend/sandbox-pluggy/README.md`](Backend/sandbox-pluggy/README.md).

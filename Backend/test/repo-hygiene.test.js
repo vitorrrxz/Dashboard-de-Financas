@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
-const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const git = args => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
 
 const insideGitRepo = (() => {
@@ -39,7 +39,7 @@ describe.skipIf(!insideGitRepo)('banco de dados fora do git (FIN-097)', () => {
       'dev.db', 'dev.db-journal', 'dev.db-wal', 'dev.db-shm',
       // Cópias com os nomes que já foram versionados — nenhum deles casava com `*.db`.
       'dev.db.bak-2026-09-10T19-52-49-700Z', 'dev.db.backup-20260905-181115',
-      'dev.bak-pre-fin078-2026-09-11T19-06-58-903Z.db', 'prisma/outro.db.bak-1',
+      'dev.bak-pre-fin078-2026-09-11T19-06-58-903Z.db', 'Backend/prisma/outro.db.bak-1',
     ];
     for (const path of database) expect(DATABASE_FILE.test(path), path).toBe(true);
     const result = checkIgnore(database);
@@ -49,8 +49,8 @@ describe.skipIf(!insideGitRepo)('banco de dados fora do git (FIN-097)', () => {
 
   it('as regras novas não ignoram o schema, as migrações nem o exemplo de .env', () => {
     const result = checkIgnore([
-      'prisma/schema.prisma',
-      'prisma/migrations/20260911190406_add_two_factor/migration.sql',
+      'Backend/prisma/schema.prisma',
+      'Backend/prisma/migrations/20260911190406_add_two_factor/migration.sql',
       '.env.example',
     ]);
     expect(result.status).toBe(1);

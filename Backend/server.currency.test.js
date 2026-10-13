@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from './test/backend-test-utils.js';
-import { SUPPORTED_CURRENCIES as FRONTEND_CURRENCIES } from './src/utils/currency.ts';
+import { SUPPORTED_CURRENCIES as FRONTEND_CURRENCIES } from '../Frontend/src/utils/currency.ts';
 
 /** Data local em YYYY-MM-DD — a mesma convenção de `todayISO` no servidor. */
 function localISO(date) {

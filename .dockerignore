@@ -4,10 +4,10 @@
 **/*.db*
 backups
 **/node_modules
-dist
+**/dist
 .git
 .github
 .claude
 docs
-sandbox-pluggy
+Backend/sandbox-pluggy
 lint_results.txt

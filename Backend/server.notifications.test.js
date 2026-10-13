@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from './test/backend-test-utils.js';
-import { OWN_TRANSFER_CATEGORIES as FRONTEND_OWN_TRANSFER_CATEGORIES } from './src/utils/categories.ts';
+import { OWN_TRANSFER_CATEGORIES as FRONTEND_OWN_TRANSFER_CATEGORIES } from '../Frontend/src/utils/categories.ts';
 
 /** Hoje deslocado em `days` dias (negativo = passado), em ISO local — mesma convenção do server. */
 function isoFromToday(days) {

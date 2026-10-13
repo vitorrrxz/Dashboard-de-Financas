@@ -11,25 +11,27 @@ FROM base AS build
 # Dependências antes do código, para o cache desta etapa sobreviver às mudanças nele. O `postinstall`
 # (prisma generate) lê o schema.
 COPY package.json package-lock.json prisma.config.ts ./
-COPY prisma ./prisma
+COPY Backend/prisma ./Backend/prisma
 RUN npm ci
 COPY . .
-# Vazia, o frontend chama a API da própria origem (src/services/api.ts).
+# Vazia, o frontend chama a API da própria origem (Frontend/src/services/api.ts).
 ENV VITE_API_URL=""
 RUN npm run build && npm prune --omit=dev
 
 FROM base
 ENV NODE_ENV=production \
-    FRONTEND_DIR=/app/dist \
+    FRONTEND_DIR=/app/Frontend/dist \
     DATABASE_URL=file:/data/finflow.db
 # Pastas do banco e dos backups com dono `node`: um volume novo herda o dono.
 RUN mkdir -p /data /backups && chown node:node /data /backups
 COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json prisma.config.ts server.js ./
-COPY prisma ./prisma
-COPY scripts/backup-db.mjs ./scripts/
+COPY --from=build /app/Frontend/dist ./Frontend/dist
+COPY package.json prisma.config.ts ./
+COPY Backend/server.js ./Backend/
+COPY Backend/server ./Backend/server
+COPY Backend/prisma ./Backend/prisma
+COPY Backend/scripts/backup-db.mjs ./Backend/scripts/
 USER node
 EXPOSE 3001
 # Aplica as migrações pendentes (FIN-020) e sobe a API; com `exec`, o node recebe o sinal de parada.
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node server.js"]
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && exec node Backend/server.js"]

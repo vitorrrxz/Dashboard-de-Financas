@@ -13,11 +13,11 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'node',
-    setupFiles: ['./src/test/setup.ts'],
+    setupFiles: ['./Frontend/src/test/setup.ts'],
     // FIN-114 — cria o banco-modelo (schema aplicado, sem linhas) uma vez para a suíte inteira;
     // cada teste de backend copia esse arquivo em vez de rodar `prisma db push` de novo (ver
-    // test/global-setup.js e test/backend-test-utils.js).
-    globalSetup: ['./test/global-setup.js'],
+    // Backend/test/global-setup.js e Backend/test/backend-test-utils.js).
+    globalSetup: ['./Backend/test/global-setup.js'],
     globals: true,
     css: false,
     // Preparar um banco de teste (antes: `db push` por arquivo; agora: cópia do modelo) ainda
