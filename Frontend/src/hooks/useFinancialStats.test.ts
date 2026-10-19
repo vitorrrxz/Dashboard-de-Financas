@@ -1,7 +1,8 @@
 // FIN-034 (parte 2/2) — regras de negócio financeiras centrais do Dashboard, testando a
 // função pura extraída em FIN-086 (não precisa renderizar componentes React).
 import { describe, it, expect } from 'vitest';
-import { computeFinancialStats } from './useFinancialStats';
+import { billPeriod, computeFinancialStats } from './useFinancialStats';
+import { advanceDays } from '../utils/dates';
 import { todayISO } from '../utils/debts';
 import type { Account, Debt, Transaction } from '../types';
 
@@ -118,7 +119,7 @@ describe('computeFinancialStats', () => {
       debt({ accountId: 'a1', totalAmount: 1000, paidAmount: 200 }),
       debt({ accountId: 'a2', totalAmount: 500, paidAmount: 0 }),
     ];
-    const s = computeFinancialStats([], [], debts, 'a1');
+    const s = computeFinancialStats([], [acc({ id: 'a1' }), acc({ id: 'a2' })], debts, 'a1');
     expect(s.activeDebts).toBe(800); // só a dívida de a1: 1000 - 200
   });
 });
@@ -140,5 +141,54 @@ describe('transferências entre contas e pagamento de fatura (FIN-103)', () => {
     expect(s.expenseByCategory).toEqual([{ name: 'Alimentação', amount: 300 }]);
     expect(s.balanceByMonth.map(m => m.balance)).toEqual([700]);
     expect(s.dailyEvolution.map(d => d.balance)).toEqual([700]);
+  });
+});
+
+describe('computeFinancialStats — parcelas do mês', () => {
+  it('soma a parcela mensal só das dívidas ainda não quitadas', () => {
+    const debts = [
+      debt({ monthlyPayment: 300, totalInstallments: 10, paidInstallments: 2 }),
+      debt({ monthlyPayment: 200, totalInstallments: 5, paidInstallments: 5 }),
+    ];
+    expect(computeFinancialStats([], [], debts, null).monthDebtPayments).toBe(300);
+  });
+});
+
+describe('computeFinancialStats — tudo o que se deve é dívida', () => {
+  it('separa cartão de despesa e soma fatura, parcelas futuras e dívidas cadastradas', () => {
+    const today = todayISO();
+    const card = acc({ id: 'card', type: 'credit', pendingBill: 500 });
+    const txs = [
+      tx({ accountId: 'card', paymentType: 'credit', name: 'Loja 1/3', amount: -100, date: today }),
+      tx({ accountId: 'card', paymentType: 'credit', name: 'Mercado', amount: -50, date: today }),
+      tx({ accountId: 'chk', paymentType: 'pix', name: 'Padaria', amount: -30, date: today }),
+    ];
+    const debts = [debt({ totalAmount: 1000, paidAmount: 200, monthlyPayment: 100, totalInstallments: 10 })];
+    const s = computeFinancialStats(txs, [card, acc({ id: 'chk' })], debts, null);
+    expect(s.monthCardExpense).toBe(150);
+    expect(s.monthCashExpense).toBe(30);
+    // 800 cadastradas + 500 de fatura + 2 parcelas futuras de 100.
+    expect(s.totalOwed).toBe(1500);
+  });
+});
+
+describe('billPeriod — ciclo da fatura que vence no mês', () => {
+  it('vencimento depois do fechamento: fecha no próprio mês', () => {
+    expect(billPeriod('2026-10', 10, 20)).toEqual({ start: '2026-09-11', end: '2026-10-10' });
+  });
+  it('vencimento até o fechamento: fechou no mês anterior', () => {
+    expect(billPeriod('2026-10', 28, 5)).toEqual({ start: '2026-08-29', end: '2026-09-28' });
+  });
+  it('fechamento no dia 31 respeita o tamanho do mês', () => {
+    expect(billPeriod('2026-03', 31)).toEqual({ start: '2026-03-01', end: '2026-03-31' });
+  });
+  it('com fechamento cadastrado, só a compra dentro do ciclo entra nas dívidas do mês', () => {
+    const card = acc({ id: 'card', type: 'credit', closingDay: 10, dueDay: 20 });
+    const { end } = billPeriod(todayISO().slice(0, 7), 10, 20);
+    const txs = [
+      tx({ accountId: 'card', paymentType: 'credit', amount: -100, date: end }),
+      tx({ accountId: 'card', paymentType: 'credit', amount: -40, date: advanceDays(end, 1) }),
+    ];
+    expect(computeFinancialStats(txs, [card], [], null).monthCardExpense).toBe(100);
   });
 });

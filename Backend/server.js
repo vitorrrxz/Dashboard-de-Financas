@@ -11,7 +11,7 @@ import { runBackupSafely } from './scripts/backup-db.mjs';
 import { prisma } from './server/lib/prisma.js';
 import {
   pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment, pluggyTransactionCategory,
-  pluggyCurrency, pluggyBillDueDay, OWN_TRANSFER_CATEGORIES,
+  pluggyCurrency, pluggyBillDueDay, pluggyPendingBillCents, OWN_TRANSFER_CATEGORIES,
 } from './server/lib/pluggyHelpers.js';
 import { nextBillDueDate, buildDueNotifications, detectUnusualSpending } from './server/lib/notificationsCore.js';
 import { formatCents, SUPPORTED_CURRENCIES } from './server/lib/money.js';
@@ -144,7 +144,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 // funções puras que os testes de unidade importam diretamente daqui, sem subir o app inteiro.
 export {
   app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment, pluggyTransactionCategory,
-  nextBillDueDate, pluggyBillDueDay, buildDueNotifications, detectUnusualSpending,
+  nextBillDueDate, pluggyBillDueDay, pluggyPendingBillCents, buildDueNotifications, detectUnusualSpending,
   pluggyCurrency, formatCents, SUPPORTED_CURRENCIES, parseProviderRates, createExchangeRateCache,
   encryptTwoFactorSecret, decryptTwoFactorSecret, OWN_TRANSFER_CATEGORIES,
 };

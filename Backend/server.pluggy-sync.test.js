@@ -165,4 +165,13 @@ describe('sincronização automática com a Pluggy (FIN-107)', () => {
     expect(res.status).toBe(404);
     expect(await prisma.pluggyItem.count()).toBe(0);
   });
+
+  it('conexão MeuPluggy aparece com o nome do banco, tirado do código nas contas', async () => {
+    await addItem(null, { providerName: 'MeuPluggy' });
+    pluggy.fetchItem.mockResolvedValue({ ...ITEM, connector: { name: 'MeuPluggy' } });
+    pluggy.fetchAccounts.mockResolvedValue({ results: [{ ...ACCOUNT, marketingName: null, bankData: { transferNumber: '341/0001/12345-6' } }] });
+    const res = await autoSync(tokenA);
+    expect(res.body.items).toEqual([expect.objectContaining({ providerName: 'Itaú' })]);
+    expect((await request(app).get('/api/accounts').set(auth(tokenA))).body).toEqual([expect.objectContaining({ bank: 'Itaú' })]);
+  });
 });

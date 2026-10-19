@@ -54,7 +54,13 @@ router.put('/:id', authenticateToken, async (req, res) => {
 
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
-    await prisma.account.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    // As transações vão junto: o vínculo opcional faria o banco só desligá-las (SET NULL), e
+    // transação sem conta continuava somando no Dashboard sem ter mais de onde ser filtrada.
+    const where = { userId: req.user.userId, accountId: req.params.id };
+    await prisma.$transaction([
+      prisma.transaction.deleteMany({ where }),
+      prisma.account.deleteMany({ where: { id: req.params.id, userId: req.user.userId } }),
+    ]);
     res.json({ success: true });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao excluir conta.');

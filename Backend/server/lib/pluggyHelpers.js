@@ -22,6 +22,30 @@ export function getPluggyClient() {
   return pluggyClient;
 }
 
+// Código COMPE (início de `bankData.transferNumber`, "341/agência/conta") → nome do banco.
+// ponytail: só os bancos mais comuns; código fora da lista cai no nome da conta.
+const BANK_NAMES = {
+  '001': 'Banco do Brasil', '033': 'Santander', '041': 'Banrisul', '077': 'Inter', '104': 'Caixa',
+  '208': 'BTG Pactual', '212': 'Banco Original', '237': 'Bradesco', '260': 'Nubank', '290': 'PagBank',
+  '323': 'Mercado Pago', '336': 'C6 Bank', '341': 'Itaú', '380': 'PicPay', '422': 'Safra',
+  '536': 'Neon', '748': 'Sicredi', '756': 'Sicoob',
+};
+
+/**
+ * Nome do banco de uma conexão. Na MeuPluggy o conector é a própria MeuPluggy, não o banco: o nome
+ * vem do código do banco nas contas e, sem ele, do nome da primeira conta.
+ */
+export function pluggyInstitutionName(pluggyItem, pluggyAccounts = []) {
+  const connectorName = pluggyItem?.connector?.name || 'Banco Conectado';
+  if (connectorName !== 'MeuPluggy') return connectorName;
+  for (const account of pluggyAccounts) {
+    const code = account.bankData?.transferNumber?.split('/')[0]?.trim().padStart(3, '0');
+    if (code && BANK_NAMES[code]) return BANK_NAMES[code];
+  }
+  const firstAccount = pluggyAccounts.find(a => a.type === 'BANK') ?? pluggyAccounts[0];
+  return firstAccount?.name || connectorName;
+}
+
 // Mapeia o `type`/`subtype` retornado pela Pluggy para o enum AccountType do frontend
 // (checking | savings | credit | investment | cash). A Pluggy só retorna `type` como
 // "BANK" ou "CREDIT" (ver node_modules/pluggy-sdk/dist/types/account.d.ts) — a distinção
@@ -101,7 +125,12 @@ export const OWN_TRANSFER_CATEGORIES = ['Transferência entre contas', 'Pagament
 // somaria o mesmo valor duas vezes — e, com o sinal corrigido acima, ainda apareceria como
 // RECEITA. A verificação só é aplicada em contas de cartão: numa conta corrente,
 // "pagamento recebido" é uma entrada legítima.
+//
+// Pagamento reduz a fatura, então nunca vem positivo: a Pluggy põe o "Parcelamento de Fatura"
+// (a parcela cobrada quando se parcela a fatura) na categoria "Credit card payment", mas ele
+// é uma cobrança, e descartá-lo sumia com a parcela do extrato e da fatura aberta.
 export function isCreditCardBillPayment(pluggyTx) {
+  if (pluggyTx.amount > 0) return false;
   const haystack = ((pluggyTx.category ?? '') + ' ' + (pluggyTx.description ?? '')).toLowerCase();
   return CREDIT_CARD_PAYMENT_MARKERS.some(marker => haystack.includes(marker));
 }
@@ -133,4 +162,37 @@ export function pluggyBillDueDay(bill) {
   if (!bill?.dueDate) return undefined;
   const date = new Date(bill.dueDate);
   return Number.isNaN(date.getTime()) ? undefined : date.getUTCDate();
+}
+
+/** Mês seguinte a uma data, como 'YYYY-MM', lido em UTC (mesmo motivo de `pluggyBillDueDay`). */
+function nextMonthUTC(date) {
+  const d = new Date(date);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString().slice(0, 7);
+}
+
+/**
+ * Fatura a pagar de um cartão, em centavos. A Pluggy só lista faturas FECHADAS: passado o
+ * vencimento da última, ela já é passado (e em geral foi paga), e o que o banco mostra como
+ * "fatura atual" é a aberta — que não existe no endpoint de faturas. Gravar a última fechada
+ * mostrava R$ 819,76 de uma fatura vencida contra R$ 2.452,92 da aberta no app do Nubank.
+ *
+ * Até o vencimento, vale a fechada. Depois, a aberta é somada das transações: as sem `billId`
+ * (ainda fora de fatura fechada) cuja previsão de fatura (`billForecastDate`) é o mês seguinte
+ * ao do vencimento da última; sem previsão, pela data entre o fechamento da última e um mês
+ * depois. O pagamento da fatura anterior fica fora — ele quita a fechada, não reduz a aberta.
+ */
+export function pluggyPendingBillCents(lastBill, transactions, today = new Date().toISOString().slice(0, 10)) {
+  if (new Date(lastBill.dueDate).toISOString().slice(0, 10) >= today) return toCents(lastBill.totalAmount);
+  const openMonth = nextMonthUTC(lastBill.dueDate);
+  const closing = lastBill.billClosingDate ? new Date(lastBill.billClosingDate).toISOString().slice(0, 10) : null;
+  const nextClosing = closing && `${nextMonthUTC(closing)}-${closing.slice(8)}`;
+  const inOpenBill = tx => {
+    const meta = tx.creditCardMetadata ?? {};
+    if (meta.billId || isCreditCardBillPayment(tx)) return false;
+    if (meta.billForecastDate) return meta.billForecastDate === openMonth;
+    const date = new Date(tx.date).toISOString().slice(0, 10);
+    return closing !== null && date > closing && date <= nextClosing;
+  };
+  // Referencial da fatura: compra positiva, estorno negativo (ver `pluggyAmountToCents`).
+  return -transactions.filter(inOpenBill).reduce((sum, tx) => sum + pluggyAmountToCents(tx, 'credit'), 0);
 }

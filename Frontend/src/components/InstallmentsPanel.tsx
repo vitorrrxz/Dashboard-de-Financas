@@ -15,6 +15,12 @@ interface InstallmentsPanelProps {
   transactions: Transaction[];
   debts: Debt[];
   accounts: Account[];
+  /**
+   * Soma das faturas a pagar dos cartões do filtro (`pendingBill`, em reais), ou `null` se
+   * nenhum tem fatura. No mês corrente ela substitui a soma das parcelas: a fatura do banco
+   * tem também as compras à vista, assinaturas e estornos, que não são parcelas.
+   */
+  cardBill: number | null;
 }
 
 /** Mesma cor da categoria "Cartão de Crédito" no DebtManager. */
@@ -30,7 +36,7 @@ const DONE_COLOR = '#14b8a6';
  * As compras parceladas são somente leitura: a fonte da verdade é o extrato do cartão, e
  * editá-las aqui divergiria do que a próxima sincronização traria.
  */
-export function InstallmentsPanel({ transactions, debts, accounts }: InstallmentsPanelProps) {
+export function InstallmentsPanel({ transactions, debts, accounts, cardBill }: InstallmentsPanelProps) {
   const today = todayISO();
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
@@ -39,6 +45,8 @@ export function InstallmentsPanel({ transactions, debts, accounts }: Installment
   const months = useMemo(() => dueMonths(purchases, debts, currentMonth), [purchases, debts, currentMonth]);
   const items = useMemo(() => dueItemsInMonth(purchases, debts, month), [purchases, debts, month]);
   const totals = useMemo(() => summarizeDueItems(items), [items]);
+  const showBill = month === currentMonth && cardBill !== null;
+  const card = showBill ? cardBill : totals.card;
 
   const activeCount = purchases.filter(p => p.nextDate !== null).length;
   const accountName = (id?: string) => accounts.find(a => a.id === id)?.name;
@@ -49,9 +57,9 @@ export function InstallmentsPanel({ transactions, debts, accounts }: Installment
       <div className="glass-card rounded-2xl p-4 flex flex-wrap items-end justify-between gap-4">
         <MonthNavigator id="debt-month" value={month} months={months} onChange={setMonth}/>
         <div className="flex flex-wrap items-end gap-6">
-          <MonthTotal label="Parcelas do cartão" value={totals.card} color={readableColor(CARD_COLOR)}/>
+          <MonthTotal label={showBill ? 'Fatura do cartão' : 'Parcelas do cartão'} value={card} color={readableColor(CARD_COLOR)}/>
           <MonthTotal label="Dívidas" value={totals.debt} color={readableColor(DEBT_COLOR)}/>
-          <MonthTotal label="Valor total" value={totals.total} color="var(--color-textMain)"/>
+          <MonthTotal label="Valor total" value={Math.round((card + totals.debt) * 100) / 100} color="var(--color-textMain)"/>
         </div>
       </div>
 

@@ -39,6 +39,7 @@
 
   /* Cores de texto com sentido (positivo, negativo, alerta…) para estilos inline. */
   --text-positive: #2dd4bf;
+  --text-gain: #4ade80;
   --text-negative: #f87171;
   --text-warning: #fbbf24;
   --text-pink: #f472b6;
@@ -88,6 +89,7 @@
   --color-indigo-300: #4338ca;
 
   --text-positive: #0f766e;
+  --text-gain: #15803d;
   --text-negative: #b91c1c;
   --text-warning: #92400e;
   --text-pink: #be185d;

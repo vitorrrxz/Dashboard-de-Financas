@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import {
   Wallet, Upload, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
+  Pencil, PiggyBank,
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -11,11 +13,84 @@ import { CATEGORY_COLORS } from '../utils/categories';
 import type { BudgetProgress } from '../utils/budget';
 import type { ProjectionPoint } from '../utils/projection';
 import type { FinancialStats } from '../hooks/useFinancialStats';
-import type { Account, Debt, RecurringTransaction, Transaction } from '../types';
+import type { Account, Debt, RecurringTransaction, Salary, SalaryFrequency } from '../types';
 import type { Tab } from '../App';
+import { AccountOptions } from '../components/AccountFilter';
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+}
+
+/** Total recebido no mês: quinzenal são dois pagamentos. */
+function salaryPerMonth(salary: Salary) {
+  return salary.amount * (salary.frequency === 'biweekly' ? 2 : 1);
+}
+
+function SalaryCard({ salary, monthly, onSave }: { salary: Salary; monthly: number; onSave: (s: Salary) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [frequency, setFrequency] = useState<SalaryFrequency>('monthly');
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = () => {
+    setAmount(salary.amount ? String(salary.amount) : '');
+    setFrequency(salary.frequency);
+    setEditing(true);
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onSave({ amount: Number(amount) || 0, frequency });
+      setEditing(false);
+    } catch {
+      // onSave já avisou o usuário; o formulário continua aberto para corrigir.
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <form onSubmit={submit} className="glass-card rounded-2xl p-6 flex flex-col gap-3">
+        <label htmlFor="salary-amount" className="text-sm font-medium text-textMuted">
+          {frequency === 'biweekly' ? 'Valor de cada quinzena' : 'Salário mensal'}
+        </label>
+        <input id="salary-amount" type="number" min="0" step="0.01" inputMode="decimal" required autoFocus
+          value={amount} onChange={e => setAmount(e.target.value)} className="input-field" />
+        <label htmlFor="salary-frequency" className="sr-only">Periodicidade</label>
+        <select id="salary-frequency" value={frequency} onChange={e => setFrequency(e.target.value as SalaryFrequency)} className="input-field">
+          <option value="monthly" className="bg-dashboard">Mensal</option>
+          <option value="biweekly" className="bg-dashboard">Quinzenal</option>
+        </select>
+        <div className="flex gap-2">
+          <button type="submit" disabled={saving} className="flex-1 px-3 py-2 rounded-xl bg-primary text-on-accent text-sm font-semibold disabled:opacity-60">Salvar</button>
+          <button type="button" onClick={() => setEditing(false)} className="px-3 py-2 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5">Cancelar</button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className="glass-card rounded-2xl p-6">
+      <div className="flex justify-between items-start mb-4">
+        <div className="p-2.5 rounded-xl" style={{ backgroundColor:'var(--fg-3)', border:'1px solid var(--fg-5)' }}>
+          <ArrowUpRight size={22} style={{ color:'var(--color-accent)' }}/>
+        </div>
+        <button onClick={startEdit} aria-label="Editar salário"
+          className="p-1.5 rounded-lg text-textMuted hover:text-white hover:bg-white/5 transition-colors">
+          <Pencil size={14}/>
+        </button>
+      </div>
+      <p className="text-sm font-medium text-textMuted mb-1">Salário</p>
+      <h3 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-gain)' }}>{fmt(monthly)}</h3>
+      <p className="text-xs text-textMuted mt-1">
+        {salary.amount === 0 ? 'Clique no lápis para informar'
+          : salary.frequency === 'biweekly' ? `Quinzenal · 2× ${fmt(salary.amount)}` : 'Mensal'}
+      </p>
+    </div>
+  );
 }
 
 function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { title: string; amount: string; icon: React.ReactNode; badge?: string; isPositive: boolean; onClick?: () => void }) {
@@ -28,7 +103,7 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { titl
         {badge && <span className="text-[10px] uppercase tracking-wider font-bold text-textMuted bg-white/5 px-2.5 py-1 rounded-full border border-white/5">{badge}</span>}
       </div>
       <p className="text-sm font-medium text-textMuted mb-1">{title}</p>
-      <h3 className={`text-2xl font-bold tracking-tight ${isPositive ? 'text-white' : 'text-white'}`}>
+      <h3 className="text-2xl font-bold tracking-tight" style={{ color: isPositive ? 'var(--text-gain)' : 'var(--text-negative)' }}>
         {!isPositive && amount !== 'R$ 0,00' ? '-' : ''}{amount}
       </h3>
     </div>
@@ -50,7 +125,6 @@ interface DashboardPageProps {
   hasInvestments: boolean;
   investmentHoldings: InvestmentHoldings;
   debts: Debt[];
-  transactions: Transaction[];
   isEmpty: boolean;
   hasAccounts: boolean;
   chartPeriod: '30d' | 'all';
@@ -60,14 +134,20 @@ interface DashboardPageProps {
   onNavigate: (tab: Tab) => void;
   onFilterTransactions: (filter: 'all' | 'income' | 'expense') => void;
   onShowImport: () => void;
+  salary: Salary;
+  onSaveSalary: (salary: Salary) => Promise<void>;
 }
 
 export function DashboardPage({
   accounts, dashboardAccountId, onChangeDashboardAccount, stats, overBudget, budgetProgress,
   usedCurrencies, rates, ratesFailed, conversionIssue, missingCurrencies, hasInvestments,
-  investmentHoldings, debts, transactions, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
-  recurring, projection, onNavigate, onFilterTransactions, onShowImport,
+  investmentHoldings, debts, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
+  recurring, projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary,
 }: DashboardPageProps) {
+  const monthlySalary = salaryPerMonth(salary);
+  // Tudo o que se deve no mês é dívida: compras no cartão (à vista e parcelas) + parcelas cadastradas.
+  const monthDebts = stats.monthCardExpense + stats.monthDebtPayments;
+  const leftover = monthlySalary - stats.monthCashExpense - monthDebts;
   return (
     <>
       <div className="mb-8 flex justify-between items-center">
@@ -80,10 +160,7 @@ export function DashboardPage({
             onChange={(e) => onChangeDashboardAccount(e.target.value || null)}
             className="bg-white/5 border border-white/10 text-sm text-white py-2 px-4 rounded-xl focus:outline-none focus:border-primary/50"
           >
-            <option value="" className="bg-dashboard">Todas as Contas</option>
-            {accounts.map(a => (
-              <option key={a.id} value={a.id} className="bg-dashboard">{a.name} - {a.bank}</option>
-            ))}
+            <AccountOptions accounts={accounts} />
           </select>
         )}
       </div>
@@ -123,10 +200,24 @@ export function DashboardPage({
         )
       )}
 
+      {/* Resumo do mês: salário − despesas fora do cartão − dívidas do mês = quanto sobra. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
+        <SalaryCard salary={salary} monthly={monthlySalary} onSave={onSaveSalary} />
+        <SummaryCard title="Despesas do Mês" amount={fmt(stats.monthCashExpense)} isPositive={false}
+          icon={<ArrowDownRight size={22} className="text-red-400"/>} badge="Fora do cartão"
+          onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }} />
+        <SummaryCard title="Dívidas do Mês" amount={fmt(monthDebts)} isPositive={false}
+          icon={<CreditCard size={22} className="text-amber-400"/>} badge="Fatura + parcelas"
+          onClick={() => onNavigate('debts')} />
+        <SummaryCard title="Sobra do Mês" amount={fmt(leftover)} isPositive={leftover >= 0}
+          icon={<PiggyBank size={22} className={leftover >= 0 ? 'text-emerald-400' : 'text-red-400'}/>}
+          badge={leftover >= 0 ? 'Disponível' : 'No vermelho'} />
+      </div>
+
       {/* Summary Cards Row 1 — Real Accounts */}
       {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem conta de
           investimento ou posição na carteira (FIN-073), o total aparece separado ao lado. */}
-      <div className={`grid grid-cols-1 md:grid-cols-3 ${hasInvestments ? 'lg:grid-cols-4' : ''} gap-5 mb-5`}>
+      <div className={`grid grid-cols-1 md:grid-cols-2 ${hasInvestments ? 'lg:grid-cols-3' : ''} gap-5 mb-8`}>
         <SummaryCard title="Saldo Real (Contas)" amount={fmt(stats.realBalance)} isPositive={stats.realBalance >= 0}
           icon={<Wallet size={22} style={{ color:'var(--color-primary)' }}/>} badge="Saldo atual" />
         {hasInvestments && (
@@ -134,23 +225,9 @@ export function DashboardPage({
             icon={<TrendingUp size={22} className="text-teal-400"/>}
             badge={describeHoldings(investmentHoldings)} />
         )}
-        <SummaryCard title="Fatura Pendente" amount={fmt(stats.pendingBills)} isPositive={false}
-          icon={<CreditCard size={22} className="text-pink-400"/>} badge={`${accounts.filter(a=>a.type==='credit').length} cartão(ões)`} />
-        <SummaryCard title="Dívidas Ativas" amount={fmt(stats.activeDebts)} isPositive={false}
-          icon={<TrendingDown size={22} className="text-amber-400"/>}
-          badge={`${debts.filter(d=>d.paidInstallments < d.totalInstallments).length} pendente(s)`} />
-      </div>
-
-      {/* Summary Cards Row 2 — Transactions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
-        <SummaryCard title="Total de Receitas" amount={fmt(stats.income)} isPositive={true}
-          icon={<ArrowUpRight size={22} style={{ color:'var(--color-accent)' }}/>} badge={`${stats.income > 0 ? (transactions.filter(t=>t.amount>0).length) : 0} entradas`}
-          onClick={() => { onFilterTransactions('income'); onNavigate('transactions'); }} />
-        <SummaryCard title="Total de Despesas" amount={fmt(stats.expense)} isPositive={false}
-          icon={<ArrowDownRight size={22} className="text-red-400"/>} badge={`${stats.expense > 0 ? (transactions.filter(t=>t.amount<0).length) : 0} saídas`}
-          onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }} />
-        <SummaryCard title="Este Mês (Gastos)" amount={fmt(stats.monthExpense)} isPositive={false}
-          icon={<ArrowDownRight size={22} className="text-orange-400"/>} badge="Mês corrente" />
+        <SummaryCard title="Dívidas Ativas" amount={fmt(stats.totalOwed)} isPositive={false}
+          icon={<TrendingDown size={22} className="text-amber-400"/>} badge="Cartão + cadastradas"
+          onClick={() => onNavigate('debts')} />
       </div>
 
       {/* FIN-046: indicador de orçamento do mês corrente no Dashboard. */}

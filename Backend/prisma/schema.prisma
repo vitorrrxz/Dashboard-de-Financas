@@ -12,6 +12,10 @@ model User {
   email        String        @unique
   passwordHash String
   createdAt    DateTime      @default(now())
+  // Salário informado manualmente: valor de CADA pagamento, em centavos. "biweekly" (quinzenal)
+  // = dois pagamentos no mês; "monthly" = um.
+  salaryCents     Int        @default(0)
+  salaryFrequency String     @default("monthly")
 
   accounts     Account[]
   transactions Transaction[]

@@ -80,6 +80,11 @@ export const budgetSchema = z.object({
   monthlyLimit: z.coerce.number().int('Limite mensal deve ser um inteiro em centavos.').min(1, 'Limite mensal deve ser maior que zero.'),
 });
 export const budgetUpdateSchema = budgetSchema.partial();
+// Salário manual: valor de cada pagamento (centavos) e periodicidade.
+export const salarySchema = z.object({
+  salaryCents: z.coerce.number().int('Salário deve ser um inteiro em centavos.').min(0, 'Salário não pode ser negativo.'),
+  salaryFrequency: z.enum(['monthly', 'biweekly'], { message: 'Periodicidade deve ser mensal ou quinzenal.' }),
+});
 // FIN-105 — regra de categoria. Pelo menos 2 caracteres: uma letra só casaria com quase toda descrição.
 export const categoryRuleSchema = z.object({
   match: z.string({ error: 'Texto da regra é obrigatório.' }).trim().min(2, 'O texto da regra precisa de ao menos 2 caracteres.').max(100),

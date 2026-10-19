@@ -11,12 +11,13 @@ describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
   let pluggyCurrency;
   let pluggyTransactionCategory;
   let OWN_TRANSFER_CATEGORIES;
+  let pluggyPendingBillCents;
   let cleanup;
 
   beforeAll(async () => {
     const app = await createTestApp('pluggy_credit');
     cleanup = app.cleanup;
-    ({ pluggyAmountToCents, isCreditCardBillPayment, pluggyCurrency, pluggyTransactionCategory, OWN_TRANSFER_CATEGORIES } = await import('./server.js'));
+    ({ pluggyAmountToCents, isCreditCardBillPayment, pluggyCurrency, pluggyTransactionCategory, OWN_TRANSFER_CATEGORIES, pluggyPendingBillCents } = await import('./server.js'));
   });
 
   afterAll(() => cleanup());
@@ -130,8 +131,37 @@ describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
       expect(isCreditCardBillPayment({ category: 'Groceries', description: 'Mercado*Mercadolivre 3/10' })).toBe(false);
     });
 
+    it('parcela de fatura parcelada é cobrança, mesmo na categoria de pagamento', () => {
+      expect(isCreditCardBillPayment({ amount: 218.32, category: 'Credit card payment', description: 'Parcelamento de Fatura' })).toBe(false);
+      expect(isCreditCardBillPayment({ amount: -300, category: 'Credit card payment', description: 'Pagamento recebido' })).toBe(true);
+    });
+
     it('não quebra quando categoria e descrição estão ausentes', () => {
       expect(isCreditCardBillPayment({})).toBe(false);
+    });
+  });
+
+  // Fatura a pagar: a fechada até o vencimento; depois, a aberta, somada das transações.
+  describe('pluggyPendingBillCents', () => {
+    const lastBill = { dueDate: '2026-09-21T00:00:00.000Z', billClosingDate: '2026-09-14T00:00:00.000Z', totalAmount: 819.7614 };
+    const tx = (amount, date, meta = {}, extra = {}) => ({ amount, date: new Date(`${date}T03:00:00Z`), creditCardMetadata: meta, ...extra });
+    const txs = [
+      tx(150, '2026-09-14', { billForecastDate: '2026-10' }),                // compra de antes do fechamento que caiu na aberta
+      tx(218.32, '2026-09-15', { billForecastDate: '2026-10' }, { category: 'Credit card payment', description: 'Parcelamento de Fatura' }),
+      tx(-300, '2026-09-15', { billForecastDate: '2026-10' }, { category: 'Credit card payment', description: 'Pagamento recebido' }),
+      tx(-83.99, '2026-09-16', { billForecastDate: '2026-10' }),             // estorno
+      tx(105.99, '2026-09-30'),                                              // sem previsão, dentro do ciclo
+      tx(13.6, '2026-10-15'),                                                // sem previsão, já no ciclo seguinte
+      tx(147.89, '2026-11-09', { billForecastDate: '2026-11' }),             // parcela futura
+      tx(500, '2026-09-10', { billId: 'b-set' }),                            // já na fatura fechada
+    ];
+
+    it('até o vencimento, vale a última fatura fechada', () => {
+      expect(pluggyPendingBillCents(lastBill, txs, '2026-09-21')).toBe(81976);
+    });
+
+    it('depois do vencimento, soma a fatura aberta sem o pagamento da anterior', () => {
+      expect(pluggyPendingBillCents(lastBill, txs, '2026-10-13')).toBe(15000 + 21832 - 8399 + 10599);
     });
   });
 });

@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { ImportModal } from './components/ImportModal';
 import { NavItem } from './components/NavItem';
-import { TopBarActions } from './components/TopBarActions';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from './utils/paymentTypes';
 import { NotificationBell } from './components/NotificationBell';
 import { AuthForm } from './components/AuthForm';
@@ -27,9 +26,10 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ defa
 const PluggyConnectButton = lazy(() => import('./components/PluggyConnectButton').then(m => ({ default: m.PluggyConnectButton })));
 import { toCents, toReais } from './utils/money';
 import { apiFetch, ApiError } from './services/api';
+import { accountIdsOf, inAccounts } from './utils/accountGroups';
+
 import { useFinancialStats } from './hooks/useFinancialStats';
 import { useMobileDrawer } from './hooks/useMobileDrawer';
-import { useMediaQuery } from './hooks/useMediaQuery';
 import { useTheme } from './hooks/useTheme';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
@@ -50,10 +50,13 @@ import {
 } from './utils/currency';
 import type {
   Account, AppNotification, Budget, Debt, DebtCategory, Goal, Investment, InvestmentInput, NetWorthSnapshot,
-  NotificationType, RecurringTransaction, Transaction, PaymentType,
+  NotificationType, RecurringTransaction, Salary, Transaction, PaymentType,
 } from './types';
 
 export type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports' | 'settings';
+
+// Login desativado temporariamente — ver `local-session` em Backend/server/routes/auth.js.
+const AUTH_DISABLED = import.meta.env.VITE_AUTH_DISABLED === 'true';
 
 // FIN-066: aba para onde o clique numa notificação leva, por tipo.
 const NOTIFICATION_TAB: Record<NotificationType, Tab> = {
@@ -256,12 +259,6 @@ export default function App() {
     initialFocusRef: drawerCloseRef,
     returnFocusRef: menuButtonRef,
   });
-  // A barra lateral (celular/tablet, sem mudança) vira uma barra superior a partir do
-  // breakpoint `lg` do Tailwind (telas grandes) — layouts estruturalmente diferentes demais
-  // para conviver só com classes responsivas: o botão de conectar banco via Pluggy dispara uma
-  // sincronização ao montar, e escondê-lo só com CSS deixaria as duas cópias montadas ao mesmo
-  // tempo, sincronizando em dobro. A troca de layout é condicional em JS por isso.
-  const isDesktopNav = useMediaQuery('(min-width: 1024px)');
   // FIN-083: tema claro/escuro — aplicado ao documento também na tela de login.
   const theme = useTheme();
   const [notifications, setNotifications] = useState<AppNotification[]>([]); // FIN-066
@@ -272,6 +269,7 @@ export default function App() {
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
   const [budgets, setBudgets]         = useState<Budget[]>([]);
+  const [salary, setSalary]           = useState<Salary>({ amount: 0, frequency: 'monthly' });
   const [goals, setGoals]             = useState<Goal[]>([]);
   const [recurring, setRecurring]     = useState<RecurringTransaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]); // FIN-072
@@ -307,6 +305,7 @@ export default function App() {
     setTxs([]);
     setDebts([]);
     setBudgets([]);
+    setSalary({ amount: 0, frequency: 'monthly' });
     setGoals([]);
     setRecurring([]);
     setInvestments([]);
@@ -337,7 +336,8 @@ export default function App() {
           fetchAPI('/api/recurring-transactions'),
           fetchAPI('/api/investments'),
           fetchAPI('/api/net-worth/history'),
-        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData, investmentsData, netWorthHistoryData]) => {
+          fetchAPI('/api/auth/salary'),
+        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData, investmentsData, netWorthHistoryData, salaryData]) => {
         setUser(meData.user);
         setAccounts((accsData as Account[]).map(accountFromApi));
         setTxs((txsData as Transaction[]).map(txFromApi));
@@ -348,6 +348,7 @@ export default function App() {
         setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
         setInvestments((investmentsData as Investment[]).map(investmentFromApi));
         setNetWorthHistory((netWorthHistoryData as NetWorthSnapshot[]).map(netWorthSnapshotFromApi));
+        setSalary({ amount: toReais(salaryData.salaryCents), frequency: salaryData.salaryFrequency });
       }).catch(err => {
         // FIN-082: só um token recusado (401/403) encerra a sessão. Sem conexão — o app instalado
         // aberto offline — ou com o servidor fora do ar, a sessão continua e a tela oferece tentar
@@ -417,8 +418,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [token, foreignKey]);
 
-  /** FIN-107: depois que o widget da Pluggy sincroniza, recarrega contas e transações. Usado pela
-   * barra lateral (celular/tablet) e pelo menu do usuário na barra superior (telas grandes). */
+  /** FIN-107: depois que o widget da Pluggy sincroniza, recarrega contas e transações. */
   const handlePluggySyncComplete = async () => {
     const [accsData, txsData] = await Promise.all([
       fetchAPI('/api/accounts'),
@@ -429,7 +429,7 @@ export default function App() {
     setTxHasMore((txsData as Transaction[]).length >= 2000);
   };
 
-  /** Remove todas as transações do usuário, com confirmação. Mesmos dois pontos de uso acima. */
+  /** Remove todas as transações do usuário, com confirmação. */
   const handleClearTransactions = async () => {
     if (!confirm('Remover todas as transações?')) return;
     await fetchAPI('/api/transactions/bulk', 'DELETE');
@@ -442,6 +442,16 @@ export default function App() {
     setToken(newToken);
     setUser(newUser);
   };
+
+  // Login desativado temporariamente (VITE_AUTH_DISABLED=true): sem token, abre a sessão local
+  // em vez de mostrar a tela de login. Se a rota falhar, a tela de login volta a aparecer.
+  const [localSessionFailed, setLocalSessionFailed] = useState(false);
+  useEffect(() => {
+    if (!AUTH_DISABLED || token || localSessionFailed) return;
+    apiFetch<{ token: string; user: { id: string; name: string; email: string } }>('/api/auth/local-session', { method: 'POST' })
+      .then(data => handleLogin(data.token, data.user))
+      .catch(err => { console.error('Falha ao abrir a sessão local:', err); setLocalSessionFailed(true); });
+  }, [token, localSessionFailed]);
 
   /** FIN-082: nova tentativa depois de uma carga que falhou sem conexão. */
   const retryLoad = () => {
@@ -479,14 +489,16 @@ export default function App() {
         }
         await reloadTransactions();
 
-        // Auto-create debt for credit or pix_installment payments
+        // Auto-create debt for pix_installment payments. Cartão não: as compras já estão nas
+        // transações e a fatura no `pendingBill` da conta — a dívida contava tudo de novo no
+        // total a pagar do mês da aba Dívidas.
         // Só faz sentido se ao menos uma transação nova foi de fato importada — se tudo
         // já existia (res.count === 0), reimportar o mesmo extrato não deve gerar dívida.
         // FIN-076: dívidas são registradas em real — a fatura de uma conta em outra moeda não
         // vira dívida automática, porque o valor seria gravado como se fosse real.
         const importAccount = accounts.find(a => a.id === txsWithType[0]?.accountId);
         const importCurrency = importAccount ? currencyOf(importAccount) : BASE_CURRENCY;
-        const wantsDebt = (paymentType === 'credit' || paymentType === 'pix_installment') && res.count > 0;
+        const wantsDebt = paymentType === 'pix_installment' && res.count > 0;
         if (wantsDebt && importCurrency !== BASE_CURRENCY) {
           alert(`Transações importadas. A conta está em ${importCurrency} e dívidas são registradas em real, então nenhuma dívida automática foi criada — cadastre-a na aba Dívidas, se quiser.`);
         } else if (wantsDebt) {
@@ -502,8 +514,8 @@ export default function App() {
             const totalExpense = expenseTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
             const now = new Date();
             const monthName = now.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-            const label = paymentType === 'credit' ? 'Crédito' : 'PIX Parcelado';
-            const category: DebtCategory = paymentType === 'credit' ? 'Cartão de Crédito' : 'Pessoal';
+            const label = 'PIX Parcelado';
+            const category: DebtCategory = 'Pessoal';
             // Due date: last day of current month
             const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
             const nextDueDate = lastDay.toISOString().slice(0, 10);
@@ -615,6 +627,7 @@ export default function App() {
     try {
       await fetchAPI(`/api/accounts/${id}`, 'DELETE');
       setAccounts(prev => prev.filter(a => a.id !== id));
+      setTxs(prev => prev.filter(t => t.accountId !== id)); // o servidor exclui as transações da conta
       // FIN-072: o banco desfaz o vínculo das posições com a conta excluída (ON DELETE SET
       // NULL); o estado local acompanha, para a carteira não citar uma conta que não existe.
       setInvestments(prev => prev.map(i => (i.accountId === id ? { ...i, accountId: undefined } : i)));
@@ -640,6 +653,14 @@ export default function App() {
       const updated = await fetchAPI(`/api/debts/${id}`, 'PUT', debtToApi(debtData));
       setDebts(prev => prev.map(d => d.id === id ? debtFromApi(updated) : d));
     } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
+  };
+
+  /** Salva o salário manual via `PUT /api/auth/salary` (API em centavos, estado em reais). */
+  const saveSalary = async (next: Salary) => {
+    try {
+      await fetchAPI('/api/auth/salary', 'PUT', { salaryCents: toCents(next.amount), salaryFrequency: next.frequency });
+      setSalary(next);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
   // CRUD BUDGETS (FIN-045)
@@ -851,8 +872,10 @@ export default function App() {
   // aba Transações e passam a ser exibidos na aba Dívidas — ver `isInstallmentTransaction`.
   // Conta escolhida no filtro, se ainda existir: excluir a conta ou restaurar um backup não
   // deixa o filtro preso numa conta que sumiu (o que esvaziaria as listas).
-  const listAccount = listAccountId && accounts.some(a => a.id === listAccountId) ? listAccountId : null;
-  const inListAccount = (t: Transaction) => !listAccount || t.accountId === listAccount;
+  // A seleção pode ser um banco inteiro (conta corrente + cartão) — ver accountGroups.
+  const listAccountIds = accountIdsOf(listAccountId, accounts);
+  const listAccount = listAccountIds ? listAccountId : null;
+  const inListAccount = (t: Transaction) => inAccounts(listAccountIds, t.accountId);
 
   const regularTransactions = useMemo(
     () => transactions.filter(t => !isInstallmentTransaction(t) && inListAccount(t)),
@@ -997,8 +1020,7 @@ export default function App() {
   const hasAccounts = accounts.length > 0;
   const isEmpty     = transactions.length === 0;
 
-  // Badges da navegação (barra lateral e barra superior, ver render abaixo) — calculados uma
-  // única vez para os dois layouts não repetirem a mesma conta.
+  // Badges da navegação (barra lateral, ver render abaixo).
   const accountsBadge = accounts.length > 0 ? accounts.length : undefined;
   const unpaidDebtsCount = debts.filter(d => d.paidInstallments < d.totalInstallments).length;
   const debtsBadge = unpaidDebtsCount > 0 ? unpaidDebtsCount : undefined;
@@ -1010,7 +1032,11 @@ export default function App() {
   const activeRecurringCount = recurring.filter(r => r.active).length;
   const recurringBadge = activeRecurringCount > 0 ? activeRecurringCount : undefined;
 
-  if (!token) return <AuthForm onLogin={handleLogin} />;
+  if (!token) {
+    return AUTH_DISABLED && !localSessionFailed
+      ? <div className="h-screen w-full flex items-center justify-center bg-background text-white">Entrando...</div>
+      : <AuthForm onLogin={handleLogin} />;
+  }
   if (loading) return <div className="h-screen w-full flex items-center justify-center bg-background text-white">Carregando Banco de Dados...</div>;
   if (loadError) return (
     <div className="h-screen w-full flex items-center justify-center p-6" style={{ backgroundColor: 'var(--color-background)' }}>
@@ -1035,7 +1061,7 @@ export default function App() {
 
   // ---------- Render ----------
   return (
-    <div className="flex lg:flex-col h-screen overflow-hidden relative" style={{ backgroundColor: 'var(--color-background)' }}>
+    <div className="flex h-screen overflow-hidden relative" style={{ backgroundColor: 'var(--color-background)' }}>
       <div className="absolute top-[-10%] left-[-10%] w-96 h-96 rounded-full blur-[100px] pointer-events-none" style={{ backgroundColor: 'rgba(99,102,241,0.12)' }} />
       <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style={{ backgroundColor: 'rgba(168,85,247,0.07)' }} />
 
@@ -1045,9 +1071,7 @@ export default function App() {
         Pular para o conteúdo
       </a>
 
-      {/* ── Barra lateral em celular/tablet (FIN-028/FIN-081: gaveta que desliza em mobile,
-          estática em md+); vira barra superior em telas grandes (ver isDesktopNav) ── */}
-      {!isDesktopNav && (<>
+      {/* ── Sidebar (FIN-028/FIN-081: gaveta que desliza em mobile, estática em md+) ── */}
       <div aria-hidden="true" onClick={() => setMobileNavOpen(false)}
         className={`fixed inset-0 bg-black/70 z-40 md:hidden transition-opacity duration-200 motion-reduce:transition-none
           ${mobileNavOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
@@ -1151,49 +1175,6 @@ export default function App() {
           )}
         </div>
       </aside>
-      </>)}
-
-      {/* ── Barra superior em telas grandes (substitui a barra lateral acima) ── */}
-      {isDesktopNav && (
-        <header className="w-full glass-panel border-b border-white/5 relative z-20 shrink-0">
-          <div className="px-8 py-3 flex items-center justify-between gap-6">
-            <div className="flex items-center gap-8 min-w-0">
-              <div className="flex items-center gap-3 text-white shrink-0">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg text-on-accent"
-                  style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>F</div>
-                <span className="text-xl font-bold">Fin<span style={{ color: 'var(--color-primary)', fontWeight: 300 }}>Flow</span></span>
-              </div>
-
-              <nav aria-label="Principal" className="flex items-center gap-1 flex-wrap">
-                <NavItem horizontal icon={<LayoutDashboard size={18}/>} label="Dashboard" active={activeTab==='dashboard'} onClick={() => setActiveTab('dashboard')} />
-                <NavItem horizontal icon={<Wallet size={18}/>} label="Contas" active={activeTab==='accounts'} onClick={() => setActiveTab('accounts')} badge={accountsBadge} />
-                {accounts.length > 0 && (<>
-                  <NavItem horizontal icon={<ArrowRightLeft size={16}/>} label="Transações" active={activeTab==='transactions'} onClick={() => setActiveTab('transactions')} />
-                  <NavItem horizontal icon={<TrendingDown size={16}/>} label="Dívidas" active={activeTab==='debts'} onClick={() => setActiveTab('debts')} badge={debtsBadge} badgeColor={debtsBadgeColor} />
-                </>)}
-                <NavItem horizontal icon={<PiggyBank size={18}/>} label="Orçamento" active={activeTab==='budgets'} onClick={() => setActiveTab('budgets')} badge={budgetsBadge} badgeColor={budgetsBadgeColor} />
-                <NavItem horizontal icon={<Target size={18}/>} label="Metas" active={activeTab==='goals'} onClick={() => setActiveTab('goals')} badge={goalsBadge} />
-                <NavItem horizontal icon={<TrendingUp size={18}/>} label="Investimentos" active={activeTab==='investments'} onClick={() => setActiveTab('investments')} badge={investmentsBadge} />
-                <NavItem horizontal icon={<Repeat size={18}/>} label="Recorrências" active={activeTab==='recurring'} onClick={() => setActiveTab('recurring')} badge={recurringBadge} />
-                <NavItem horizontal icon={<BarChart3 size={18}/>} label="Relatórios" active={activeTab==='reports'} onClick={() => setActiveTab('reports')} />
-                <NavItem horizontal icon={<Settings size={18}/>} label="Configurações" active={activeTab==='settings'} onClick={() => setActiveTab('settings')} />
-              </nav>
-            </div>
-
-            <TopBarActions
-              user={user}
-              token={token}
-              onLogout={handleLogout}
-              onManageAccounts={() => setActiveTab('accounts')}
-              onShowImport={() => setShowImport(true)}
-              onPluggySyncComplete={handlePluggySyncComplete}
-              hasTransactions={transactions.length > 0}
-              onClearTransactions={handleClearTransactions}
-            />
-          </div>
-        </header>
-      )}
-
       {/* ── Main Content ── */}
       <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto z-10 custom-scrollbar focus:outline-none">
         <header className="sticky top-0 z-20 backdrop-blur-xl bg-background/80 border-b border-white/5 px-4 md:px-8 py-5 flex justify-between items-center gap-3">
@@ -1250,7 +1231,6 @@ export default function App() {
               hasInvestments={hasInvestments}
               investmentHoldings={investmentHoldings}
               debts={debts}
-              transactions={transactions}
               isEmpty={isEmpty}
               hasAccounts={hasAccounts}
               chartPeriod={chartPeriod}
@@ -1260,6 +1240,8 @@ export default function App() {
               onNavigate={setActiveTab}
               onFilterTransactions={setTxFilter}
               onShowImport={() => setShowImport(true)}
+              salary={salary}
+              onSaveSalary={saveSalary}
             />
           )}
 

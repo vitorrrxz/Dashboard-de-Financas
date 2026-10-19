@@ -2,6 +2,9 @@ import { useMemo } from 'react';
 import { isDebtOverdue, todayISO } from '../utils/debts';
 import { computeInvestmentHoldings } from '../utils/investments';
 import { isOwnTransfer } from '../utils/categories';
+import { groupInstallmentPurchases } from '../utils/installments';
+import { advanceDays, dateInMonth, shiftMonth } from '../utils/dates';
+import { accountIdsOf, inAccounts } from '../utils/accountGroups';
 import type { Account, Debt, Investment, Transaction } from '../types';
 
 // FIN-086 — lógica de cálculo financeiro extraída de dentro de `App.tsx` (onde vivia como
@@ -20,12 +23,33 @@ export interface FinancialStats {
   dailyEvolution: { name: string; balance: number }[];
   expenseByCategory: { name: string; amount: number }[];
   monthExpense: number;
+  /** Gastos do mês fora do cartão (débito, PIX, dinheiro). */
+  monthCashExpense: number;
+  /** Compras no cartão da fatura que vence neste mês (ciclo de fechamento; sem fechamento, o mês civil). Contam como dívida. */
+  monthCardExpense: number;
   realBalance: number;
   investmentBalance: number;
   pendingBills: number;
   activeDebts: number;
+  /** Soma das parcelas mensais das dívidas ainda não quitadas — o que sai do salário todo mês. */
+  monthDebtPayments: number;
+  /** Tudo o que se deve: dívidas cadastradas + faturas pendentes + parcelas futuras do cartão. */
+  totalOwed: number;
   overdueDebts: Debt[];
   filteredTxsCount: number;
+}
+
+/**
+ * Período de compras (início e fim, inclusive) da fatura que vence em `month` (YYYY-MM). Vencimento
+ * até o dia do fechamento = a fatura fechou no mês anterior (fecha 28, vence 5). Sem `dueDay`, a
+ * fatura fecha no próprio mês.
+ */
+export function billPeriod(month: string, closingDay: number, dueDay?: number): { start: string; end: string } {
+  const closingMonth = dueDay && dueDay <= closingDay ? shiftMonth(month, -1) : month;
+  return {
+    start: advanceDays(dateInMonth(shiftMonth(closingMonth, -1), closingDay), 1),
+    end: dateInMonth(closingMonth, closingDay),
+  };
 }
 
 // Padrão estável para `investments` ausente: um `[]` literal no parâmetro seria um array novo
@@ -40,22 +64,16 @@ export function computeFinancialStats(
   investments: Pick<Investment, 'accountId' | 'currentValue'>[] = NO_INVESTMENTS
 ): FinancialStats {
   // FIN-103: transferência entre contas próprias e pagamento de fatura não são receita nem despesa.
-  const activeTxs = (dashboardAccountId
-    ? transactions.filter(t => t.accountId === dashboardAccountId)
-    : transactions).filter(t => !isOwnTransfer(t));
+  // Seleção do filtro: uma conta ou um banco inteiro (conta corrente + cartão) — ver accountGroups.
+  const ids = accountIdsOf(dashboardAccountId, accounts);
+  const activeTxs = transactions.filter(t => inAccounts(ids, t.accountId)).filter(t => !isOwnTransfer(t));
 
-  const activeAccs = dashboardAccountId
-    ? accounts.filter(a => a.id === dashboardAccountId)
-    : accounts;
+  const activeAccs = accounts.filter(a => inAccounts(ids, a.id));
 
-  const activeDebts = dashboardAccountId
-    ? debts.filter(d => d.accountId === dashboardAccountId)
-    : debts;
+  const activeDebts = debts.filter(d => inAccounts(ids, d.accountId));
 
   // FIN-073: com uma conta selecionada, só as posições da carteira vinculadas a ela.
-  const activeInvestments = dashboardAccountId
-    ? investments.filter(i => i.accountId === dashboardAccountId)
-    : investments;
+  const activeInvestments = investments.filter(i => inAccounts(ids, i.accountId));
 
   const income = activeTxs.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
   const expense = activeTxs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -84,6 +102,20 @@ export function computeFinancialStats(
   const today = todayISO();
   const mPrefix = today.slice(0, 7);
   const monthExpense = activeTxs.filter(t => t.amount < 0 && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
+  // Compra no cartão = transação de conta de crédito ou importada como crédito. Ela é dívida, e
+  // entra no mês da fatura em que cai: cartão com dia de fechamento usa o ciclo da fatura que
+  // vence neste mês; sem fechamento cadastrado, o mês civil.
+  const periods = new Map(accounts
+    .filter(a => a.type === 'credit')
+    .map(a => [a.id, a.closingDay ? billPeriod(mPrefix, a.closingDay, a.dueDay) : null]));
+  const isCard = (t: Transaction) => t.paymentType === 'credit' || (!!t.accountId && periods.has(t.accountId));
+  const inThisBill = (t: Transaction) => {
+    const period = t.accountId ? periods.get(t.accountId) : null;
+    return period ? t.date >= period.start && t.date <= period.end : t.date.startsWith(mPrefix);
+  };
+  const expenses = activeTxs.filter(t => t.amount < 0);
+  const monthCardExpense = expenses.filter(t => isCard(t) && inThisBill(t)).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const monthCashExpense = expenses.filter(t => !isCard(t) && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
 
   // "Saldo Real" reflete apenas dinheiro líquido disponível (corrente/poupança/dinheiro).
   // Investimentos são somados separadamente — misturá-los ao saldo líquido pode enganar
@@ -94,6 +126,12 @@ export function computeFinancialStats(
   const investmentBalance = computeInvestmentHoldings(activeAccs, activeInvestments).total;
   const pendingBills = activeAccs.filter(a => a.type === 'credit').reduce((s, a) => s + (a.pendingBill ?? 0), 0);
   const totalActiveDebts = activeDebts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
+  const monthDebtPayments = activeDebts
+    .filter(d => d.paidInstallments < d.totalInstallments)
+    .reduce((s, d) => s + d.monthlyPayment, 0);
+  // Parcelas do cartão ainda não lançadas: as já lançadas estão na fatura pendente.
+  const futureCardInstallments = groupInstallmentPurchases(activeTxs, today).reduce((s, p) => s + p.remainingAmount, 0);
+  const totalOwed = totalActiveDebts + pendingBills + futureCardInstallments;
 
   const overdueDebts = activeDebts.filter(isDebtOverdue);
 
@@ -111,8 +149,8 @@ export function computeFinancialStats(
 
   return {
     income, expense, importedBalance, balanceByMonth, dailyEvolution,
-    expenseByCategory, monthExpense, realBalance, investmentBalance, pendingBills,
-    activeDebts: totalActiveDebts, overdueDebts,
+    expenseByCategory, monthExpense, monthCashExpense, monthCardExpense, realBalance, investmentBalance, pendingBills,
+    activeDebts: totalActiveDebts, monthDebtPayments, totalOwed, overdueDebts,
     filteredTxsCount: activeTxs.length,
   };
 }

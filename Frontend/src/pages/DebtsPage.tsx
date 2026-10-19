@@ -2,12 +2,14 @@ import { InstallmentsPanel } from '../components/InstallmentsPanel';
 import { DebtManager } from '../components/DebtManager';
 import { AccountFilter } from '../components/AccountFilter';
 import type { Account, Debt, Transaction } from '../types';
+import { BASE_CURRENCY, currencyOf } from '../utils/currency';
+import { accountIdsOf, inAccounts } from '../utils/accountGroups';
 
 interface DebtsPageProps {
   transactionsBase: Transaction[];
   debts: Debt[];
   accounts: Account[];
-  /** Conta do filtro (null = todas). Dívida sem conta só aparece em "todas". */
+  /** Conta ou banco do filtro (null = todas). Dívida sem conta só aparece em "todas". */
   accountId: string | null;
   onChangeAccount: (accountId: string | null) => void;
   onAdd: (debt: Omit<Debt, 'id' | 'createdAt'>) => Promise<void>;
@@ -16,8 +18,13 @@ interface DebtsPageProps {
 }
 
 export function DebtsPage({ transactionsBase, debts, accounts, accountId, onChangeAccount, onAdd, onUpdate, onDelete }: DebtsPageProps) {
-  const shownDebts = accountId ? debts.filter(d => d.accountId === accountId) : debts;
-  const shownTransactions = accountId ? transactionsBase.filter(t => t.accountId === accountId) : transactionsBase;
+  const ids = accountIdsOf(accountId, accounts);
+  const shownDebts = debts.filter(d => inAccounts(ids, d.accountId));
+  const shownTransactions = transactionsBase.filter(t => inAccounts(ids, t.accountId));
+  // Faturas em real: dívidas e parcelas desta aba são somadas em real (FIN-076).
+  const billed = accounts.filter(a => a.type === 'credit' && a.pendingBill != null && currencyOf(a) === BASE_CURRENCY
+    && inAccounts(ids, a.id));
+  const cardBill = billed.length ? billed.reduce((s, a) => s + (a.pendingBill ?? 0), 0) : null;
 
   return (
     <>
@@ -29,7 +36,7 @@ export function DebtsPage({ transactionsBase, debts, accounts, accountId, onChan
         <AccountFilter id="debts-account" accounts={accounts} value={accountId} onChange={onChangeAccount}/>
       </div>
       {/* FIN-094: mês de referência, vencimentos do mês e compras parceladas no cartão. */}
-      <InstallmentsPanel transactions={shownTransactions} debts={shownDebts} accounts={accounts}/>
+      <InstallmentsPanel transactions={shownTransactions} debts={shownDebts} accounts={accounts} cardBill={cardBill}/>
       <DebtManager
         debts={shownDebts}
         onAdd={onAdd}

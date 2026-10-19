@@ -6,7 +6,8 @@ import * as OTPAuth from 'otpauth';
 import qrcode from 'qrcode-generator';
 import { prisma } from '../lib/prisma.js';
 import { authenticateToken, authLimiter, JWT_EXPIRES_IN, JWT_SECRET } from '../lib/auth.js';
-import { sendInternalError } from '../lib/http.js';
+import { sendInternalError, validateBody } from '../lib/http.js';
+import { salarySchema } from '../lib/schemas.js';
 
 export const router = express.Router();
 
@@ -246,8 +247,53 @@ router.post('/login', authLimiter, async (req, res) => {
   }
 });
 
+// Login desativado temporariamente: com VITE_AUTH_DISABLED=true (fora de produção), o frontend
+// pula a tela de login e pede aqui uma sessão do primeiro usuário cadastrado — o app é de um
+// usuário só. Sem a variável, a rota não existe (404) e o login volta a ser exigido.
+router.post('/local-session', async (req, res) => {
+  if (process.env.VITE_AUTH_DISABLED !== 'true' || process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Não encontrado.' });
+  }
+  try {
+    let user = await prisma.user.findFirst({ orderBy: { createdAt: 'asc' } });
+    if (!user) {
+      // Banco vazio: cria o usuário local com uma senha aleatória (o login fica desativado mesmo).
+      const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 10);
+      user = await prisma.user.create({ data: { name: 'Local', email: 'local@finflow.local', passwordHash } });
+    }
+    const token = jwt.sign({ userId: user.id, name: user.name, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  } catch (error) {
+    sendInternalError(res, error, 'Erro ao abrir a sessão local.');
+  }
+});
+
 router.get('/me', authenticateToken, async (req, res) => {
   res.json({ user: req.user });
+});
+
+// Salário informado manualmente (valor de cada pagamento, em centavos) e periodicidade.
+const SALARY_SELECT = { salaryCents: true, salaryFrequency: true };
+
+router.get('/salary', authenticateToken, async (req, res) => {
+  try {
+    const salary = await prisma.user.findUnique({ where: { id: req.user.userId }, select: SALARY_SELECT });
+    if (!salary) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    res.json(salary);
+  } catch (error) {
+    sendInternalError(res, error, 'Erro ao carregar o salário.');
+  }
+});
+
+router.put('/salary', authenticateToken, async (req, res) => {
+  const validation = validateBody(salarySchema, req.body);
+  if (!validation.ok) return res.status(400).json({ error: validation.message });
+  try {
+    const salary = await prisma.user.update({ where: { id: req.user.userId }, data: validation.data, select: SALARY_SELECT });
+    res.json(salary);
+  } catch (error) {
+    sendInternalError(res, error, 'Erro ao salvar o salário.');
+  }
 });
 
 // FIN-078 — estado da verificação em duas etapas do usuário: se o servidor tem a chave para

@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { X, Plus, Trash2, Edit2, CreditCard, Landmark, PiggyBank, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, ChevronRight, CreditCard, Landmark, PiggyBank, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
 import type { Account, AccountType } from '../types';
 import { FormField } from './shared/FormField';
 import { formatBRL } from '../utils/money';
+import { groupByBank } from '../utils/accountGroups';
 import {
   BASE_CURRENCY, accountsInBase, currencyLabel, currencyOf, currencyOptions, currencySymbol,
   foreignCurrencies, formatMoney, isSupportedCurrency, type ExchangeRates,
@@ -90,10 +91,82 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm('Remover esta conta?')) await onDelete(id);
+    if (confirm('Remover esta conta e todas as transações dela?')) await onDelete(id);
   };
 
   const set = (k: keyof Omit<Account, 'id'>, v: unknown) => setForm(f => ({ ...f, [k]: v }));
+
+  // Bancos com os cartões à mostra (fechados por padrão).
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleBank = (key: string) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+
+  /** Card de uma conta. Com `toggle`, é a conta principal do banco e abre as demais (o cartão). */
+  const renderAccount = (acc: Account, toggle?: { open: boolean; onToggle: () => void; controls: string; label: string }) => {
+    const currency = currencyOf(acc);
+    return (
+      <div key={acc.id} className="glass-card rounded-xl p-4 flex items-center gap-4">
+        {toggle && (
+          <button type="button" onClick={toggle.onToggle} aria-expanded={toggle.open} aria-controls={toggle.controls}
+            aria-label={`${toggle.open ? 'Esconder' : 'Mostrar'} ${toggle.label}`}
+            className="-ml-1 p-1 rounded-lg text-textMuted hover:text-white hover:bg-white/10 transition-colors shrink-0">
+            <ChevronRight size={16} aria-hidden="true" className={`transition-transform ${toggle.open ? 'rotate-90' : ''}`} />
+          </button>
+        )}
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white"
+          style={{ backgroundColor: `${acc.color}25`, border: `1px solid ${acc.color}40`, color: acc.color }}>
+          {ACCOUNT_TYPE_ICONS[acc.type]}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-white truncate">{acc.name}</p>
+            {/* FIN-076: a moeda só aparece quando não é real, para não poluir o caso comum. */}
+            {currency !== BASE_CURRENCY && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md text-amber-300" style={{ backgroundColor: 'rgba(245,158,11,0.12)' }}>
+                {currency}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-textMuted">{ACCOUNT_TYPE_LABELS[acc.type]}{toggle && ` · ${toggle.label}`}</p>
+          {acc.type === 'credit' && acc.limit && (
+            <div className="mt-2">
+              <div className="flex justify-between text-xs text-textMuted mb-1">
+                <span>Fatura: {formatMoney(acc.pendingBill ?? 0, currency)}</span>
+                <span>Limite: {formatMoney(acc.limit, currency)}</span>
+              </div>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
+                <div className="h-full rounded-full bg-red-400 transition-all"
+                  style={{ width: `${Math.min(100, ((acc.pendingBill ?? 0) / acc.limit) * 100)}%` }} />
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="text-right shrink-0">
+          <p className={`text-lg font-bold ${acc.type === 'credit' ? 'text-red-400' : (acc.balance >= 0 ? 'text-white' : 'text-red-400')}`}>
+            {acc.type === 'credit' ? '-' : ''}{formatMoney(acc.type === 'credit' ? (acc.pendingBill ?? 0) : acc.balance, currency)}
+          </p>
+          {acc.type === 'credit' && (acc.closingDay || acc.dueDay) && (
+            <p className="text-xs text-textMuted">
+              {[acc.closingDay && `Fecha dia ${acc.closingDay}`, acc.dueDay && `Vence dia ${acc.dueDay}`].filter(Boolean).join(' · ')}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-1 shrink-0">
+          <button type="button" onClick={() => openEdit(acc)} aria-label={`Editar ${acc.name}`}
+            className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+            <Edit2 size={14} aria-hidden="true" />
+          </button>
+          <button type="button" onClick={() => handleDelete(acc.id)} aria-label={`Excluir ${acc.name}`}
+            className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
+            <Trash2 size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const formCurrency = currencyOf(form);
   const symbol = currencySymbol(formCurrency);
@@ -127,8 +200,8 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
         </p>
       )}
 
-      {/* Account Cards */}
-      <div className="space-y-3 mb-4">
+      {/* Account Cards — agrupadas por banco: conta corrente e cartão do mesmo banco ficam juntos. */}
+      <div className="space-y-6 mb-4">
         {accounts.length === 0 && (
           <div className="glass-card rounded-xl p-8 flex flex-col items-center text-center">
             <Landmark size={32} className="text-textMuted mb-3" />
@@ -136,60 +209,43 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
             <p className="text-textMuted text-sm">Adicione suas contas e cartões para ver seu saldo real</p>
           </div>
         )}
-        {accounts.map(acc => {
-          const currency = currencyOf(acc);
+        {groupByBank(accounts).map(group => {
+          const ids = new Set(group.accounts.map(a => a.id));
+          // Em real (FIN-076): saldo das contas menos as faturas dos cartões do banco.
+          const net = accountsBase.filter(a => ids.has(a.id))
+            .reduce((sum, a) => sum + (a.type === 'credit' ? -(a.pendingBill ?? 0) : a.balance), 0);
           return (
-            <div key={acc.id} className="glass-card rounded-xl p-4 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white"
-                style={{ backgroundColor: `${acc.color}25`, border: `1px solid ${acc.color}40`, color: acc.color }}>
-                {ACCOUNT_TYPE_ICONS[acc.type]}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-white truncate">{acc.name}</p>
-                  <span className="text-xs px-2 py-0.5 rounded-full text-textMuted" style={{ backgroundColor: 'var(--fg-5)' }}>
-                    {acc.bank}
-                  </span>
-                  {/* FIN-076: a moeda só aparece quando não é real, para não poluir o caso comum. */}
-                  {currency !== BASE_CURRENCY && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md text-amber-300" style={{ backgroundColor: 'rgba(245,158,11,0.12)' }}>
-                      {currency}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-textMuted">{ACCOUNT_TYPE_LABELS[acc.type]}</p>
-                {acc.type === 'credit' && acc.limit && (
-                  <div className="mt-2">
-                    <div className="flex justify-between text-xs text-textMuted mb-1">
-                      <span>Fatura: {formatMoney(acc.pendingBill ?? 0, currency)}</span>
-                      <span>Limite: {formatMoney(acc.limit, currency)}</span>
-                    </div>
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
-                      <div className="h-full rounded-full bg-red-400 transition-all"
-                        style={{ width: `${Math.min(100, ((acc.pendingBill ?? 0) / acc.limit) * 100)}%` }} />
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="text-right shrink-0">
-                <p className={`text-lg font-bold ${acc.type === 'credit' ? 'text-red-400' : (acc.balance >= 0 ? 'text-white' : 'text-red-400')}`}>
-                  {acc.type === 'credit' ? '-' : ''}{formatMoney(acc.type === 'credit' ? (acc.pendingBill ?? 0) : acc.balance, currency)}
-                </p>
-                {acc.type === 'credit' && acc.dueDay && (
-                  <p className="text-xs text-textMuted">Vence dia {acc.dueDay}</p>
-                )}
-              </div>
-              <div className="flex gap-1 shrink-0">
-                <button type="button" onClick={() => openEdit(acc)} aria-label={`Editar ${acc.name}`}
-                  className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
-                  <Edit2 size={14} aria-hidden="true" />
-                </button>
-                <button type="button" onClick={() => handleDelete(acc.id)} aria-label={`Excluir ${acc.name}`}
-                  className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
-                  <Trash2 size={14} aria-hidden="true" />
-                </button>
-              </div>
+          <section key={group.key} aria-label={group.bank}>
+            <div className="flex items-baseline justify-between mb-2 px-1">
+              <h3 className="text-sm font-semibold text-white">
+                {group.bank} <span className="text-xs font-normal text-textMuted">· {group.accounts.length} conta(s)</span>
+              </h3>
+              {/* Com uma conta só, o total repetiria o valor do card. */}
+              {group.accounts.length > 1 && (
+                <span className="text-sm font-semibold" style={{ color: net >= 0 ? 'var(--text-gain)' : 'var(--text-negative)' }}>
+                  {net < 0 ? '-' : ''}{formatBRL(Math.abs(net))}
+                </span>
+              )}
             </div>
+            <div className="space-y-3">
+              {(() => {
+                // Conta principal: a primeira que não é cartão. As demais ficam escondidas atrás da seta.
+                const main = group.accounts.find(a => a.type !== 'credit') ?? group.accounts[0];
+                const others = group.accounts.filter(a => a !== main);
+                const open = expanded.has(group.key);
+                const panelId = `bank-${group.key.replace(/\W+/g, '-')}-others`;
+                const label = others.every(a => a.type === 'credit') ? `${others.length} cartão(ões)` : `mais ${others.length} conta(s)`;
+                return (
+                  <>
+                    {renderAccount(main, others.length ? { open, onToggle: () => toggleBank(group.key), controls: panelId, label } : undefined)}
+                    {others.length > 0 && (
+                      <div id={panelId} hidden={!open} className="ml-8 space-y-3">{others.map(a => renderAccount(a))}</div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </section>
           );
         })}
       </div>

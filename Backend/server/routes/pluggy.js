@@ -5,7 +5,8 @@ import { sendInternalError } from '../lib/http.js';
 import { toCents } from '../lib/money.js';
 import {
   getPluggyClient, mapPluggyAccountType, pluggyReauthMessage, pluggyAmountToCents,
-  isCreditCardBillPayment, pluggyTransactionCategory, pluggyCurrency, pluggyBillDueDay,
+  isCreditCardBillPayment, pluggyTransactionCategory, pluggyCurrency, pluggyBillDueDay, pluggyPendingBillCents,
+  pluggyInstitutionName,
 } from '../lib/pluggyHelpers.js';
 
 export const router = express.Router();
@@ -114,6 +115,10 @@ async function syncPluggyItem(userId, itemId) {
     return { status: 404, body: { error: 'Nenhuma conta encontrada para este item.' } };
   }
 
+  // Nome do banco, e não "MeuPluggy": só dá para saber com as contas em mãos.
+  const institutionName = pluggyInstitutionName(pluggyItem, accountsRes.results);
+  await prisma.pluggyItem.updateMany({ where: { userId, pluggyId: itemId }, data: { providerName: institutionName } });
+
   let totalTxs = 0;
   // FIN-105: regras de categoria do usuário, lidas uma vez para a sincronização inteira.
   const categoryRules = await prisma.categoryRule.findMany({ where: { userId } });
@@ -128,7 +133,7 @@ async function syncPluggyItem(userId, itemId) {
         userId,
         pluggyId: pluggyAcc.id,
         name: pluggyAcc.name,
-        bank: pluggyAcc.marketingName || 'Banco Conectado',
+        bank: pluggyAcc.marketingName || institutionName,
         type: accountType,
         balance: toCents(pluggyAcc.balance),
         currency: accountCurrency,
@@ -143,7 +148,36 @@ async function syncPluggyItem(userId, itemId) {
       data: { currency: accountCurrency },
     });
 
-    // Para cartões de crédito, busca a fatura real via endpoint dedicado da Pluggy
+    // Busca transações do último mês, paginando até obter todas — a API da Pluggy pagina
+    // por padrão (20 itens/página, máx. 500), então sem este loop uma conta com mais
+    // transações que uma página perderia dados silenciosamente (ver FIN-038 em
+    // docs/BACKLOG_DETAIL.md).
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    const fromDate = oneMonthAgo.toISOString().split('T')[0];
+    // No cartão, busca um mês a mais: a fatura aberta inclui compras que só entram nela dias
+    // depois da data (ver `pluggyPendingBillCents`). Só o último mês é importado, como antes.
+    const fetchFrom = new Date(oneMonthAgo);
+    if (accountType === 'credit') fetchFrom.setMonth(fetchFrom.getMonth() - 1);
+
+    const allPluggyTxs = [];
+    let page = 1;
+    let totalPages = 1;
+    do {
+      const txsRes = await getPluggyClient().fetchTransactions(pluggyAcc.id, { from: fetchFrom.toISOString().split('T')[0], page, pageSize: 500 });
+      allPluggyTxs.push(...txsRes.results);
+      totalPages = txsRes.totalPages;
+      page++;
+    } while (page <= totalPages);
+
+    // FIN-092: em conta de cartão, descarta o pagamento da própria fatura — ver
+    // `isCreditCardBillPayment`. O filtro é feito aqui, antes de qualquer uso, para que
+    // a query de existentes, o refresh e a inserção enxerguem todos o mesmo conjunto.
+    const pluggyTxs = accountType === 'credit'
+      ? allPluggyTxs.filter(tx => !isCreditCardBillPayment(tx) && tx.date.toISOString().split('T')[0] >= fromDate)
+      : allPluggyTxs;
+
+    // Para cartões de crédito, busca as faturas via endpoint dedicado da Pluggy
     // e atualiza `pendingBill` — não é possível inferir a fatura a partir de `balance`
     // para contas do tipo CREDIT (ver FIN-001 em docs/BACKLOG_DETAIL.md).
     if (pluggyAcc.type === 'CREDIT') {
@@ -151,8 +185,8 @@ async function syncPluggyItem(userId, itemId) {
         const billsRes = await getPluggyClient().fetchCreditCardBills(pluggyAcc.id);
         const bills = billsRes?.results ?? [];
         if (bills.length > 0) {
-          // A fatura pendente é a mais recentemente fechada (maior billClosingDate/dueDate) —
-          // não a de menor data, que representaria uma fatura antiga já superada.
+          // A última fatura fechada (maior billClosingDate/dueDate) — não a de menor data, que
+          // representaria uma fatura antiga já superada.
           const currentBill = [...bills].sort((a, b) => {
             const dateA = new Date(a.billClosingDate ?? a.dueDate).getTime();
             const dateB = new Date(b.billClosingDate ?? b.dueDate).getTime();
@@ -164,38 +198,13 @@ async function syncPluggyItem(userId, itemId) {
           const dueDay = pluggyBillDueDay(currentBill);
           await prisma.account.updateMany({
             where: { id: localAccount.id, userId },
-            data: { pendingBill: toCents(currentBill.totalAmount), ...(dueDay ? { dueDay } : {}) },
+            data: { pendingBill: pluggyPendingBillCents(currentBill, allPluggyTxs), ...(dueDay ? { dueDay } : {}) },
           });
         }
       } catch (billError) {
         console.error(`Erro ao buscar fatura do cartão (accountId=${pluggyAcc.id}):`, billError);
       }
     }
-
-    // Busca transações do último mês, paginando até obter todas — a API da Pluggy pagina
-    // por padrão (20 itens/página, máx. 500), então sem este loop uma conta com mais
-    // transações que uma página perderia dados silenciosamente (ver FIN-038 em
-    // docs/BACKLOG_DETAIL.md).
-    const oneMonthAgo = new Date();
-    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-    const fromDate = oneMonthAgo.toISOString().split('T')[0];
-
-    const allPluggyTxs = [];
-    let page = 1;
-    let totalPages = 1;
-    do {
-      const txsRes = await getPluggyClient().fetchTransactions(pluggyAcc.id, { from: fromDate, page, pageSize: 500 });
-      allPluggyTxs.push(...txsRes.results);
-      totalPages = txsRes.totalPages;
-      page++;
-    } while (page <= totalPages);
-
-    // FIN-092: em conta de cartão, descarta o pagamento da própria fatura — ver
-    // `isCreditCardBillPayment`. O filtro é feito aqui, antes de qualquer uso, para que
-    // a query de existentes, o refresh e a inserção enxerguem todos o mesmo conjunto.
-    const pluggyTxs = accountType === 'credit'
-      ? allPluggyTxs.filter(tx => !isCreditCardBillPayment(tx))
-      : allPluggyTxs;
 
     // FIN-037: busca de uma vez os `pluggyId` já existentes desta sincronização (1
     // consulta), em vez de um `findFirst` por transação (N consultas).

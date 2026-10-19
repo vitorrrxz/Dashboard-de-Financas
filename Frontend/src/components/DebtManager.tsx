@@ -49,8 +49,6 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const totalDebt = debts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
-  const totalMonthly = debts.reduce((s, d) => s + d.monthlyPayment, 0);
 
   const openAdd = () => {
     setEditing(null);
@@ -248,9 +246,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
   return (
     <div>
-      {/* Summary + Actions button */}
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-textMuted uppercase tracking-wide font-medium">Resumo</p>
+      {/* Actions */}
+      <div className="flex items-center justify-end mb-4">
         <div className="flex gap-2">
           <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
           <button
@@ -279,24 +276,6 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             <Download size={14} />
             Exportar CSV
           </button>
-        </div>
-      </div>
-
-      {/* Summary Cards — FIN-029: coluna única abaixo de `sm` para não espremer valores monetários */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div className="glass-card rounded-2xl p-5">
-          <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Total em Dívidas</p>
-          <p className="text-2xl font-bold text-red-400">
-            R$ {totalDebt.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </p>
-          <p className="text-xs text-textMuted mt-1">{debts.filter(d => !isPaid(d)).length} dívida(s) ativas</p>
-        </div>
-        <div className="glass-card rounded-2xl p-5">
-          <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Parcelas Mensais</p>
-          <p className="text-2xl font-bold text-amber-400">
-            R$ {totalMonthly.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </p>
-          <p className="text-xs text-textMuted mt-1">por mês</p>
         </div>
       </div>
 
