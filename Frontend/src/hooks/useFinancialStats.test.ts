@@ -167,6 +167,9 @@ describe('computeFinancialStats — tudo o que se deve é dívida', () => {
     const s = computeFinancialStats(txs, [card, acc({ id: 'chk' })], debts, null);
     expect(s.monthCardExpense).toBe(150);
     expect(s.monthExpense).toBe(180); // total gasto no mês: cartão + PIX
+    expect(s.monthExpenseByType).toEqual({ debitPix: 30, credit: 50, installment: 100 });
+    // Cartão (50 à vista + 100 parcelado) + dívida cadastrada em 10x (100).
+    expect(s.monthDebtsByType).toEqual({ debitPix: 0, credit: 50, installment: 200 });
     // 800 cadastradas + 500 de fatura + 2 parcelas futuras de 100.
     expect(s.totalOwed).toBe(1500);
   });

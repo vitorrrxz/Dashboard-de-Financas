@@ -12,7 +12,7 @@ import { describeHoldings, type InvestmentHoldings } from '../utils/investments'
 import { CATEGORY_COLORS } from '../utils/categories';
 import type { BudgetProgress } from '../utils/budget';
 import type { ProjectionPoint } from '../utils/projection';
-import type { FinancialStats } from '../hooks/useFinancialStats';
+import type { ByPaymentType, FinancialStats } from '../hooks/useFinancialStats';
 import type { Account, Debt, RecurringTransaction, Salary, SalaryFrequency } from '../types';
 import type { Tab } from '../App';
 import { AccountOptions } from '../components/AccountFilter';
@@ -144,6 +144,23 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick, children
   );
 }
 
+function PaymentTypeBreakdown({ values }: { values: ByPaymentType }) {
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs text-textMuted">
+      {([
+        ['Débito / PIX', 'Débito e PIX', values.debitPix],
+        ['Crédito à vista', 'Crédito à vista e PIX no crédito', values.credit],
+        ['Crédito parcelado', 'Crédito parcelado e PIX parcelado', values.installment],
+      ] as const).map(([label, hint, value]) => (
+        <li key={label} title={hint} className="flex justify-between gap-2 whitespace-nowrap">
+          <span className="truncate">{label}</span>
+          <span>{fmt(value)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 interface DashboardPageProps {
   accounts: Account[];
   dashboardAccountId: string | null;
@@ -247,10 +264,14 @@ export function DashboardPage({
         <SalaryCard salary={salary} monthly={monthlySalary} month={month} bonus={bonus} onSave={onSaveSalary} />
         <SummaryCard title="Despesas do Mês" amount={fmt(stats.monthExpense)} isPositive={false}
           icon={<ArrowDownRight size={22} className="text-red-400"/>} badge="Total gasto"
-          onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }} />
+          onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }}>
+          <PaymentTypeBreakdown values={stats.monthExpenseByType} />
+        </SummaryCard>
         <SummaryCard title="Dívidas do Mês" amount={fmt(monthDebts)} isPositive={false}
           icon={<CreditCard size={22} className="text-amber-400"/>} badge="Fatura + parcelas"
-          onClick={() => onNavigate('debts')} />
+          onClick={() => onNavigate('debts')}>
+          <PaymentTypeBreakdown values={stats.monthDebtsByType} />
+        </SummaryCard>
         <SummaryCard title="Sobra do Mês" amount={fmt(leftover)} isPositive={leftover >= 0}
           icon={<PiggyBank size={22} className={leftover >= 0 ? 'text-emerald-400' : 'text-red-400'}/>}
           badge={leftover >= 0 ? 'Disponível' : 'No vermelho'}>

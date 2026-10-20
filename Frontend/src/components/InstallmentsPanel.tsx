@@ -21,6 +21,8 @@ interface InstallmentsPanelProps {
    * tem também as compras à vista, assinaturas e estornos, que não são parcelas.
    */
   cardBill: number | null;
+  /** Qual aba da página está aberta: vencimentos do mês ou compras parceladas no cartão. */
+  view: 'due' | 'purchases';
 }
 
 /** Mesma cor da categoria "Cartão de Crédito" no DebtManager. */
@@ -36,7 +38,7 @@ const DONE_COLOR = '#14b8a6';
  * As compras parceladas são somente leitura: a fonte da verdade é o extrato do cartão, e
  * editá-las aqui divergiria do que a próxima sincronização traria.
  */
-export function InstallmentsPanel({ transactions, debts, accounts, cardBill }: InstallmentsPanelProps) {
+export function InstallmentsPanel({ transactions, debts, accounts, cardBill, view }: InstallmentsPanelProps) {
   const today = todayISO();
   const currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
@@ -51,8 +53,32 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill }: I
   const activeCount = purchases.filter(p => p.nextDate !== null).length;
   const accountName = (id?: string) => accounts.find(a => a.id === id)?.name;
 
+  if (view === 'purchases') {
+    return (
+      <section>
+        <div className="flex items-baseline justify-between gap-3 mb-4 flex-wrap">
+          <h3 className="text-lg font-semibold text-white">Compras parceladas no cartão</h3>
+          {purchases.length > 0 && (
+            <p className="text-xs text-textMuted">
+              {activeCount} em andamento · {purchases.length - activeCount} concluída(s)
+            </p>
+          )}
+        </div>
+        {purchases.length === 0 ? (
+          <div className="glass-card rounded-xl p-8 text-center text-sm text-textMuted">
+            Nenhuma compra parcelada encontrada nas transações do cartão.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {purchases.map(p => <PurchaseCard key={p.key} purchase={p} accountName={accountName(p.accountId)}/>)}
+          </div>
+        )}
+      </section>
+    );
+  }
+
   return (
-    <div className="space-y-6 mb-10">
+    <div className="space-y-6">
       {/* Mês de referência + valor total a pagar no mês */}
       <div className="glass-card rounded-2xl p-4 flex flex-wrap items-end justify-between gap-4">
         <MonthNavigator id="debt-month" value={month} months={months} onChange={setMonth}/>
@@ -84,27 +110,6 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill }: I
                 {items.map(item => <DueRow key={item.key} item={item} today={today}/>)}
               </tbody>
             </table>
-          </div>
-        )}
-      </section>
-
-      {/* Compras parceladas no cartão */}
-      <section>
-        <div className="flex items-baseline justify-between gap-3 mb-4 flex-wrap">
-          <h3 className="text-lg font-semibold text-white">Compras parceladas no cartão</h3>
-          {purchases.length > 0 && (
-            <p className="text-xs text-textMuted">
-              {activeCount} em andamento · {purchases.length - activeCount} concluída(s)
-            </p>
-          )}
-        </div>
-        {purchases.length === 0 ? (
-          <div className="glass-card rounded-xl p-8 text-center text-sm text-textMuted">
-            Nenhuma compra parcelada encontrada nas transações do cartão.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {purchases.map(p => <PurchaseCard key={p.key} purchase={p} accountName={accountName(p.accountId)}/>)}
           </div>
         )}
       </section>

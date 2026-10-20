@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { isDebtOverdue, todayISO } from '../utils/debts';
 import { computeInvestmentHoldings } from '../utils/investments';
 import { isOwnTransfer } from '../utils/categories';
-import { groupInstallmentPurchases } from '../utils/installments';
+import { groupInstallmentPurchases, parseInstallment } from '../utils/installments';
 import { advanceDays, dateInMonth, shiftMonth } from '../utils/dates';
 import { accountIdsOf, inAccounts } from '../utils/accountGroups';
 import type { Outflow } from '../utils/salary';
@@ -16,6 +16,8 @@ import type { Account, Debt, Investment, Transaction } from '../types';
 //
 // Todos os valores de entrada/saída estão em REAIS (não centavos) — a conversão para/de
 // centavos acontece só na borda com a API (ver `accountFromApi`/`txFromApi` em App.tsx).
+export interface ByPaymentType { debitPix: number; credit: number; installment: number }
+
 export interface FinancialStats {
   income: number;
   expense: number;
@@ -26,6 +28,10 @@ export interface FinancialStats {
   monthExpense: number;
   /** Compras no cartão da fatura que vence neste mês (ciclo de fechamento; sem fechamento, o mês civil). Contam como dívida. */
   monthCardExpense: number;
+  /** `monthExpense` dividido pela forma de pagamento: débito/PIX, crédito à vista, crédito parcelado. */
+  monthExpenseByType: ByPaymentType;
+  /** `monthCardExpense + monthDebtPayments` divididos do mesmo jeito que `monthExpenseByType`. */
+  monthDebtsByType: ByPaymentType;
   realBalance: number;
   investmentBalance: number;
   pendingBills: number;
@@ -116,6 +122,13 @@ export function computeFinancialStats(
   };
   const expenses = activeTxs.filter(t => t.amount < 0);
   const monthCardExpense = expenses.filter(t => isCard(t) && inThisBill(t)).reduce((s, t) => s + Math.abs(t.amount), 0);
+  // Mesmo recorte de `monthExpense` (mês civil), separado pela forma de pagamento. PIX no
+  // crédito chega como compra no cartão, então cai em crédito à vista ou parcelado.
+  const txKind = (t: Transaction): keyof ByPaymentType =>
+    t.paymentType === 'pix_installment' || (isCard(t) && parseInstallment(t.name)) ? 'installment'
+      : isCard(t) ? 'credit' : 'debitPix';
+  const monthExpenseByType: ByPaymentType = { debitPix: 0, credit: 0, installment: 0 };
+  expenses.filter(t => t.date.startsWith(mPrefix)).forEach(t => { monthExpenseByType[txKind(t)] += Math.abs(t.amount); });
 
   // "Saldo Real" reflete apenas dinheiro líquido disponível (corrente/poupança/dinheiro).
   // Investimentos são somados separadamente — misturá-los ao saldo líquido pode enganar
@@ -129,6 +142,14 @@ export function computeFinancialStats(
   const monthDebtPayments = activeDebts
     .filter(d => d.paidInstallments < d.totalInstallments)
     .reduce((s, d) => s + d.monthlyPayment, 0);
+  // Dívida cadastrada não tem forma de pagamento: mais de uma parcela = parcelado; parcela
+  // única = crédito à vista se for de cartão, senão débito/PIX (empréstimo, boleto…).
+  const monthDebtsByType: ByPaymentType = { debitPix: 0, credit: 0, installment: 0 };
+  expenses.filter(t => isCard(t) && inThisBill(t)).forEach(t => { monthDebtsByType[txKind(t)] += Math.abs(t.amount); });
+  activeDebts.filter(d => d.paidInstallments < d.totalInstallments).forEach(d => {
+    const kind = d.totalInstallments > 1 ? 'installment' : d.category === 'Cartão de Crédito' ? 'credit' : 'debitPix';
+    monthDebtsByType[kind] += d.monthlyPayment;
+  });
   // Parcelas do cartão ainda não lançadas: as já lançadas estão na fatura pendente.
   const futureCardInstallments = groupInstallmentPurchases(activeTxs, today).reduce((s, p) => s + p.remainingAmount, 0);
   const totalOwed = totalActiveDebts + pendingBills + futureCardInstallments;
@@ -160,7 +181,7 @@ export function computeFinancialStats(
 
   return {
     income, expense, importedBalance, balanceByMonth, dailyEvolution,
-    expenseByCategory, monthExpense, monthCardExpense, realBalance, investmentBalance, pendingBills,
+    expenseByCategory, monthExpense, monthExpenseByType, monthDebtsByType, monthCardExpense, realBalance, investmentBalance, pendingBills,
     activeDebts: totalActiveDebts, monthDebtPayments, totalOwed, monthOutflows, overdueDebts,
     filteredTxsCount: activeTxs.length,
   };
