@@ -15,7 +15,8 @@ import { AccountOptions } from '../components/AccountFilter';
 import { activeBonus, biweeklyLeftovers, salaryPerMonth } from '../utils/salary';
 import { todayISO } from '../utils/debts';
 import { advanceDays, daysInMonth, formatMonthLabel } from '../utils/dates';
-import { formatBRL } from '../utils/money';
+import { balanceTone, formatBRL } from '../utils/money';
+import { categoryColor, categoryDot } from '../utils/categories';
 import { niceTicks } from '../utils/chart';
 
 /** "R$ 1.234,56" com espaço que não quebra: o valor nunca se separa do símbolo numa linha estreita. */
@@ -32,8 +33,6 @@ const tooltipStyle = {
   cursor: { fill: 'var(--fg-4)' },
 };
 
-/** Fatias do anel de categorias: um só tom, do mais forte (maior gasto) ao mais claro. */
-const RING_OPACITY = [1, 0.72, 0.52, 0.38, 0.26, 0.16];
 
 /**
  * Régua de um pagamento: o trilho tem o tamanho do que entra; a parte preenchida é o que já está
@@ -47,14 +46,14 @@ function PayRuler({ label, detail, pay, owed, scale }: { label: string; detail: 
     <div>
       <div className="flex items-baseline justify-between gap-3 mb-1.5">
         <p className="text-sm text-white">{label}</p>
-        <p className={`text-sm font-medium whitespace-nowrap ${left < 0 ? 'text-red-400' : 'text-white'}`}>
+        <p className={`text-sm font-medium whitespace-nowrap ${balanceTone(left)}`}>
           {left < 0 ? `faltam ${fmt(left)}` : `sobram ${fmt(left)}`}
         </p>
       </div>
       <div className="relative h-2" role="img"
         aria-label={`${label}: recebe ${fmt(pay)}, dívidas ${fmt(owed)}, ${left < 0 ? 'faltam' : 'sobram'} ${fmt(left)}`}>
-        <div className="absolute inset-y-0 left-0 rounded-full bg-white/[0.08]" style={{ width: pct(pay) }} />
-        <div className="absolute inset-y-0 left-0 rounded-l-full" style={{ width: pct(Math.min(owed, pay)), backgroundColor: 'var(--color-accent)' }} />
+        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: pct(pay), backgroundColor: 'var(--ruler-free)' }} />
+        <div className="absolute inset-y-0 left-0 rounded-l-full" style={{ width: pct(Math.min(owed, pay)), backgroundColor: 'var(--color-debt)' }} />
         {owed > pay && (
           <div className="absolute inset-y-0 rounded-r-full" style={{ left: pct(pay), width: pct(owed - pay), backgroundColor: 'var(--color-red-500)' }} />
         )}
@@ -65,7 +64,7 @@ function PayRuler({ label, detail, pay, owed, scale }: { label: string; detail: 
 }
 
 /** Divisão de um total por forma de pagamento — linhas pequenas, valores alinhados à direita. */
-function PaymentTypeBreakdown({ values }: { values: ByPaymentType }) {
+function PaymentTypeBreakdown({ values, tone = 'text-white' }: { values: ByPaymentType; tone?: string }) {
   return (
     <dl className="mt-2 space-y-0.5 text-[13px]">
       {([
@@ -75,7 +74,7 @@ function PaymentTypeBreakdown({ values }: { values: ByPaymentType }) {
       ] as const).map(([label, value]) => (
         <div key={label} className="flex justify-between gap-2 whitespace-nowrap">
           <dt className="text-textMuted">{label}</dt>
-          <dd className={value === 0 ? 'text-textMuted' : 'text-white'}>{fmt(value)}</dd>
+          <dd className={value === 0 ? 'text-textMuted' : tone}>{fmt(value)}</dd>
         </div>
       ))}
     </dl>
@@ -167,7 +166,7 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
           <Pencil size={13}/>
         </button>
       </div>
-      <p className={`text-[22px] leading-8 font-bold ${monthly === 0 ? 'text-textMuted' : 'text-white'}`}>{fmt(monthly)}</p>
+      <p className={`text-[22px] leading-8 font-bold ${monthly === 0 ? 'text-textMuted' : 'text-teal-400'}`}>{fmt(monthly)}</p>
       <p className="text-xs text-textMuted mt-1">
         {salary.amount === 0 ? 'Informe o salário no lápis para calcular a sobra'
           : salary.frequency === 'biweekly' ? `Quinzenal, dias ${salary.payDay} e ${salary.payDay + 15} · 2 × ${fmt(salary.amount)}` : 'Mensal'}
@@ -342,7 +341,7 @@ export function DashboardPage({
             <div className="p-5 md:p-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-10">
               <div>
                 <h2 id="month-title" className="text-sm text-textMuted">Sobra de {monthName}</h2>
-                <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${monthlySalary === 0 ? 'text-textMuted' : leftover < 0 ? 'text-red-400' : 'text-white'}`}>
+                <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${monthlySalary === 0 ? 'text-textMuted' : balanceTone(leftover)}`}>
                   {signed(leftover)}
                 </p>
                 <p className="text-sm text-textMuted mt-1">
@@ -352,8 +351,8 @@ export function DashboardPage({
               <div className="space-y-4 lg:pt-1">
                 {rulers.map(r => <PayRuler key={r.label} {...r} scale={rulerScale} />)}
                 <p className="text-xs text-textMuted flex items-center gap-x-4 gap-y-1 flex-wrap">
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--color-accent)' }}/>Comprometido com dívidas</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-white/[0.08]"/>Livre</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--color-debt)' }}/>Comprometido com dívidas</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--ruler-free)' }}/>Livre</span>
                   {rulers.some(r => r.owed > r.pay) && (
                     <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--color-red-500)' }}/>Além do salário</span>
                   )}
@@ -366,8 +365,8 @@ export function DashboardPage({
               </div>
               <button type="button" onClick={() => onNavigate('debts')} className="p-5 md:px-6 text-left hover:bg-white/[0.02] transition-colors">
                 <p className="text-sm text-textMuted">Dívidas do mês</p>
-                <p className="text-[22px] leading-8 font-bold text-white">{fmt(monthDebts)}</p>
-                <PaymentTypeBreakdown values={stats.monthDebtsByType} />
+                <p className="text-[22px] leading-8 font-bold text-debt">{fmt(monthDebts)}</p>
+                <PaymentTypeBreakdown values={stats.monthDebtsByType} tone="text-debt" />
               </button>
               <button type="button" onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }}
                 className="p-5 md:px-6 text-left hover:bg-white/[0.02] transition-colors">
@@ -382,7 +381,7 @@ export function DashboardPage({
           <section aria-label="Saldos" className={`panel rounded-2xl grid divide-y sm:divide-y-0 sm:divide-x divide-white/[0.07] ${hasInvestments ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
             <div className="px-5 md:px-6 py-4">
               <p className="text-sm text-textMuted">Saldo em contas</p>
-              <p className={`text-[22px] leading-8 font-bold ${stats.realBalance < 0 ? 'text-red-400' : stats.realBalance === 0 ? 'text-textMuted' : 'text-white'}`}>{signed(stats.realBalance)}</p>
+              <p className={`text-[22px] leading-8 font-bold ${balanceTone(stats.realBalance)}`}>{signed(stats.realBalance)}</p>
               <p className="text-xs text-textMuted">Contas correntes, sem investimentos</p>
             </div>
             {hasInvestments && (
@@ -394,7 +393,7 @@ export function DashboardPage({
             )}
             <button type="button" onClick={() => onNavigate('debts')} className="px-5 md:px-6 py-4 text-left hover:bg-white/[0.02] transition-colors">
               <p className="text-sm text-textMuted">Total em dívidas</p>
-              <p className={`text-[22px] leading-8 font-bold ${stats.totalOwed === 0 ? 'text-textMuted' : 'text-white'}`}>{fmt(stats.totalOwed)}</p>
+              <p className={`text-[22px] leading-8 font-bold ${stats.totalOwed === 0 ? 'text-textMuted' : 'text-debt'}`}>{fmt(stats.totalOwed)}</p>
               <p className="text-xs text-textMuted">Cartão, parcelas futuras e dívidas cadastradas</p>
             </button>
           </section>
@@ -424,12 +423,12 @@ export function DashboardPage({
                     <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6}/>
                     <RechartsTooltip {...tooltipStyle} formatter={(v) => [signed(Number(v)), 'Entradas − saídas']}/>
                     <Bar dataKey="balance" maxBarSize={chartPeriod === '30d' ? 14 : 36} isAnimationActive={false}>
-                      {flowData.map(d => <Cell key={d.name} fill={d.balance < 0 ? 'var(--chart-muted)' : 'var(--chart-ink)'}/>)}
+                      {flowData.map(d => <Cell key={d.name} fill={d.balance < 0 ? 'var(--color-red-500)' : 'var(--color-teal-500)'}/>)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <p className="text-xs text-textMuted mt-2">Barra para cima: entrou mais do que saiu. Transferências entre suas contas não contam.</p>
+              <p className="text-xs text-textMuted mt-2">Em verde, entrou mais do que saiu; em vermelho, saiu mais do que entrou. Transferências entre suas contas não contam.</p>
             </section>
 
             <section aria-labelledby="category-title" className="panel rounded-2xl p-5 md:p-6">
@@ -443,8 +442,8 @@ export function DashboardPage({
                       <PieChart>
                         <Pie data={stats.expenseByCategory} dataKey="amount" nameKey="name"
                           innerRadius="80%" outerRadius="100%" paddingAngle={1.5} stroke="none" isAnimationActive={false} startAngle={90} endAngle={-270}>
-                          {stats.expenseByCategory.map((e, i) => (
-                            <Cell key={e.name} fill="var(--color-accent)" fillOpacity={RING_OPACITY[i] ?? 0.12}/>
+                          {stats.expenseByCategory.map(e => (
+                            <Cell key={e.name} fill={categoryColor(e.name)}/>
                           ))}
                         </Pie>
                       </PieChart>
@@ -457,10 +456,10 @@ export function DashboardPage({
                   <table className="w-full text-[13px]">
                     <caption className="sr-only">Gastos por categoria</caption>
                     <tbody>
-                      {stats.expenseByCategory.map((c, i) => (
+                      {stats.expenseByCategory.map(c => (
                         <tr key={c.name}>
                           <td className="py-1 pr-2 w-3">
-                            <span className="block w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-accent)', opacity: RING_OPACITY[i] ?? 0.12 }}/>
+                            <span className="block w-2 h-2 rounded-full" style={categoryDot(c.name)}/>
                           </td>
                           <td className="py-1 pr-2 text-white truncate max-w-0 w-full">{c.name}</td>
                           <td className="py-1 pr-2 text-right text-white whitespace-nowrap">{fmt(c.amount)}</td>
@@ -494,7 +493,7 @@ export function DashboardPage({
                         <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6}/>
                         <RechartsTooltip {...tooltipStyle} formatter={(v) => [signed(Number(v)), 'Saldo ao fim do mês']}/>
                         <Bar dataKey="balance" maxBarSize={36} isAnimationActive={false}>
-                          {projection.map(p => <Cell key={p.month} fill={p.balance < 0 ? 'var(--color-red-500)' : 'var(--chart-ink)'}/>)}
+                          {projection.map(p => <Cell key={p.month} fill={p.balance < 0 ? 'var(--color-red-500)' : 'var(--color-teal-500)'}/>)}
                         </Bar>
                       </BarChart>
                     </ResponsiveContainer>
@@ -517,7 +516,7 @@ export function DashboardPage({
                     {[...budgetProgress].sort((a, b) => b.percentage - a.percentage).slice(0, 5).map(b => (
                       <li key={b.id}>
                         <div className="flex justify-between gap-3 text-sm mb-1.5">
-                          <span className="text-white truncate">{b.category}</span>
+                          <span className="text-white truncate flex items-center gap-2"><span className="inline-block w-2 h-2 rounded-full shrink-0" style={categoryDot(b.category)} aria-hidden="true"/>{b.category}</span>
                           <span className="whitespace-nowrap">
                             <span className={b.isOverLimit ? 'text-red-400 font-medium' : 'text-white'}>{fmt(b.spent)}</span>
                             <span className="text-textMuted"> de {fmt(b.limit)}</span>
@@ -525,7 +524,7 @@ export function DashboardPage({
                         </div>
                         <div className="h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
                           <div className="h-full rounded-full"
-                            style={{ width: `${Math.min(100, b.percentage)}%`, backgroundColor: b.isOverLimit ? 'var(--color-red-500)' : 'var(--chart-ink)' }} />
+                            style={{ width: `${Math.min(100, b.percentage)}%`, backgroundColor: b.isOverLimit ? 'var(--color-red-500)' : categoryColor(b.category) }} />
                         </div>
                       </li>
                     ))}

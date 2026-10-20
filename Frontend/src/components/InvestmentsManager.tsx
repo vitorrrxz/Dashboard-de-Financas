@@ -13,8 +13,10 @@ import { formatBRL } from '../utils/money';
 import { formatRelativeTime } from '../utils/dates';
 import { FormField } from './shared/FormField';
 
-/** Fatias da alocação (já ordenadas do maior para o menor): um só tom, do mais forte ao mais claro. */
-const SLICE_OPACITY = [1, 0.7, 0.5, 0.35, 0.22];
+/** Cor de cada tipo na barra de alocação — a mesma paleta das categorias. */
+const TYPE_COLORS: Record<InvestmentType, string> = {
+  fixed_income: '#14b8a6', stocks: '#3b82f6', funds: '#8b5cf6', crypto: '#f59e0b', other: '#94a3b8',
+};
 
 /** Ícone de cada tipo, no card da posição. */
 const TYPE_META: Record<InvestmentType, { icon: React.ReactNode }> = {
@@ -235,15 +237,15 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
           <h3 id="allocation-title" className="text-base font-medium text-white mb-3">Alocação por tipo</h3>
           {/* A barra é só visual; os números estão na lista logo abaixo. */}
           <div className="flex gap-0.5 h-2.5 rounded-full overflow-hidden mb-4" aria-hidden="true" style={{ backgroundColor: 'var(--fg-8)' }}>
-            {summary.allocation.map((slice, i) => (
-              <div key={slice.type} style={{ width: `${slice.share}%`, backgroundColor: 'var(--color-accent)', opacity: SLICE_OPACITY[i] ?? 0.2 }} />
+            {summary.allocation.map(slice => (
+              <div key={slice.type} style={{ width: `${slice.share}%`, backgroundColor: TYPE_COLORS[slice.type] }} />
             ))}
           </div>
           <ul className="space-y-2">
-            {summary.allocation.map((slice, i) => (
+            {summary.allocation.map(slice => (
               <li key={slice.type} className="flex items-center justify-between gap-3 text-sm">
                 <span className="flex items-center gap-2 min-w-0">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" aria-hidden="true" style={{ backgroundColor: 'var(--color-accent)', opacity: SLICE_OPACITY[i] ?? 0.2 }} />
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" aria-hidden="true" style={{ backgroundColor: TYPE_COLORS[slice.type] }} />
                   <span className="text-white truncate">{INVESTMENT_TYPE_LABELS[slice.type]}</span>
                   <span className="text-xs text-textMuted">({slice.count})</span>
                 </span>

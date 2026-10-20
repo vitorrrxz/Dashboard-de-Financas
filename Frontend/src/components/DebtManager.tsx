@@ -319,7 +319,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                   </div>
                   <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
                     <div className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, backgroundColor: paid ? 'var(--color-teal-500)' : 'var(--color-accent)' }} />
+                      style={{ width: `${pct}%`, backgroundColor: paid ? 'var(--color-teal-500)' : 'var(--color-debt)' }} />
                   </div>
                 </div>
 
@@ -327,11 +327,11 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                 <div className="grid grid-cols-3 gap-3 mb-1">
                   <div>
                     <p className="text-xs text-textMuted mb-0.5">Total</p>
-                    <p className="text-sm font-bold text-white">{formatBRL(remaining(debt))}</p>
+                    <p className="text-sm font-bold text-debt">{formatBRL(remaining(debt))}</p>
                   </div>
                   <div>
                     <p className="text-xs text-textMuted mb-0.5">{isGroup ? 'Subtotal' : 'Parcela'}</p>
-                    <p className="text-sm font-bold text-white">{formatBRL(debt.monthlyPayment)}</p>
+                    <p className="text-sm font-bold text-debt">{formatBRL(debt.monthlyPayment)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-textMuted mb-0.5">Vencimento</p>
@@ -377,7 +377,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                   </div>
                   <div className="mt-4 pt-3 border-t border-[var(--line)] flex justify-between items-center">
                     <span className="text-xs text-textMuted">Total da fatura importada</span>
-                    <span className="text-sm font-bold text-white">R$ {debt.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <span className="text-sm font-bold text-debt">R$ {debt.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               )}

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { X, Plus, Trash2, Edit2, Pause, Play } from 'lucide-react';
 import { formatBRL } from '../utils/money';
 import type { Account, RecurrenceFrequency, RecurringTransaction, Transaction } from '../types';
-import { CATEGORIES, EXPENSE_CATEGORIES } from '../utils/categories';
+import { CATEGORIES, EXPENSE_CATEGORIES, categoryDot } from '../utils/categories';
 import { todayISO } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
 import {
@@ -202,15 +202,15 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-textMuted">
-                  {rec.category}
+                <p className="text-xs text-textMuted flex items-center gap-1.5 flex-wrap">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={categoryDot(rec.category)} aria-hidden="true"/>{rec.category}
                   {account ? ` · ${account.name}` : ''}
                   {rec.active ? ` · próxima em ${formatDateBR(rec.nextOccurrence)}` : ''}
                 </p>
               </div>
 
               <div className="text-right shrink-0">
-                <p className={`text-base font-medium ${rec.amount >= 0 ? 'text-teal-400' : 'text-white'}`}>
+                <p className={`text-base font-medium ${rec.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
                   {rec.amount >= 0 ? '+' : '−'}{formatBRL(rec.amount)}
                 </p>
               </div>

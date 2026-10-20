@@ -3,7 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { formatBRL as fmt } from '../utils/money';
+import { balanceTone, formatBRL as fmt } from '../utils/money';
 import { niceTicks } from '../utils/chart';
 import type { Account, Debt, Investment, NetWorthSnapshot, Transaction } from '../types';
 import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth, monthLabel, type NetWorth } from '../utils/reports';
@@ -42,14 +42,14 @@ function investmentsDetail(netWorth: NetWorth): string | undefined {
 }
 
 /** Uma parte do patrimônio: rótulo, valor e se entra somando ou subtraindo. */
-function CompositionCell({ title, amount, negative, detail }: {
-  title: string; amount: number; negative?: boolean; detail?: string;
+function CompositionCell({ title, amount, negative, balance, detail }: {
+  title: string; amount: number; negative?: boolean; balance?: boolean; detail?: string;
 }) {
   return (
     <div className="px-5 py-4">
       <p className="text-sm text-textMuted">{title}</p>
-      <p className={`text-xl font-bold ${amount === 0 ? 'text-textMuted' : 'text-white'}`}>
-        {negative && amount !== 0 ? '−' : ''}{fmt(amount)}
+      <p className={`text-xl font-bold ${amount === 0 ? 'text-textMuted' : negative ? 'text-debt' : balance ? balanceTone(amount) : 'text-white'}`}>
+        {(negative && amount !== 0) || (balance && amount < 0) ? '−' : ''}{fmt(amount)}
       </p>
       {detail && <p className="text-xs text-textMuted mt-0.5">{detail}</p>}
     </div>
@@ -84,7 +84,7 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
         <div className="panel rounded-2xl">
           <div className="p-5 md:p-6">
             <h3 className="text-sm text-textMuted">Patrimônio líquido</h3>
-            <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${netWorth.total >= 0 ? 'text-white' : 'text-red-400'}`}>
+            <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${balanceTone(netWorth.total)}`}>
               {netWorth.total < 0 ? '−' : ''}{fmt(netWorth.total)}
             </p>
             <p className="text-sm text-textMuted mt-1">
@@ -92,7 +92,7 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
             </p>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/[0.07] border-t border-white/[0.07] rounded-b-2xl overflow-hidden [&>*]:bg-card">
-            <CompositionCell title="Saldo em contas" amount={netWorth.liquid} />
+            <CompositionCell title="Saldo em contas" amount={netWorth.liquid} balance />
             <CompositionCell title="Investimentos" amount={netWorth.investments} detail={investmentsDetail(netWorth)} />
             <CompositionCell title="Faturas em aberto" amount={netWorth.pendingBills} negative />
             <CompositionCell title="Dívidas em aberto" amount={netWorth.debts} negative />
@@ -137,12 +137,12 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
                 {[...netWorthChart].reverse().map(snapshot => (
                   <tr key={snapshot.month} className="hover:bg-white/[0.02] transition-colors">
                     <td className="py-3 text-white">{snapshot.label}</td>
-                    <td className={`py-3 text-right ${snapshot.liquid < 0 ? 'text-red-400' : 'text-white'}`}>
+                    <td className={`py-3 text-right ${balanceTone(snapshot.liquid)}`}>
                       {snapshot.liquid < 0 ? '−' : ''}{fmt(snapshot.liquid)}
                     </td>
                     <td className="py-3 text-right text-white">{fmt(snapshot.investments)}</td>
-                    <td className="py-3 text-right text-white">{snapshot.liabilities > 0 ? `−${fmt(snapshot.liabilities)}` : fmt(0)}</td>
-                    <td className={`py-3 text-right font-medium ${snapshot.total >= 0 ? 'text-white' : 'text-red-400'}`}>
+                    <td className={`py-3 text-right ${snapshot.liabilities > 0 ? "text-debt" : "text-white"}`}>{snapshot.liabilities > 0 ? `−${fmt(snapshot.liabilities)}` : fmt(0)}</td>
+                    <td className={`py-3 text-right font-medium ${balanceTone(snapshot.total)}`}>
                       {snapshot.total < 0 ? '−' : ''}{fmt(snapshot.total)}
                     </td>
                   </tr>
@@ -160,7 +160,7 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
           <div className="flex items-center gap-4">
             <span className="hidden sm:flex items-center gap-3 text-xs text-textMuted">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--chart-ink)' }} />Receitas</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--chart-muted)' }} />Despesas</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--color-red-500)' }} />Despesas</span>
             </span>
             <div role="group" aria-label="Período" className="flex p-0.5 rounded-md bg-white/[0.06]">
               {([['monthly', 'Mês a mês'], ['yearly', 'Ano a ano']] as const).map(([value, label]) => (
@@ -188,7 +188,7 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
                     ticks={comparisonTicks} domain={[0, comparisonTicks[comparisonTicks.length - 1]]} interval={0} />
                   <RechartsTooltip {...tooltipStyle} formatter={(v, name) => [fmt(Number(v)), name]} />
                   <Bar dataKey="income" name="Receitas" fill="var(--chart-ink)" maxBarSize={24} isAnimationActive={false} />
-                  <Bar dataKey="expense" name="Despesas" fill="var(--chart-muted)" maxBarSize={24} isAnimationActive={false} />
+                  <Bar dataKey="expense" name="Despesas" fill="var(--color-red-500)" maxBarSize={24} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -211,7 +211,7 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
                       <td className="py-3 text-white">{row.label}</td>
                       <td className="py-3 text-right text-white">{fmt(row.income)}</td>
                       <td className="py-3 text-right text-white">{fmt(row.expense)}</td>
-                      <td className={`py-3 text-right font-medium ${row.balance >= 0 ? 'text-white' : 'text-red-400'}`}>
+                      <td className={`py-3 text-right font-medium ${balanceTone(row.balance)}`}>
                         {row.balance < 0 ? '−' : ''}{fmt(row.balance)}
                       </td>
                     </tr>

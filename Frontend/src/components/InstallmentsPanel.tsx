@@ -79,9 +79,9 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill, vie
       <div className="panel rounded-2xl p-4 flex flex-wrap items-end justify-between gap-4">
         <MonthNavigator id="debt-month" value={month} months={months} onChange={setMonth}/>
         <div className="flex flex-wrap items-end gap-6">
-          <MonthTotal label={showBill ? 'Fatura do cartão' : 'Parcelas do cartão'} value={card} color="var(--color-textMain)"/>
-          <MonthTotal label="Dívidas" value={totals.debt} color="var(--color-textMain)"/>
-          <MonthTotal label="Valor total" value={Math.round((card + totals.debt) * 100) / 100} color="var(--color-textMain)"/>
+          <MonthTotal label={showBill ? 'Fatura do cartão' : 'Parcelas do cartão'} value={card} color="var(--color-debt)"/>
+          <MonthTotal label="Dívidas" value={totals.debt} color="var(--color-debt)"/>
+          <MonthTotal label="Valor total" value={Math.round((card + totals.debt) * 100) / 100} color="var(--color-debt)"/>
         </div>
       </div>
 
@@ -150,7 +150,7 @@ function DueRow({ item, today }: { item: DueItem; today: string }) {
         )}
       </td>
       <td className="py-3"><span className={`text-xs font-medium ${status.className}`}>{status.label}</span></td>
-      <td className="py-3 text-right font-medium text-white whitespace-nowrap">{formatBRL(item.amount)}</td>
+      <td className="py-3 text-right font-medium text-debt whitespace-nowrap">{formatBRL(item.amount)}</td>
     </tr>
   );
 }
@@ -160,7 +160,7 @@ function InfoCell({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <p className="text-xs text-textMuted mb-0.5">{label}</p>
-      <p className="text-sm font-bold text-white">{value}</p>
+      <p className="text-sm font-bold text-debt">{value}</p>
     </div>
   );
 }
@@ -171,7 +171,7 @@ function PurchaseCard({ purchase: p, accountName }: { purchase: InstallmentPurch
   const pct = p.totalInstallments > 0 ? (p.chargedInstallments / p.totalInstallments) * 100 : 0;
   const estimatedCount = p.installments.filter(i => i.estimated).length;
   const lastDate = p.installments[p.installments.length - 1].date;
-  const barColor = done ? 'var(--color-teal-500)' : 'var(--color-accent)';
+  const barColor = done ? 'var(--color-teal-500)' : 'var(--color-debt)';
 
   return (
     <div className="panel rounded-xl p-5">

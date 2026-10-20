@@ -2,7 +2,7 @@ import { useState, useId } from 'react';
 import { Edit2, Trash2, X } from 'lucide-react';
 import { BASE_CURRENCY, currencyOf, currencySymbol, formatMoney } from '../utils/currency';
 import { formatDateBR } from '../utils/dates';
-import { CATEGORIES } from '../utils/categories';
+import { CATEGORIES, categoryDot } from '../utils/categories';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from '../utils/paymentTypes';
 import type { Account, PaymentType, Transaction } from '../types';
 
@@ -86,11 +86,13 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
                 <td className="py-3 pr-3 text-white">
                   {t.name}
                   {/* No celular, data, categoria e tipo descem para uma segunda linha em vez de sumir. */}
-                  <span className="block sm:hidden text-xs text-textMuted mt-0.5">{formatDateBR(t.date)} · {t.category} · {pt.label}</span>
+                  <span className="flex sm:hidden items-center gap-1.5 text-xs text-textMuted mt-0.5">{formatDateBR(t.date)} · <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={categoryDot(t.category)} aria-hidden="true"/>{t.category} · {pt.label}</span>
                 </td>
-                <td className="py-3 pr-3 text-white hidden sm:table-cell">{t.category}</td>
+                <td className="py-3 pr-3 text-white hidden sm:table-cell">
+                  <span className="inline-flex items-center gap-2"><span className="inline-block w-2 h-2 rounded-full shrink-0" style={categoryDot(t.category)} aria-hidden="true"/>{t.category}</span>
+                </td>
                 <td className="py-3 pr-3 text-textMuted hidden md:table-cell">{pt.label}</td>
-                <td className={`py-3 text-right font-medium whitespace-nowrap ${t.amount > 0 ? 'text-teal-400' : 'text-white'}`}>
+                <td className={`py-3 text-right font-medium whitespace-nowrap ${t.amount > 0 ? 'text-teal-400' : t.amount < 0 ? 'text-red-400' : 'text-white'}`}>
                   {formatTxAmount(t)}
                 </td>
                 <td className="py-3 pl-2">

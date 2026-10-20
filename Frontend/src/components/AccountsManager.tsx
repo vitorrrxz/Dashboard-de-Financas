@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { X, Plus, Trash2, Edit2, ChevronRight, CreditCard, Landmark, PiggyBank, TrendingUp, Wallet, AlertCircle } from 'lucide-react';
 import type { Account, AccountType } from '../types';
 import { FormField } from './shared/FormField';
-import { formatBRL } from '../utils/money';
+import { balanceTone, formatBRL } from '../utils/money';
 import { groupByBank } from '../utils/accountGroups';
 import {
   BASE_CURRENCY, accountsInBase, currencyLabel, currencyOf, currencyOptions, currencySymbol,
@@ -136,14 +136,14 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
                 <span>Limite: {formatMoney(acc.limit, currency)}</span>
               </div>
               <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
-                <div className="h-full rounded-full transition-all" style={{ backgroundColor: 'var(--chart-ink)',
+                <div className="h-full rounded-full transition-all" style={{ backgroundColor: 'var(--color-debt)',
                   width: `${Math.min(100, ((acc.pendingBill ?? 0) / acc.limit) * 100)}%` }} />
               </div>
             </div>
           )}
         </div>
         <div className="text-right shrink-0">
-          <p className={`text-base font-bold ${acc.type !== 'credit' && acc.balance < 0 ? 'text-red-400' : 'text-white'}`}>
+          <p className={`text-base font-bold ${acc.type === 'credit' ? ((acc.pendingBill ?? 0) > 0 ? 'text-debt' : 'text-textMuted') : balanceTone(acc.balance)}`}>
             {acc.type === 'credit' ? '−' : ''}{formatMoney(acc.type === 'credit' ? (acc.pendingBill ?? 0) : acc.balance, currency)}
           </p>
           {acc.type === 'credit' && (acc.closingDay || acc.dueDay) && (
@@ -177,14 +177,14 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
       <div className="panel rounded-2xl grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/[0.07] mb-6">
         <div className="p-5">
           <p className="text-sm text-textMuted mb-1">Saldo em contas</p>
-          <p className={`text-2xl font-bold ${totalBalance >= 0 ? 'text-white' : 'text-red-400'}`}>
-            {formatBRL(totalBalance)}
+          <p className={`text-2xl font-bold ${balanceTone(totalBalance)}`}>
+            {totalBalance < 0 ? '−' : ''}{formatBRL(totalBalance)}
           </p>
           <p className="text-xs text-textMuted mt-1">{accounts.filter(a => a.type !== 'credit').length} conta(s)</p>
         </div>
         <div className="p-5">
           <p className="text-sm text-textMuted mb-1">Faturas em aberto</p>
-          <p className="text-2xl font-bold text-white">
+          <p className="text-2xl font-bold text-debt">
             {formatBRL(totalCredit)}
           </p>
           <p className="text-xs text-textMuted mt-1">{accounts.filter(a => a.type === 'credit').length} cartão(ões)</p>
@@ -216,7 +216,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
               </h3>
               {/* Com uma conta só, o total repetiria o valor do card. */}
               {group.accounts.length > 1 && (
-                <span className={`text-sm font-medium ${net < 0 ? 'text-red-400' : 'text-white'}`}>
+                <span className={`text-sm font-medium ${balanceTone(net)}`}>
                   {net < 0 ? '−' : ''}{formatBRL(Math.abs(net))}
                 </span>
               )}

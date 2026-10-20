@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { X, Plus, Trash2, Edit2 } from 'lucide-react';
 import type { Budget } from '../types';
 import type { BudgetProgress } from '../utils/budget';
-import { EXPENSE_CATEGORIES } from '../utils/categories';
+import { EXPENSE_CATEGORIES, categoryColor, categoryDot } from '../utils/categories';
 import { FormField } from './shared/FormField';
 import { formatBRL } from '../utils/money';
 
@@ -100,7 +100,7 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
           <div key={b.id} className="panel rounded-xl p-4">
             <div className="flex items-center gap-4">
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{b.category}</p>
+                <p className="text-sm font-medium text-white truncate flex items-center gap-2"><span className="inline-block w-2 h-2 rounded-full shrink-0" style={categoryDot(b.category)} aria-hidden="true"/>{b.category}</p>
                 <p className="text-xs text-textMuted">
                   {formatBRL(b.spent)} de {formatBRL(b.limit)}{b.isOverLimit && <span className="text-red-400"> · {formatBRL(b.spent - b.limit)} acima</span>}
                 </p>
@@ -119,7 +119,7 @@ export function BudgetManager({ budgetProgress, onAdd, onUpdate, onDelete, exist
             </div>
             <div className="h-1.5 rounded-full overflow-hidden mt-3" style={{ backgroundColor: 'var(--fg-8)' }}>
               <div className="h-full rounded-full transition-all"
-                style={{ width: `${Math.min(100, b.percentage)}%`, backgroundColor: b.isOverLimit ? 'var(--color-red-500)' : 'var(--chart-ink)' }} />
+                style={{ width: `${Math.min(100, b.percentage)}%`, backgroundColor: b.isOverLimit ? 'var(--color-red-500)' : categoryColor(b.category) }} />
             </div>
           </div>
         ))}

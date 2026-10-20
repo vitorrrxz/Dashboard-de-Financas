@@ -30,3 +30,8 @@ export function toReais(cents: number): number {
 export function formatBRL(value: number): string {
   return `R$ ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
+
+/** Cor de um saldo: verde se positivo, vermelho se negativo, cinza se zero. */
+export function balanceTone(value: number): string {
+  return value > 0 ? 'text-teal-400' : value < 0 ? 'text-red-400' : 'text-textMuted';
+}

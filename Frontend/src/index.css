@@ -23,6 +23,8 @@
   --color-primary: #141414;
   --color-secondary: #141414;
   --color-accent: #1d5fbf;
+  /* Tudo o que é dívida: faturas, parcelas, dívidas cadastradas, o comprometido do salário. */
+  --color-debt: #c2410c;
   --color-textMain: #0a0a0a;
   --color-textMuted: #5f6368;
   --color-white: #0a0a0a;
@@ -62,6 +64,8 @@
   --on-primary: #ffffff;
   --line: #e6e6e6;
   --control: #d4d4d4;
+  /* Régua do salário no Dashboard: a parte livre, em verde (a comprometida usa --color-debt). */
+  --ruler-free: #3fa564;
   --rule: #f0f0f0;
 
   /* Véus da cor de contraste para estilos inline. */
@@ -98,6 +102,7 @@
   --color-primary: #f2f2f2;
   --color-secondary: #f2f2f2;
   --color-accent: #6ea2ef;
+  --color-debt: #fb923c;
   --color-textMain: #ffffff;
   --color-textMuted: #a3a3a3;
   --color-white: #ffffff;
@@ -127,6 +132,7 @@
   --on-primary: #0a0a0a;
   --line: #262626;
   --control: #3d3d3d;
+  --ruler-free: #3fc07a;
   --rule: #1a1a1a;
 
   --text-positive: #3fc07a;

@@ -82,9 +82,9 @@ export function TransactionsPage({
 
         <div className="flex flex-wrap items-end gap-6">
           <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-textMain)"/>
-          <MonthTotal label="Despesas" value={monthTotals.expense} color="var(--color-textMain)"/>
+          <MonthTotal label="Despesas" value={monthTotals.expense} color="var(--text-negative)"/>
           <MonthTotal label="Valor total" value={monthTotals.balance} signed
-            color={monthTotals.balance >= 0 ? 'var(--color-textMain)' : 'var(--text-negative)'}/>
+            color={monthTotals.balance > 0 ? 'var(--text-positive)' : monthTotals.balance < 0 ? 'var(--text-negative)' : 'var(--color-textMuted)'}/>
         </div>
       </div>
 

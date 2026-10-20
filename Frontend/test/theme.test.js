@@ -61,7 +61,7 @@ describe('tokens de cor dos temas (FIN-083)', () => {
     for (const [theme, tokens] of [['claro', light], ['escuro', dark]]) {
       const texts = Object.keys(tokens).filter(name => /^--color-(red|teal|amber|pink|orange|blue|indigo|emerald|green)-\d+$/.test(name) || name.startsWith('--text-'));
       expect(texts.length).toBeGreaterThan(10);
-      for (const name of [...texts, '--color-textMain', '--color-textMuted', '--color-primary', '--color-accent', '--color-white', '--chart-axis']) {
+      for (const name of [...texts, '--color-textMain', '--color-textMuted', '--color-primary', '--color-accent', '--color-debt', '--color-white', '--chart-axis']) {
         for (const surface of ['--color-background', '--color-card']) {
           expect(contrast(rgb(tokens, name), rgb(tokens, surface)), `${theme}: ${name} sobre ${surface}`).toBeGreaterThanOrEqual(4.5);
         }
