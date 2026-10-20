@@ -147,4 +147,10 @@ export type SalaryFrequency = 'monthly' | 'biweekly';
 export interface Salary {
   amount: number;
   frequency: SalaryFrequency;
+  /** Quinzenal: dia do 1º pagamento (1 a 15); o 2º é 15 dias depois. */
+  payDay: number;
+  /** Bônus de um mês só (`bonusMonth`, YYYY-MM), somado à quinzena `bonusHalf`. Em reais. */
+  bonus: number;
+  bonusHalf: 1 | 2;
+  bonusMonth: string | null;
 }

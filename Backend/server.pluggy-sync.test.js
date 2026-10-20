@@ -174,4 +174,25 @@ describe('sincronização automática com a Pluggy (FIN-107)', () => {
     expect(res.body.items).toEqual([expect.objectContaining({ providerName: 'Itaú' })]);
     expect((await request(app).get('/api/accounts').set(auth(tokenA))).body).toEqual([expect.objectContaining({ bank: 'Itaú' })]);
   });
+
+  it('conta e cartão da mesma conexão ficam com o mesmo banco; nome digitado pelo usuário fica', async () => {
+    await addItem(null, { providerName: 'MeuPluggy' });
+    pluggy.fetchItem.mockResolvedValue({ ...ITEM, connector: { name: 'MeuPluggy' } });
+    const NU_BANK = { ...ACCOUNT, id: 'nu-cc', marketingName: 'Nu Pagamentos S.A. - Instituição de Pagamento (Conta Pré-paga)', bankData: { transferNumber: '260/0001/1-2' } };
+    const NU_CARD = { ...ACCOUNT, id: 'nu-card', type: 'CREDIT', subtype: 'CREDIT_CARD', name: 'platinum', marketingName: null };
+    pluggy.fetchAccounts.mockResolvedValue({ results: [NU_BANK, NU_CARD] });
+    pluggy.fetchCreditCardBills = vi.fn().mockResolvedValue({ results: [] });
+    // Conta de antes desta regra, com o nome comercial como banco — e uma que o usuário renomeou.
+    await prisma.account.create({ data: { userId: userA, pluggyId: 'nu-cc', name: 'x', bank: NU_BANK.marketingName, type: 'checking', balance: 0, color: '#fff' } });
+    await prisma.account.create({ data: { userId: userA, pluggyId: 'nu-card', name: 'x', bank: 'Meu Roxinho', type: 'credit', balance: 0, color: '#fff' } });
+
+    await autoSync(tokenA);
+    const banks = Object.fromEntries((await prisma.account.findMany()).map(a => [a.pluggyId, a.bank]));
+    expect(banks).toEqual({ 'nu-cc': 'Nubank', 'nu-card': 'Meu Roxinho' });
+
+    await prisma.account.deleteMany();
+    await prisma.pluggyItem.update({ where: { userId_pluggyId: { userId: userA, pluggyId: 'item-1' } }, data: { lastSyncAt: null } });
+    await autoSync(tokenA);
+    expect((await prisma.account.findMany()).map(a => a.bank)).toEqual(['Nubank', 'Nubank']);
+  });
 });

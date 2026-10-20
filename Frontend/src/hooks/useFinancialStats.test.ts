@@ -166,7 +166,7 @@ describe('computeFinancialStats — tudo o que se deve é dívida', () => {
     const debts = [debt({ totalAmount: 1000, paidAmount: 200, monthlyPayment: 100, totalInstallments: 10 })];
     const s = computeFinancialStats(txs, [card, acc({ id: 'chk' })], debts, null);
     expect(s.monthCardExpense).toBe(150);
-    expect(s.monthCashExpense).toBe(30);
+    expect(s.monthExpense).toBe(180); // total gasto no mês: cartão + PIX
     // 800 cadastradas + 500 de fatura + 2 parcelas futuras de 100.
     expect(s.totalOwed).toBe(1500);
   });
@@ -190,5 +190,22 @@ describe('billPeriod — ciclo da fatura que vence no mês', () => {
       tx({ accountId: 'card', paymentType: 'credit', amount: -40, date: advanceDays(end, 1) }),
     ];
     expect(computeFinancialStats(txs, [card], [], null).monthCardExpense).toBe(100);
+  });
+});
+
+describe('computeFinancialStats — saídas por dia (sobra quinzenal)', () => {
+  it('somam o mesmo que as dívidas do mês (cartão + parcelas), sem as despesas; cartão cai no vencimento', () => {
+    const today = todayISO();
+    const card = acc({ id: 'card', type: 'credit', dueDay: 10 });
+    const txs = [
+      tx({ accountId: 'card', paymentType: 'credit', amount: -100, date: today }),
+      tx({ accountId: 'chk', paymentType: 'pix', amount: -30, date: today }),
+    ];
+    const debts = [debt({ monthlyPayment: 50, totalInstallments: 2, nextDueDate: `${today.slice(0, 7)}-25` })];
+    const s = computeFinancialStats(txs, [card, acc({ id: 'chk' })], debts, null);
+    const total = s.monthOutflows.reduce((sum, o) => sum + o.amount, 0);
+    expect(total).toBe(s.monthCardExpense + s.monthDebtPayments);
+    expect(s.monthOutflows).toContainEqual({ day: 10, amount: 100 });
+    expect(s.monthOutflows).toContainEqual({ day: 25, amount: 50 });
   });
 });

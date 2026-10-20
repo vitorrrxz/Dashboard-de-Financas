@@ -83,3 +83,22 @@ describe('AccountsManager — moedas (FIN-076)', () => {
     expect(onUpdate.mock.calls[0][1]).not.toHaveProperty('currency');
   });
 });
+
+describe('AccountsManager — conta e cartão do mesmo banco', () => {
+  it('o cartão fica escondido atrás da seta da conta e aparece ao clicar', () => {
+    const card: Account = { id: 'card', name: 'Itaú Click', bank: 'Itaú', type: 'credit', balance: 0, pendingBill: 335.34, color: '#6366f1' };
+    renderManager({ accounts: [itau, card] });
+    const toggle = screen.getByRole('button', { name: 'Mostrar 1 cartão(ões)' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Itaú Click')).not.toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText('Itaú Click')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Esconder 1 cartão(ões)' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('banco com uma conta só não tem seta', () => {
+    renderManager();
+    expect(screen.queryByRole('button', { name: /cartão\(ões\)/ })).not.toBeInTheDocument();
+  });
+});

@@ -115,7 +115,14 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
   };
 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
-    setForm(f => ({ ...f, [k]: v }));
+    setForm(f => {
+      const next = { ...f, [k]: v };
+      // Total ou nº de parcelas mudou → sugere parcela = total / n (ainda editável à mão).
+      if ((k === 'totalAmount' || k === 'totalInstallments') && next.totalAmount > 0 && next.totalInstallments > 0) {
+        next.monthlyPayment = Math.round((next.totalAmount / next.totalInstallments) * 100) / 100;
+      }
+      return next;
+    });
 
   const remaining = (d: Debt) => Math.max(0, d.totalAmount - d.paidAmount);
   const progress = (d: Debt) => d.totalInstallments > 0 ? (d.paidInstallments / d.totalInstallments) * 100 : 0;

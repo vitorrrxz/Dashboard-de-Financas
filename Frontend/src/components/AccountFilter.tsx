@@ -2,22 +2,17 @@ import type { Account } from '../types';
 import { groupByBank } from '../utils/accountGroups';
 
 /**
- * Opções do filtro de conta, agrupadas por banco. Banco com mais de uma conta (conta corrente e
- * cartão) ganha a opção de ver tudo dele junto.
+ * Opções do filtro: um item por banco, que já reúne a conta corrente e o cartão dele. Com um banco
+ * só, ele é a única opção (e equivale a "todos").
  */
 export function AccountOptions({ accounts }: { accounts: Account[] }) {
+  const groups = groupByBank(accounts);
+  if (groups.length === 1) return <option value="" className="bg-dashboard">{groups[0].bank}</option>;
   return (
     <>
-      <option value="" className="bg-dashboard">Todas as contas</option>
-      {groupByBank(accounts).map(group => (
-        <optgroup key={group.key} label={group.bank} className="bg-dashboard">
-          {group.accounts.length > 1 && (
-            <option value={group.value} className="bg-dashboard">{group.bank} — tudo</option>
-          )}
-          {group.accounts.map(a => (
-            <option key={a.id} value={a.id} className="bg-dashboard">{a.name}</option>
-          ))}
-        </optgroup>
+      <option value="" className="bg-dashboard">Todos os bancos</option>
+      {groups.map(group => (
+        <option key={group.key} value={group.value} className="bg-dashboard">{group.bank}</option>
       ))}
     </>
   );
@@ -26,7 +21,7 @@ export function AccountOptions({ accounts }: { accounts: Account[] }) {
 interface AccountFilterProps {
   id: string;
   accounts: Account[];
-  /** `null` = todas as contas; id de conta ou banco inteiro (ver `accountIdsOf`). */
+  /** `null` = todos os bancos; senão, o banco escolhido (ver `accountIdsOf`). */
   value: string | null;
   onChange: (selection: string | null) => void;
 }

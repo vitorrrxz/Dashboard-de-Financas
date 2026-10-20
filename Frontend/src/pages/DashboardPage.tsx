@@ -16,25 +16,30 @@ import type { FinancialStats } from '../hooks/useFinancialStats';
 import type { Account, Debt, RecurringTransaction, Salary, SalaryFrequency } from '../types';
 import type { Tab } from '../App';
 import { AccountOptions } from '../components/AccountFilter';
+import { activeBonus, biweeklyLeftovers, salaryPerMonth } from '../utils/salary';
+import { todayISO } from '../utils/debts';
+import { daysInMonth } from '../utils/dates';
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 }
 
-/** Total recebido no mês: quinzenal são dois pagamentos. */
-function salaryPerMonth(salary: Salary) {
-  return salary.amount * (salary.frequency === 'biweekly' ? 2 : 1);
-}
-
-function SalaryCard({ salary, monthly, onSave }: { salary: Salary; monthly: number; onSave: (s: Salary) => Promise<void> }) {
+/** `month` (YYYY-MM) é o mês corrente: o bônus lançado vale só para ele. `bonus` é o bônus ativo nele. */
+function SalaryCard({ salary, monthly, month, bonus, onSave }: { salary: Salary; monthly: number; month: string; bonus: number; onSave: (s: Salary) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState('');
   const [frequency, setFrequency] = useState<SalaryFrequency>('monthly');
+  const [payDay, setPayDay] = useState(15);
+  const [bonusInput, setBonusInput] = useState('');
+  const [bonusHalf, setBonusHalf] = useState<1 | 2>(1);
   const [saving, setSaving] = useState(false);
 
   const startEdit = () => {
     setAmount(salary.amount ? String(salary.amount) : '');
     setFrequency(salary.frequency);
+    setPayDay(salary.payDay);
+    setBonusInput(bonus ? String(bonus) : '');
+    setBonusHalf(salary.bonusHalf);
     setEditing(true);
   };
 
@@ -42,7 +47,8 @@ function SalaryCard({ salary, monthly, onSave }: { salary: Salary; monthly: numb
     e.preventDefault();
     setSaving(true);
     try {
-      await onSave({ amount: Number(amount) || 0, frequency });
+      const bonusValue = Number(bonusInput) || 0;
+      await onSave({ amount: Number(amount) || 0, frequency, payDay, bonus: bonusValue, bonusHalf, bonusMonth: bonusValue > 0 ? month : null });
       setEditing(false);
     } catch {
       // onSave já avisou o usuário; o formulário continua aberto para corrigir.
@@ -64,6 +70,28 @@ function SalaryCard({ salary, monthly, onSave }: { salary: Salary; monthly: numb
           <option value="monthly" className="bg-dashboard">Mensal</option>
           <option value="biweekly" className="bg-dashboard">Quinzenal</option>
         </select>
+        {frequency === 'biweekly' && (
+          <>
+            <label htmlFor="salary-pay-day" className="text-sm font-medium text-textMuted">Dias de pagamento</label>
+            <select id="salary-pay-day" value={payDay} onChange={e => setPayDay(Number(e.target.value))} className="input-field">
+              {Array.from({ length: 15 }, (_, i) => i + 1).map(d => (
+                <option key={d} value={d} className="bg-dashboard">Dias {d} e {d + 15}</option>
+              ))}
+            </select>
+          </>
+        )}
+        <label htmlFor="salary-bonus" className="text-sm font-medium text-textMuted">Bônus deste mês (opcional)</label>
+        <input id="salary-bonus" type="number" min="0" step="0.01" inputMode="decimal" placeholder="0,00"
+          value={bonusInput} onChange={e => setBonusInput(e.target.value)} className="input-field" />
+        {frequency === 'biweekly' && Number(bonusInput) > 0 && (
+          <>
+            <label htmlFor="salary-bonus-half" className="text-sm font-medium text-textMuted">Bônus entra na quinzena</label>
+            <select id="salary-bonus-half" value={bonusHalf} onChange={e => setBonusHalf(e.target.value === '2' ? 2 : 1)} className="input-field">
+              <option value={1} className="bg-dashboard">Do dia {payDay}</option>
+              <option value={2} className="bg-dashboard">Do dia {payDay + 15}</option>
+            </select>
+          </>
+        )}
         <div className="flex gap-2">
           <button type="submit" disabled={saving} className="flex-1 px-3 py-2 rounded-xl bg-primary text-on-accent text-sm font-semibold disabled:opacity-60">Salvar</button>
           <button type="button" onClick={() => setEditing(false)} className="px-3 py-2 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5">Cancelar</button>
@@ -87,13 +115,18 @@ function SalaryCard({ salary, monthly, onSave }: { salary: Salary; monthly: numb
       <h3 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-gain)' }}>{fmt(monthly)}</h3>
       <p className="text-xs text-textMuted mt-1">
         {salary.amount === 0 ? 'Clique no lápis para informar'
-          : salary.frequency === 'biweekly' ? `Quinzenal · 2× ${fmt(salary.amount)}` : 'Mensal'}
+          : salary.frequency === 'biweekly' ? `Quinzenal · dias ${salary.payDay} e ${salary.payDay + 15} · 2× ${fmt(salary.amount)}` : 'Mensal'}
       </p>
+      {bonus > 0 && (
+        <p className="text-xs mt-0.5" style={{ color: 'var(--text-gain)' }}>
+          + bônus {fmt(bonus)}{salary.frequency === 'biweekly' ? ` no dia ${salary.bonusHalf === 1 ? salary.payDay : salary.payDay + 15}` : ''}
+        </p>
+      )}
     </div>
   );
 }
 
-function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { title: string; amount: string; icon: React.ReactNode; badge?: string; isPositive: boolean; onClick?: () => void }) {
+function SummaryCard({ title, amount, icon, badge, isPositive, onClick, children }: { title: string; amount: string; icon: React.ReactNode; badge?: string; isPositive: boolean; onClick?: () => void; children?: React.ReactNode }) {
   return (
     <div onClick={onClick} className={`glass-card rounded-2xl p-6 transition-all ${onClick ? 'cursor-pointer hover:bg-white/5 hover:-translate-y-1' : ''}`}>
       <div className="flex justify-between items-start mb-4">
@@ -106,6 +139,7 @@ function SummaryCard({ title, amount, icon, badge, isPositive, onClick }: { titl
       <h3 className="text-2xl font-bold tracking-tight" style={{ color: isPositive ? 'var(--text-gain)' : 'var(--text-negative)' }}>
         {!isPositive && amount !== 'R$ 0,00' ? '-' : ''}{amount}
       </h3>
+      {children}
     </div>
   );
 }
@@ -144,10 +178,18 @@ export function DashboardPage({
   investmentHoldings, debts, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
   recurring, projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary,
 }: DashboardPageProps) {
-  const monthlySalary = salaryPerMonth(salary);
+  const month = todayISO().slice(0, 7);
+  const bonus = activeBonus(salary, month);
+  const monthlySalary = salaryPerMonth(salary) + bonus;
   // Tudo o que se deve no mês é dívida: compras no cartão (à vista e parcelas) + parcelas cadastradas.
   const monthDebts = stats.monthCardExpense + stats.monthDebtPayments;
-  const leftover = monthlySalary - stats.monthCashExpense - monthDebts;
+  // Sobra = salário − dívidas do mês. As despesas do mês são só informativas (o total gasto).
+  const leftover = monthlySalary - monthDebts;
+  // Quinzenal: a sobra de cada pagamento, com as dívidas que vencem até o pagamento seguinte.
+  const now = new Date();
+  const halves = salary.frequency === 'biweekly'
+    ? biweeklyLeftovers(salary, stats.monthOutflows, daysInMonth(now.getFullYear(), now.getMonth() + 1), bonus)
+    : null;
   return (
     <>
       <div className="mb-8 flex justify-between items-center">
@@ -202,16 +244,29 @@ export function DashboardPage({
 
       {/* Resumo do mês: salário − despesas fora do cartão − dívidas do mês = quanto sobra. */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
-        <SalaryCard salary={salary} monthly={monthlySalary} onSave={onSaveSalary} />
-        <SummaryCard title="Despesas do Mês" amount={fmt(stats.monthCashExpense)} isPositive={false}
-          icon={<ArrowDownRight size={22} className="text-red-400"/>} badge="Fora do cartão"
+        <SalaryCard salary={salary} monthly={monthlySalary} month={month} bonus={bonus} onSave={onSaveSalary} />
+        <SummaryCard title="Despesas do Mês" amount={fmt(stats.monthExpense)} isPositive={false}
+          icon={<ArrowDownRight size={22} className="text-red-400"/>} badge="Total gasto"
           onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }} />
         <SummaryCard title="Dívidas do Mês" amount={fmt(monthDebts)} isPositive={false}
           icon={<CreditCard size={22} className="text-amber-400"/>} badge="Fatura + parcelas"
           onClick={() => onNavigate('debts')} />
         <SummaryCard title="Sobra do Mês" amount={fmt(leftover)} isPositive={leftover >= 0}
           icon={<PiggyBank size={22} className={leftover >= 0 ? 'text-emerald-400' : 'text-red-400'}/>}
-          badge={leftover >= 0 ? 'Disponível' : 'No vermelho'} />
+          badge={leftover >= 0 ? 'Disponível' : 'No vermelho'}>
+          {halves && (
+            <ul className="mt-2 space-y-0.5 text-xs">
+              {halves.map(h => (
+                <li key={h.day} className="flex justify-between gap-2">
+                  <span className="text-textMuted">Dia {h.day}</span>
+                  <span className="font-semibold" style={{ color: h.leftover >= 0 ? 'var(--text-gain)' : 'var(--text-negative)' }}>
+                    {h.leftover < 0 ? '-' : ''}{fmt(h.leftover)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SummaryCard>
       </div>
 
       {/* Summary Cards Row 1 — Real Accounts */}

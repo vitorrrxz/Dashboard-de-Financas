@@ -84,6 +84,12 @@ export const budgetUpdateSchema = budgetSchema.partial();
 export const salarySchema = z.object({
   salaryCents: z.coerce.number().int('Salário deve ser um inteiro em centavos.').min(0, 'Salário não pode ser negativo.'),
   salaryFrequency: z.enum(['monthly', 'biweekly'], { message: 'Periodicidade deve ser mensal ou quinzenal.' }),
+  // Quinzenal: dia do 1º pagamento; o 2º é 15 dias depois. Opcional para quem só manda valor e periodicidade.
+  salaryPayDay: z.coerce.number().int().min(1, 'Dia de pagamento entre 1 e 15.').max(15, 'Dia de pagamento entre 1 e 15.').optional(),
+  // Bônus de um mês só, somado à 1ª ou à 2ª quinzena.
+  bonusCents: z.coerce.number().int('Bônus deve ser um inteiro em centavos.').min(0, 'Bônus não pode ser negativo.').optional(),
+  bonusHalf: z.union([z.literal(1), z.literal(2)], { message: 'Quinzena do bônus deve ser 1 ou 2.' }).optional(),
+  bonusMonth: z.string().regex(/^\d{4}-\d{2}$/, 'Mês do bônus deve ser AAAA-MM.').nullable().optional(),
 });
 // FIN-105 — regra de categoria. Pelo menos 2 caracteres: uma letra só casaria com quase toda descrição.
 export const categoryRuleSchema = z.object({

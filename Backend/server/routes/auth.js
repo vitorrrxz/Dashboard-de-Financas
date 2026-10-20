@@ -273,7 +273,7 @@ router.get('/me', authenticateToken, async (req, res) => {
 });
 
 // Salário informado manualmente (valor de cada pagamento, em centavos) e periodicidade.
-const SALARY_SELECT = { salaryCents: true, salaryFrequency: true };
+const SALARY_SELECT = { salaryCents: true, salaryFrequency: true, salaryPayDay: true, bonusCents: true, bonusHalf: true, bonusMonth: true };
 
 router.get('/salary', authenticateToken, async (req, res) => {
   try {

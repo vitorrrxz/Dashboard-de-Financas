@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 // Filtro por conta da aba Dívidas (compartilhado com Transações, ver AccountFilter).
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { DebtsPage } from './DebtsPage';
 import type { Account, Debt } from '../types';
 
 const account = (id: string, name: string): Account =>
-  ({ id, name, bank: 'Banco', type: 'credit', balance: 0, color: '#fff' });
+  ({ id, name, bank: name, type: 'credit', balance: 0, color: '#fff' });
 
 const debt = (id: string, name: string, accountId?: string): Debt => ({
   id, name, accountId, category: 'Cartão de Crédito', totalAmount: 100, paidAmount: 0, monthlyPayment: 100,
@@ -40,8 +40,9 @@ describe('DebtsPage — filtro por conta', () => {
     expect(shown('Empréstimo avulso')).toBe(false);
   });
 
-  it('"Todas as contas" volta o filtro para null', () => {
+  it('as opções são só os bancos, e "Todos os bancos" volta o filtro para null', () => {
     const onChangeAccount = renderPage('a');
+    expect(within(screen.getByLabelText('Conta')).getAllByRole('option').map(o => o.textContent)).toEqual(['Todos os bancos', 'Nubank', 'Inter']);
     fireEvent.change(screen.getByLabelText('Conta'), { target: { value: '' } });
     expect(onChangeAccount).toHaveBeenCalledWith(null);
   });

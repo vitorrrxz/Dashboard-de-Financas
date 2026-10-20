@@ -5,6 +5,7 @@ import { isOwnTransfer } from '../utils/categories';
 import { groupInstallmentPurchases } from '../utils/installments';
 import { advanceDays, dateInMonth, shiftMonth } from '../utils/dates';
 import { accountIdsOf, inAccounts } from '../utils/accountGroups';
+import type { Outflow } from '../utils/salary';
 import type { Account, Debt, Investment, Transaction } from '../types';
 
 // FIN-086 — lógica de cálculo financeiro extraída de dentro de `App.tsx` (onde vivia como
@@ -23,8 +24,6 @@ export interface FinancialStats {
   dailyEvolution: { name: string; balance: number }[];
   expenseByCategory: { name: string; amount: number }[];
   monthExpense: number;
-  /** Gastos do mês fora do cartão (débito, PIX, dinheiro). */
-  monthCashExpense: number;
   /** Compras no cartão da fatura que vence neste mês (ciclo de fechamento; sem fechamento, o mês civil). Contam como dívida. */
   monthCardExpense: number;
   realBalance: number;
@@ -35,6 +34,8 @@ export interface FinancialStats {
   monthDebtPayments: number;
   /** Tudo o que se deve: dívidas cadastradas + faturas pendentes + parcelas futuras do cartão. */
   totalOwed: number;
+  /** Dívidas do mês com o dia em que vencem: cartão pelo vencimento da fatura, parcela pelo vencimento. */
+  monthOutflows: Outflow[];
   overdueDebts: Debt[];
   filteredTxsCount: number;
 }
@@ -115,7 +116,6 @@ export function computeFinancialStats(
   };
   const expenses = activeTxs.filter(t => t.amount < 0);
   const monthCardExpense = expenses.filter(t => isCard(t) && inThisBill(t)).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const monthCashExpense = expenses.filter(t => !isCard(t) && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
 
   // "Saldo Real" reflete apenas dinheiro líquido disponível (corrente/poupança/dinheiro).
   // Investimentos são somados separadamente — misturá-los ao saldo líquido pode enganar
@@ -133,6 +133,17 @@ export function computeFinancialStats(
   const futureCardInstallments = groupInstallmentPurchases(activeTxs, today).reduce((s, p) => s + p.remainingAmount, 0);
   const totalOwed = totalActiveDebts + pendingBills + futureCardInstallments;
 
+  // As mesmas dívidas de monthCardExpense + monthDebtPayments, com o dia de cada uma — para dividir a
+  // sobra (salário − dívidas) entre os pagamentos do salário quinzenal.
+  const dayOf = (iso: string) => Number(iso.slice(8, 10));
+  const dueDays = new Map(accounts.map(a => [a.id, a.dueDay]));
+  const monthOutflows: Outflow[] = [
+    ...expenses.filter(t => isCard(t) && inThisBill(t))
+      .map(t => ({ day: (t.accountId && dueDays.get(t.accountId)) || dayOf(t.date), amount: Math.abs(t.amount) })),
+    ...activeDebts.filter(d => d.paidInstallments < d.totalInstallments)
+      .map(d => ({ day: dayOf(d.nextDueDate), amount: d.monthlyPayment })),
+  ];
+
   const overdueDebts = activeDebts.filter(isDebtOverdue);
 
   const dailyMap: Record<string, number> = {};
@@ -149,8 +160,8 @@ export function computeFinancialStats(
 
   return {
     income, expense, importedBalance, balanceByMonth, dailyEvolution,
-    expenseByCategory, monthExpense, monthCashExpense, monthCardExpense, realBalance, investmentBalance, pendingBills,
-    activeDebts: totalActiveDebts, monthDebtPayments, totalOwed, overdueDebts,
+    expenseByCategory, monthExpense, monthCardExpense, realBalance, investmentBalance, pendingBills,
+    activeDebts: totalActiveDebts, monthDebtPayments, totalOwed, monthOutflows, overdueDebts,
     filteredTxsCount: activeTxs.length,
   };
 }

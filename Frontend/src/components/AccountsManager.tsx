@@ -273,7 +273,11 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
                   <input id="account-name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="Ex: Conta Nubank" className="input-field" />
                 </FormField>
                 <FormField label="Banco / Operadora" htmlFor="account-bank">
-                  <input id="account-bank" value={form.bank} onChange={e => set('bank', e.target.value)} placeholder="Ex: Nubank" className="input-field" />
+                  {/* Sugere os bancos já cadastrados: o mesmo nome junta conta e cartão do banco. */}
+                  <input id="account-bank" list="account-bank-options" value={form.bank} onChange={e => set('bank', e.target.value)} placeholder="Ex: Nubank" className="input-field" />
+                  <datalist id="account-bank-options">
+                    {groupByBank(accounts).map(g => <option key={g.key} value={g.bank} />)}
+                  </datalist>
                 </FormField>
               </div>
 

@@ -133,13 +133,20 @@ async function syncPluggyItem(userId, itemId) {
         userId,
         pluggyId: pluggyAcc.id,
         name: pluggyAcc.name,
-        bank: pluggyAcc.marketingName || institutionName,
+        // O banco, e não `marketingName` (nome do produto: "Nu Pagamentos S.A. ... (Conta Pré-paga)"):
+        // conta e cartão da mesma instituição precisam do mesmo nome para o app juntá-los.
+        bank: institutionName,
         type: accountType,
         balance: toCents(pluggyAcc.balance),
         currency: accountCurrency,
         color: '#6366f1',
       },
       update: { balance: toCents(pluggyAcc.balance), name: pluggyAcc.name, currency: accountCurrency },
+    });
+    // Contas criadas antes: troca só o nome automático antigo — o que o usuário digitou fica.
+    await prisma.account.updateMany({
+      where: { id: localAccount.id, bank: { in: ['Banco Conectado', pluggyAcc.marketingName || 'Banco Conectado'] } },
+      data: { bank: institutionName },
     });
     // FIN-074: as transações da conta ficam na moeda dela. Só grava se alguma estiver em
     // outra moeda — na prática, nunca depois da primeira sincronização.

@@ -16,6 +16,12 @@ model User {
   // = dois pagamentos no mês; "monthly" = um.
   salaryCents     Int        @default(0)
   salaryFrequency String     @default("monthly")
+  // Quinzenal: dia do 1º pagamento (1 a 15); o 2º cai 15 dias depois (5 e 20, 15 e 30).
+  salaryPayDay    Int        @default(15)
+  // Bônus de um mês só (bonusMonth = "YYYY-MM"), em centavos, somado à quinzena bonusHalf (1 ou 2).
+  bonusCents      Int        @default(0)
+  bonusHalf       Int        @default(1)
+  bonusMonth      String?
 
   accounts     Account[]
   transactions Transaction[]

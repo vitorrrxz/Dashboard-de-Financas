@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "salaryPayDay" INTEGER NOT NULL DEFAULT 15;
