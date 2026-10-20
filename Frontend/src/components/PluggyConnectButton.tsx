@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Link2, RefreshCw, Loader2, Building2, AlertTriangle } from 'lucide-react';
+import { Link2, RefreshCw, Loader2, AlertTriangle } from 'lucide-react';
 import { apiFetch, ApiError } from '../services/api';
 import { formatRelativeTime } from '../utils/dates';
 
@@ -174,30 +174,17 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
   const busy = autoSyncing || syncingId !== null;
 
   return (
-    <div
-      className="rounded-2xl p-5 border"
-      style={{ backgroundColor: 'rgba(99,102,241,0.06)', borderColor: 'rgba(99,102,241,0.2)' }}
-    >
-      <div className="flex items-center gap-3 mb-4">
-        <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: 'linear-gradient(135deg,rgba(99,102,241,0.3),rgba(168,85,247,0.3))', border: '1px solid rgba(99,102,241,0.3)' }}
-        >
-          <Building2 size={16} style={{ color: 'var(--color-primary)' }} />
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-white">Open Finance</p>
-          <p className="text-xs text-textMuted">Conecte seu banco via Pluggy</p>
-        </div>
-      </div>
+    <div className="rounded-2xl p-3 bg-white/[0.04]">
+      <p className="text-sm font-medium text-white">Open Finance</p>
+      <p className="text-xs text-textMuted mb-3">Bancos conectados via Pluggy</p>
 
       {error && needsReauth && (
-        <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 mb-3 flex items-center gap-2">
+        <p className="text-xs text-amber-400 mb-3 flex items-center gap-2">
           <AlertTriangle size={14} className="shrink-0" /> {error}
         </p>
       )}
       {error && !needsReauth && (
-        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2 mb-3">
+        <p className="text-xs text-red-400 mb-3">
           {error}
         </p>
       )}
@@ -207,7 +194,7 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
           {items.map(item => (
             <li key={item.pluggyId} className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-white truncate">{item.providerName}</p>
+                <p className="text-xs font-medium text-white truncate">{item.providerName}</p>
                 {item.status === 'LOGIN_ERROR'
                   ? <p className="text-xs text-amber-400">Login expirado: reconecte o banco</p>
                   : <p className="text-xs text-textMuted">{lastSyncLabel(item)}</p>}
@@ -218,7 +205,7 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
                 disabled={busy}
                 aria-label={`Sincronizar ${item.providerName}`}
                 title={`Sincronizar ${item.providerName}`}
-                className="p-2 rounded-lg text-teal-400 hover:bg-white/5 transition-colors disabled:opacity-50"
+                className="p-2 rounded-md text-textMuted hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-50"
               >
                 <RefreshCw size={14} className={syncingId === item.pluggyId ? 'animate-spin' : undefined} />
               </button>
@@ -237,12 +224,11 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
         type="button"
         onClick={handleConnect}
         disabled={connecting}
-        className="w-full py-2.5 rounded-xl text-sm font-semibold text-on-accent flex items-center justify-center gap-2 transition-all disabled:opacity-60"
-        style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}
+        className="w-full h-8 rounded-md text-sm text-white bg-card border border-[var(--line)] hover:border-[var(--color-textMuted)] flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
       >
         {connecting
           ? <><Loader2 size={14} className="animate-spin" /> Conectando...</>
-          : <><Link2 size={14} /> Conectar Banco</>
+          : <><Link2 size={14} /> Conectar banco</>
         }
       </button>
     </div>

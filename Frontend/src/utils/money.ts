@@ -22,22 +22,6 @@ export function toReais(cents: number): number {
 }
 
 /**
- * Aplica `toCents` a um valor que pode ser `null`/`undefined` (campos monetários
- * opcionais como `Account.limit`/`Account.pendingBill`/`Debt.interestRate` não devem
- * virar `0` quando ausentes).
- */
-export function toCentsOrNull(reais: number | null | undefined): number | null | undefined {
-  if (reais === null || reais === undefined) return reais;
-  return toCents(reais);
-}
-
-/** Aplica `toReais` a um valor que pode ser `null`/`undefined`. */
-export function toReaisOrNull(cents: number | null | undefined): number | null | undefined {
-  if (cents === null || cents === undefined) return cents;
-  return toReais(cents);
-}
-
-/**
  * Formata um valor em reais para exibição ("R$ 1.234,56"), sempre em módulo — o sinal,
  * quando importa, fica a cargo de quem exibe (ver `MonthTotal`). Limita a duas casas: sem
  * `maximumFractionDigits`, o padrão do `toLocaleString` é três, e um resíduo de ponto

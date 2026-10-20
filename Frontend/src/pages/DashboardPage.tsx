@@ -1,11 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { Pencil, Upload } from 'lucide-react';
 import {
-  Wallet, Upload, ArrowUpRight, ArrowDownRight, CreditCard, AlertCircle, TrendingDown, TrendingUp,
-  Pencil, PiggyBank,
-} from 'lucide-react';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend, BarChart, Bar, ReferenceLine,
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, ReferenceLine,
 } from 'recharts';
 import { describeConversion, type ExchangeRates } from '../utils/currency';
 import { describeHoldings, type InvestmentHoldings } from '../utils/investments';
@@ -17,18 +14,76 @@ import type { Tab } from '../App';
 import { AccountOptions } from '../components/AccountFilter';
 import { activeBonus, biweeklyLeftovers, salaryPerMonth } from '../utils/salary';
 import { todayISO } from '../utils/debts';
-import { daysInMonth } from '../utils/dates';
+import { advanceDays, daysInMonth, formatMonthLabel } from '../utils/dates';
+import { formatBRL } from '../utils/money';
+import { niceTicks } from '../utils/chart';
 
-// Fatias por posição (o gráfico mostra no máximo 6 categorias): as da Pluggy vêm em inglês e não
-// estão em CATEGORY_COLORS, então todas cairiam na mesma cor.
-const PIE_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ec4899', '#06b6d4', '#a855f7'];
+/** "R$ 1.234,56" com espaço que não quebra: o valor nunca se separa do símbolo numa linha estreita. */
+const fmt = (v: number) => formatBRL(v).replace(' ', ' ');
+/** Valor com sinal: "−R$ 12,00" quando negativo — o sinal mora no texto, não só na cor. */
+const signed = (v: number) => `${v < 0 ? '−' : ''}${fmt(v)}`;
+/** Eixo em milhares: "2 mil", "−1,5 mil". */
+const axisMoney = (v: number) => (v === 0 ? '0' : `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`);
 
-function fmt(v: number) {
-  return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+const tooltipStyle = {
+  contentStyle: { backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 6, fontSize: 12, padding: '6px 10px' },
+  labelStyle: { color: 'var(--color-textMuted)' },
+  itemStyle: { color: 'var(--color-textMain)', padding: 0 },
+  cursor: { fill: 'var(--fg-4)' },
+};
+
+/** Fatias do anel de categorias: um só tom, do mais forte (maior gasto) ao mais claro. */
+const RING_OPACITY = [1, 0.72, 0.52, 0.38, 0.26, 0.16];
+
+/**
+ * Régua de um pagamento: o trilho tem o tamanho do que entra; a parte preenchida é o que já está
+ * comprometido com dívidas; o que passa do salário sai depois do fim do trilho, em vermelho.
+ * `scale` é o maior valor entre todas as réguas, para elas serem comparáveis entre si.
+ */
+function PayRuler({ label, detail, pay, owed, scale }: { label: string; detail: string; pay: number; owed: number; scale: number }) {
+  const left = pay - owed;
+  const pct = (v: number) => `${scale > 0 ? (v / scale) * 100 : 0}%`;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 mb-1.5">
+        <p className="text-sm text-white">{label}</p>
+        <p className={`text-sm font-medium whitespace-nowrap ${left < 0 ? 'text-red-400' : 'text-white'}`}>
+          {left < 0 ? `faltam ${fmt(left)}` : `sobram ${fmt(left)}`}
+        </p>
+      </div>
+      <div className="relative h-2" role="img"
+        aria-label={`${label}: recebe ${fmt(pay)}, dívidas ${fmt(owed)}, ${left < 0 ? 'faltam' : 'sobram'} ${fmt(left)}`}>
+        <div className="absolute inset-y-0 left-0 rounded-full bg-white/[0.08]" style={{ width: pct(pay) }} />
+        <div className="absolute inset-y-0 left-0 rounded-l-full" style={{ width: pct(Math.min(owed, pay)), backgroundColor: 'var(--color-accent)' }} />
+        {owed > pay && (
+          <div className="absolute inset-y-0 rounded-r-full" style={{ left: pct(pay), width: pct(owed - pay), backgroundColor: 'var(--color-red-500)' }} />
+        )}
+      </div>
+      <p className="text-xs text-textMuted mt-1.5">{detail}</p>
+    </div>
+  );
+}
+
+/** Divisão de um total por forma de pagamento — linhas pequenas, valores alinhados à direita. */
+function PaymentTypeBreakdown({ values }: { values: ByPaymentType }) {
+  return (
+    <dl className="mt-2 space-y-0.5 text-[13px]">
+      {([
+        ['Débito e PIX', values.debitPix],
+        ['Crédito à vista', values.credit],
+        ['Crédito parcelado', values.installment],
+      ] as const).map(([label, value]) => (
+        <div key={label} className="flex justify-between gap-2 whitespace-nowrap">
+          <dt className="text-textMuted">{label}</dt>
+          <dd className={value === 0 ? 'text-textMuted' : 'text-white'}>{fmt(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 /** `month` (YYYY-MM) é o mês corrente: o bônus lançado vale só para ele. `bonus` é o bônus ativo nele. */
-function SalaryCard({ salary, monthly, month, bonus, onSave }: { salary: Salary; monthly: number; month: string; bonus: number; onSave: (s: Salary) => Promise<void> }) {
+function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary; monthly: number; month: string; bonus: number; onSave: (s: Salary) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState('');
   const [frequency, setFrequency] = useState<SalaryFrequency>('monthly');
@@ -62,105 +117,67 @@ function SalaryCard({ salary, monthly, month, bonus, onSave }: { salary: Salary;
 
   if (editing) {
     return (
-      <form onSubmit={submit} className="glass-card rounded-2xl p-6 flex flex-col gap-3">
-        <label htmlFor="salary-amount" className="text-sm font-medium text-textMuted">
+      <form onSubmit={submit} className="flex flex-col gap-2">
+        <label htmlFor="salary-amount" className="text-sm text-textMuted">
           {frequency === 'biweekly' ? 'Valor de cada quinzena' : 'Salário mensal'}
         </label>
         <input id="salary-amount" type="number" min="0" step="0.01" inputMode="decimal" required autoFocus
           value={amount} onChange={e => setAmount(e.target.value)} className="input-field" />
         <label htmlFor="salary-frequency" className="sr-only">Periodicidade</label>
         <select id="salary-frequency" value={frequency} onChange={e => setFrequency(e.target.value as SalaryFrequency)} className="input-field">
-          <option value="monthly" className="bg-dashboard">Mensal</option>
-          <option value="biweekly" className="bg-dashboard">Quinzenal</option>
+          <option value="monthly">Mensal</option>
+          <option value="biweekly">Quinzenal</option>
         </select>
         {frequency === 'biweekly' && (
           <>
-            <label htmlFor="salary-pay-day" className="text-sm font-medium text-textMuted">Dias de pagamento</label>
+            <label htmlFor="salary-pay-day" className="text-sm text-textMuted">Dias de pagamento</label>
             <select id="salary-pay-day" value={payDay} onChange={e => setPayDay(Number(e.target.value))} className="input-field">
               {Array.from({ length: 15 }, (_, i) => i + 1).map(d => (
-                <option key={d} value={d} className="bg-dashboard">Dias {d} e {d + 15}</option>
+                <option key={d} value={d}>Dias {d} e {d + 15}</option>
               ))}
             </select>
           </>
         )}
-        <label htmlFor="salary-bonus" className="text-sm font-medium text-textMuted">Bônus deste mês (opcional)</label>
+        <label htmlFor="salary-bonus" className="text-sm text-textMuted">Bônus deste mês (opcional)</label>
         <input id="salary-bonus" type="number" min="0" step="0.01" inputMode="decimal" placeholder="0,00"
           value={bonusInput} onChange={e => setBonusInput(e.target.value)} className="input-field" />
         {frequency === 'biweekly' && Number(bonusInput) > 0 && (
           <>
-            <label htmlFor="salary-bonus-half" className="text-sm font-medium text-textMuted">Bônus entra na quinzena</label>
+            <label htmlFor="salary-bonus-half" className="text-sm text-textMuted">Bônus entra na quinzena</label>
             <select id="salary-bonus-half" value={bonusHalf} onChange={e => setBonusHalf(e.target.value === '2' ? 2 : 1)} className="input-field">
-              <option value={1} className="bg-dashboard">Do dia {payDay}</option>
-              <option value={2} className="bg-dashboard">Do dia {payDay + 15}</option>
+              <option value={1}>Do dia {payDay}</option>
+              <option value={2}>Do dia {payDay + 15}</option>
             </select>
           </>
         )}
-        <div className="flex gap-2">
-          <button type="submit" disabled={saving} className="flex-1 px-3 py-2 rounded-xl bg-primary text-on-accent text-sm font-semibold disabled:opacity-60">Salvar</button>
-          <button type="button" onClick={() => setEditing(false)} className="px-3 py-2 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5">Cancelar</button>
+        <div className="flex gap-2 mt-1">
+          <button type="submit" disabled={saving} className="h-9 px-4 rounded-md bg-primary text-on-accent text-sm font-medium disabled:opacity-60">Salvar</button>
+          <button type="button" onClick={() => setEditing(false)} className="h-9 px-4 rounded-md text-sm text-white bg-white/[0.06] hover:bg-white/10">Cancelar</button>
         </div>
       </form>
     );
   }
 
   return (
-    <div className="glass-card rounded-2xl p-6">
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-2.5 rounded-xl" style={{ backgroundColor:'var(--fg-3)', border:'1px solid var(--fg-5)' }}>
-          <ArrowUpRight size={22} style={{ color:'var(--color-accent)' }}/>
-        </div>
-        <button onClick={startEdit} aria-label="Editar salário"
-          className="p-1.5 rounded-lg text-textMuted hover:text-white hover:bg-white/5 transition-colors">
-          <Pencil size={14}/>
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm text-textMuted">Salário do mês</p>
+        <button type="button" onClick={startEdit} aria-label="Editar salário"
+          className="p-1 -m-1 rounded-md text-textMuted hover:text-white hover:bg-white/[0.06] transition-colors">
+          <Pencil size={13}/>
         </button>
       </div>
-      <p className="text-sm font-medium text-textMuted mb-1">Salário</p>
-      <h3 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-gain)' }}>{fmt(monthly)}</h3>
+      <p className={`text-[22px] leading-8 font-bold ${monthly === 0 ? 'text-textMuted' : 'text-white'}`}>{fmt(monthly)}</p>
       <p className="text-xs text-textMuted mt-1">
-        {salary.amount === 0 ? 'Clique no lápis para informar'
-          : salary.frequency === 'biweekly' ? `Quinzenal · dias ${salary.payDay} e ${salary.payDay + 15} · 2× ${fmt(salary.amount)}` : 'Mensal'}
+        {salary.amount === 0 ? 'Informe o salário no lápis para calcular a sobra'
+          : salary.frequency === 'biweekly' ? `Quinzenal, dias ${salary.payDay} e ${salary.payDay + 15} · 2 × ${fmt(salary.amount)}` : 'Mensal'}
       </p>
       {bonus > 0 && (
-        <p className="text-xs mt-0.5" style={{ color: 'var(--text-gain)' }}>
+        <p className="text-xs text-teal-400 mt-0.5">
           + bônus {fmt(bonus)}{salary.frequency === 'biweekly' ? ` no dia ${salary.bonusHalf === 1 ? salary.payDay : salary.payDay + 15}` : ''}
         </p>
       )}
     </div>
-  );
-}
-
-function SummaryCard({ title, amount, icon, badge, isPositive, onClick, children }: { title: string; amount: string; icon: React.ReactNode; badge?: string; isPositive: boolean; onClick?: () => void; children?: React.ReactNode }) {
-  return (
-    <div onClick={onClick} className={`glass-card rounded-2xl p-6 transition-all ${onClick ? 'cursor-pointer hover:bg-white/5 hover:-translate-y-1' : ''}`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-2.5 rounded-xl" style={{ backgroundColor:'var(--fg-3)', border:'1px solid var(--fg-5)' }}>
-          {icon}
-        </div>
-        {badge && <span className="text-[10px] uppercase tracking-wider font-bold text-textMuted bg-white/5 px-2.5 py-1 rounded-full border border-white/5">{badge}</span>}
-      </div>
-      <p className="text-sm font-medium text-textMuted mb-1">{title}</p>
-      <h3 className="text-2xl font-bold tracking-tight" style={{ color: isPositive ? 'var(--text-gain)' : 'var(--text-negative)' }}>
-        {!isPositive && amount !== 'R$ 0,00' ? '-' : ''}{amount}
-      </h3>
-      {children}
-    </div>
-  );
-}
-
-function PaymentTypeBreakdown({ values }: { values: ByPaymentType }) {
-  return (
-    <ul className="mt-1 space-y-0.5 text-xs text-textMuted">
-      {([
-        ['Débito / PIX', 'Débito e PIX', values.debitPix],
-        ['Crédito à vista', 'Crédito à vista e PIX no crédito', values.credit],
-        ['Crédito parcelado', 'Crédito parcelado e PIX parcelado', values.installment],
-      ] as const).map(([label, hint, value]) => (
-        <li key={label} title={hint} className="flex justify-between gap-2 whitespace-nowrap">
-          <span className="truncate">{label}</span>
-          <span>{fmt(value)}</span>
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -190,281 +207,333 @@ interface DashboardPageProps {
   onSaveSalary: (salary: Salary) => Promise<void>;
 }
 
+/**
+ * Visão geral. A pergunta da tela: quanto sobra deste mês depois do cartão e das parcelas? A
+ * resposta é o maior número e vem primeiro, com a régua de cada pagamento ao lado; saldos, fluxo,
+ * categorias, projeção e orçamento respondem às perguntas seguintes, nessa ordem.
+ */
 export function DashboardPage({
   accounts, dashboardAccountId, onChangeDashboardAccount, stats, overBudget, budgetProgress,
   usedCurrencies, rates, ratesFailed, conversionIssue, missingCurrencies, hasInvestments,
   investmentHoldings, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
   projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary,
 }: DashboardPageProps) {
-  const month = todayISO().slice(0, 7);
+  const today = todayISO();
+  const month = today.slice(0, 7);
+  const monthName = formatMonthLabel(month).split('/')[0].toLowerCase();
   const bonus = activeBonus(salary, month);
   const monthlySalary = salaryPerMonth(salary) + bonus;
   // Tudo o que se deve no mês é dívida: compras no cartão (à vista e parcelas) + parcelas cadastradas.
   const monthDebts = stats.monthCardExpense + stats.monthDebtPayments;
   // Sobra = salário − dívidas do mês. As despesas do mês são só informativas (o total gasto).
   const leftover = monthlySalary - monthDebts;
-  // Quinzenal: a sobra de cada pagamento, com as dívidas que vencem até o pagamento seguinte.
   const now = new Date();
-  const halves = salary.frequency === 'biweekly'
-    ? biweeklyLeftovers(salary, stats.monthOutflows, daysInMonth(now.getFullYear(), now.getMonth() + 1), bonus)
-    : null;
+  const monthDays = daysInMonth(now.getFullYear(), now.getMonth() + 1);
+
+  // Uma régua por pagamento: no quinzenal, cada metade com as dívidas que vencem até o pagamento seguinte.
+  const rulers = useMemo(() => {
+    if (salary.frequency !== 'biweekly') {
+      return [{ label: `Salário de ${monthName}`, detail: `Recebe ${fmt(monthlySalary)} · dívidas do mês ${fmt(monthDebts)}`, pay: monthlySalary, owed: monthDebts }];
+    }
+    const halves = biweeklyLeftovers(salary, stats.monthOutflows, monthDays, bonus);
+    return halves.map((h, i) => {
+      const pay = salary.amount + (salary.bonusHalf === i + 1 ? bonus : 0);
+      const until = i === 0 ? `até o dia ${halves[1].day - 1}` : 'até o fim do mês';
+      return { label: `Pagamento do dia ${h.day}`, detail: `Recebe ${fmt(pay)} · dívidas ${until}: ${fmt(pay - h.leftover)}`, pay, owed: pay - h.leftover };
+    });
+  }, [salary, stats.monthOutflows, monthDays, bonus, monthName, monthDebts, monthlySalary]);
+  const rulerScale = Math.max(...rulers.map(r => Math.max(r.pay, r.owed)));
+
+  // Fluxo diário: os últimos 31 dias inteiros, com zero nos dias sem lançamento (o eixo é tempo).
+  const dailyFlow = useMemo(() => {
+    const byKey = new Map(stats.dailyEvolution.map(d => [d.name, d.balance]));
+    return Array.from({ length: 31 }, (_, i) => {
+      const iso = advanceDays(today, i - 30);
+      return { name: `${iso.slice(8, 10)}/${iso.slice(5, 7)}`, balance: byKey.get(`${iso.slice(5, 7)}/${iso.slice(8, 10)}`) ?? 0 };
+    });
+  }, [stats.dailyEvolution, today]);
+  const flowData = chartPeriod === '30d' ? dailyFlow : stats.balanceByMonth;
+  const flowTicks = niceTicks(flowData.map(d => d.balance));
+  const projectionTicks = niceTicks(projection.map(p => p.balance));
+
+  const categoryTotal = stats.expenseByCategory.reduce((s, c) => s + c.amount, 0);
+  const hasProjection = projection.some(p => p.salaryDelta > 0 || p.debtDelta > 0);
+  const finding = monthlySalary === 0
+    ? 'Informe o salário para ver quanto sobra depois das dívidas do mês.'
+    : leftover < 0
+      ? `As dívidas de ${monthName} passam o salário em ${fmt(leftover)}.`
+      : `Sobram ${fmt(leftover)} de ${monthName} depois do cartão e das parcelas.`;
+
   return (
     <>
-      <div className="mb-8 flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-white tracking-tight">Visão Geral</h1>
-
-        {/* ACCOUNT SELECTOR */}
-        {accounts.length > 0 && (
-          <select
-            value={dashboardAccountId || ''}
-            onChange={(e) => onChangeDashboardAccount(e.target.value || null)}
-            className="bg-white/5 border border-white/10 text-sm text-white py-2 px-4 rounded-xl focus:outline-none focus:border-primary/50"
-          >
-            <AccountOptions accounts={accounts} />
-          </select>
-        )}
-      </div>
-
-      {stats.overdueDebts.length > 0 && (
-        <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)' }}>
-          <AlertCircle size={18} className="text-red-400 shrink-0"/>
-          <p className="text-sm text-red-300">
-            Você tem <strong>{stats.overdueDebts.length}</strong> dívida(s) com vencimento vencido:
-            {' '}{stats.overdueDebts.map(d => d.name).join(', ')}
-          </p>
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 mb-6">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-medium tracking-tight text-white">Visão geral</h1>
+          <p className="text-sm text-textMuted mt-1">{finding}</p>
         </div>
-      )}
-
-      {/* FIN-047: mesmo padrão de alerta usado para dívidas vencidas, acima. */}
-      {overBudget.length > 0 && (
-        <div className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)' }}>
-          <AlertCircle size={18} className="text-red-400 shrink-0"/>
-          <p className="text-sm text-red-300">
-            Você ultrapassou o limite de <strong>{overBudget.length}</strong> orçamento(s) este mês:
-            {' '}{overBudget.map(b => b.category).join(', ')}
-          </p>
-        </div>
-      )}
-
-      {/* FIN-076: com moeda estrangeira em uso, os totais são convertidos para real. Uma linha
-          discreta diz de que cotação; o aviso âmbar aparece quando algo ficou de fora (moeda
-          sem cotação) ou a cotação é antiga. Antes da primeira resposta, nada é exibido. */}
-      {usedCurrencies.length > 0 && (rates !== null || ratesFailed) && (
-        conversionIssue ? (
-          <div role="status" className="mb-6 p-4 rounded-xl flex items-center gap-3" style={{ backgroundColor:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)' }}>
-            <AlertCircle size={18} className="text-amber-400 shrink-0"/>
-            <p className="text-sm text-amber-200">{describeConversion(usedCurrencies, missingCurrencies, rates)}</p>
-          </div>
-        ) : (
-          <p className="text-xs text-textMuted -mt-4 mb-6">{describeConversion(usedCurrencies, missingCurrencies, rates)}</p>
-        )
-      )}
-
-      {/* Resumo do mês: salário − despesas fora do cartão − dívidas do mês = quanto sobra. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
-        <SalaryCard salary={salary} monthly={monthlySalary} month={month} bonus={bonus} onSave={onSaveSalary} />
-        <SummaryCard title="Despesas do Mês" amount={fmt(stats.monthExpense)} isPositive={false}
-          icon={<ArrowDownRight size={22} className="text-red-400"/>} badge="Total gasto"
-          onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }}>
-          <PaymentTypeBreakdown values={stats.monthExpenseByType} />
-        </SummaryCard>
-        <SummaryCard title="Dívidas do Mês" amount={fmt(monthDebts)} isPositive={false}
-          icon={<CreditCard size={22} className="text-amber-400"/>} badge="Fatura + parcelas"
-          onClick={() => onNavigate('debts')}>
-          <PaymentTypeBreakdown values={stats.monthDebtsByType} />
-        </SummaryCard>
-        <SummaryCard title="Sobra do Mês" amount={fmt(leftover)} isPositive={leftover >= 0}
-          icon={<PiggyBank size={22} className={leftover >= 0 ? 'text-emerald-400' : 'text-red-400'}/>}
-          badge={leftover >= 0 ? 'Disponível' : 'No vermelho'}>
-          {halves && (
-            <ul className="mt-2 space-y-0.5 text-xs">
-              {halves.map(h => (
-                <li key={h.day} className="flex justify-between gap-2">
-                  <span className="text-textMuted">Dia {h.day}</span>
-                  <span className="font-semibold" style={{ color: h.leftover >= 0 ? 'var(--text-gain)' : 'var(--text-negative)' }}>
-                    {h.leftover < 0 ? '-' : ''}{fmt(h.leftover)}
-                  </span>
-                </li>
-              ))}
-            </ul>
+        <div className="flex items-center gap-2">
+          {accounts.length > 0 && (
+            <>
+              <label htmlFor="dashboard-account" className="sr-only">Banco</label>
+              <select id="dashboard-account" value={dashboardAccountId || ''}
+                onChange={(e) => onChangeDashboardAccount(e.target.value || null)} className="input-field !w-auto">
+                <AccountOptions accounts={accounts} />
+              </select>
+            </>
           )}
-        </SummaryCard>
+          <button type="button" onClick={onShowImport}
+            className="h-9 px-4 rounded-md bg-primary text-on-accent text-sm font-medium flex items-center gap-2 whitespace-nowrap hover:opacity-90 transition-opacity">
+            <Upload size={14}/> Importar extrato
+          </button>
+        </div>
       </div>
 
-      {/* Summary Cards Row 1 — Real Accounts */}
-      {/* "Saldo Real" exclui investimentos (ver FIN-018) — quando o usuário tem conta de
-          investimento ou posição na carteira (FIN-073), o total aparece separado ao lado. */}
-      <div className={`grid grid-cols-1 md:grid-cols-2 ${hasInvestments ? 'lg:grid-cols-3' : ''} gap-5 mb-8`}>
-        <SummaryCard title="Saldo Real (Contas)" amount={fmt(stats.realBalance)} isPositive={stats.realBalance >= 0}
-          icon={<Wallet size={22} style={{ color:'var(--color-primary)' }}/>} badge="Saldo atual" />
-        {hasInvestments && (
-          <SummaryCard title="Investimentos" amount={fmt(stats.investmentBalance)} isPositive={stats.investmentBalance >= 0}
-            icon={<TrendingUp size={22} className="text-teal-400"/>}
-            badge={describeHoldings(investmentHoldings)} />
-        )}
-        <SummaryCard title="Dívidas Ativas" amount={fmt(stats.totalOwed)} isPositive={false}
-          icon={<TrendingDown size={22} className="text-amber-400"/>} badge="Cartão + cadastradas"
-          onClick={() => onNavigate('debts')} />
-      </div>
-
-      {/* FIN-046: indicador de orçamento do mês corrente no Dashboard. */}
-      {budgetProgress.length > 0 && (
-        <div className="glass-card rounded-2xl p-6 mb-8">
-          <div className="flex justify-between items-center mb-5">
-            <h3 className="text-lg font-semibold text-white">Orçamento do Mês</h3>
-            <button onClick={() => onNavigate('budgets')} className="text-xs text-textMuted hover:text-white transition-colors">Ver tudo →</button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {budgetProgress.map(b => (
-              <div key={b.id}>
-                <div className="flex justify-between text-xs mb-1.5">
-                  <span className="text-white font-medium">{b.category}</span>
-                  <span className={b.isOverLimit ? 'text-red-400' : 'text-textMuted'}>{fmt(b.spent)} / {fmt(b.limit)}</span>
-                </div>
-                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
-                  <div className={`h-full rounded-full transition-all ${b.isOverLimit ? 'bg-red-400' : 'bg-primary'}`}
-                    style={{ width: `${Math.min(100, b.percentage)}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Avisos: um por linha, discretos, com o fato e o atalho para resolver. */}
+      {(stats.overdueDebts.length > 0 || overBudget.length > 0 || (usedCurrencies.length > 0 && (rates !== null || ratesFailed))) && (
+        <div className="space-y-2 mb-3">
+          {stats.overdueDebts.length > 0 && (
+            <button type="button" onClick={() => onNavigate('debts')}
+              className="w-full text-left text-sm px-3 py-2 rounded-md border bg-card hover:bg-white/[0.02] transition-colors"
+              style={{ borderColor: 'color-mix(in srgb, var(--color-red-500) 35%, transparent)' }}>
+              <span className="text-red-400 font-medium">
+                {stats.overdueDebts.length === 1 ? '1 dívida vencida' : `${stats.overdueDebts.length} dívidas vencidas`}
+              </span>
+              <span className="text-white">: {stats.overdueDebts.map(d => d.name).join(', ')}</span>
+            </button>
+          )}
+          {/* FIN-047 */}
+          {overBudget.length > 0 && (
+            <button type="button" onClick={() => onNavigate('budgets')}
+              className="w-full text-left text-sm px-3 py-2 rounded-md border bg-card hover:bg-white/[0.02] transition-colors"
+              style={{ borderColor: 'color-mix(in srgb, var(--color-red-500) 35%, transparent)' }}>
+              <span className="text-red-400 font-medium">
+                {overBudget.length === 1 ? '1 orçamento estourado' : `${overBudget.length} orçamentos estourados`}
+              </span>
+              <span className="text-white">: {overBudget.map(b => b.category).join(', ')}</span>
+            </button>
+          )}
+          {/* FIN-076: com moeda estrangeira em uso, os totais são convertidos para real. */}
+          {usedCurrencies.length > 0 && (rates !== null || ratesFailed) && (
+            <p role="status" className={`text-xs ${conversionIssue ? 'text-amber-400' : 'text-textMuted'}`}>
+              {describeConversion(usedCurrencies, missingCurrencies, rates)}
+            </p>
+          )}
         </div>
       )}
 
-      {isEmpty && !hasAccounts && (
-        <div className="glass-card rounded-2xl p-16 flex flex-col items-center text-center">
-          <div className="w-20 h-20 rounded-2xl flex items-center justify-center mb-6"
-            style={{ background:'linear-gradient(135deg,rgba(99,102,241,0.2),rgba(168,85,247,0.2))', border:'1px solid rgba(99,102,241,0.2)' }}>
-            <Wallet size={36} style={{ color:'var(--color-primary)' }}/>
-          </div>
-          <h2 className="text-2xl font-bold text-white mb-3">Bem-vindo ao FinFlow!</h2>
-          <p className="text-textMuted max-w-md mb-8">
-            Seu painel financeiro pessoal!
-            Adicione suas contas na aba <strong>Contas</strong> e importe seus extratos bancários (CSV/OFX) para acompanhar suas finanças.
+      {isEmpty && !hasAccounts ? (
+        <section className="panel rounded-2xl p-6">
+          <h2 className="text-base font-medium text-white">Comece pelas suas contas</h2>
+          <p className="text-sm text-textMuted mt-1 mb-5 max-w-xl">
+            Cadastre a conta corrente e o cartão, depois importe o extrato (CSV ou OFX) ou conecte o banco pelo Open Finance.
+            A sobra do mês aparece aqui assim que houver salário e dívidas.
           </p>
-          <div className="flex gap-3">
-            <button onClick={() => onNavigate('accounts')}
-              className="px-6 py-3 rounded-xl text-on-accent font-semibold text-sm shadow-md"
-              style={{ background:'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow:'0 4px 24px rgba(99,102,241,0.35)' }}>
-              <span className="flex items-center gap-2"><Wallet size={16}/> Adicionar Conta</span>
-            </button>
-            <button onClick={onShowImport}
-              className="px-6 py-3 rounded-xl text-textMuted text-sm font-medium border border-white/10 hover:bg-white/5 hover:text-white transition-colors">
-              <span className="flex items-center gap-2"><Upload size={16}/> Importar Extrato</span>
-            </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => onNavigate('accounts')}
+              className="h-9 px-4 rounded-md bg-primary text-on-accent text-sm font-medium">Adicionar conta</button>
+            <button type="button" onClick={onShowImport}
+              className="h-9 px-4 rounded-md text-sm text-white bg-white/[0.06] hover:bg-white/10">Importar extrato</button>
           </div>
-        </div>
-      )}
-
-      {(!isEmpty || hasAccounts) && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          <div className="lg:col-span-2 glass-card rounded-2xl p-6">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-semibold text-white">Fluxo Financeiro</h3>
-              <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
-                <button
-                  onClick={() => onChangeChartPeriod('30d')}
-                  className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === '30d' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}
-                >
-                  30 Dias
-                </button>
-                <button
-                  onClick={() => onChangeChartPeriod('all')}
-                  className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${chartPeriod === 'all' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}
-                >
-                  Histórico
-                </button>
+        </section>
+      ) : (
+        <div className="space-y-3">
+          {/* ── O mês: a sobra, a régua de cada pagamento, e de onde vêm os números. ── */}
+          <section aria-labelledby="month-title" className="panel rounded-2xl">
+            <div className="p-5 md:p-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-10">
+              <div>
+                <h2 id="month-title" className="text-sm text-textMuted">Sobra de {monthName}</h2>
+                <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${monthlySalary === 0 ? 'text-textMuted' : leftover < 0 ? 'text-red-400' : 'text-white'}`}>
+                  {signed(leftover)}
+                </p>
+                <p className="text-sm text-textMuted mt-1">
+                  Salário {fmt(monthlySalary)} − dívidas do mês {fmt(monthDebts)}
+                </p>
+              </div>
+              <div className="space-y-4 lg:pt-1">
+                {rulers.map(r => <PayRuler key={r.label} {...r} scale={rulerScale} />)}
+                <p className="text-xs text-textMuted flex items-center gap-x-4 gap-y-1 flex-wrap">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--color-accent)' }}/>Comprometido com dívidas</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-white/[0.08]"/>Livre</span>
+                  {rulers.some(r => r.owed > r.pay) && (
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--color-red-500)' }}/>Além do salário</span>
+                  )}
+                </p>
               </div>
             </div>
-            <div className="h-60">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartPeriod === '30d' ? stats.dailyEvolution : stats.balanceByMonth}>
-                  <defs>
-                    <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize:10 }}
-                    interval={chartPeriod === '30d' ? 4 : 0}
-                  />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
-                  <RechartsTooltip
-                    contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                    formatter={(v) => [fmt(Number(v)), chartPeriod === '30d' ? 'Evolução' : 'Saldo']}
-                    labelStyle={{ color:'var(--color-textMuted)' }}
-                  />
-                  <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2.5} fill="url(#cg)" animationDuration={1000}/>
-                </AreaChart>
-              </ResponsiveContainer>
+            <div className="grid lg:grid-cols-3 border-t border-white/[0.07] divide-y lg:divide-y-0 lg:divide-x divide-white/[0.07]">
+              <div className="p-5 md:px-6">
+                <SalaryCell salary={salary} monthly={monthlySalary} month={month} bonus={bonus} onSave={onSaveSalary} />
+              </div>
+              <button type="button" onClick={() => onNavigate('debts')} className="p-5 md:px-6 text-left hover:bg-white/[0.02] transition-colors">
+                <p className="text-sm text-textMuted">Dívidas do mês</p>
+                <p className="text-[22px] leading-8 font-bold text-white">{fmt(monthDebts)}</p>
+                <PaymentTypeBreakdown values={stats.monthDebtsByType} />
+              </button>
+              <button type="button" onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }}
+                className="p-5 md:px-6 text-left hover:bg-white/[0.02] transition-colors">
+                <p className="text-sm text-textMuted">Gasto em {monthName}</p>
+                <p className="text-[22px] leading-8 font-bold text-white">{fmt(stats.monthExpense)}</p>
+                <PaymentTypeBreakdown values={stats.monthExpenseByType} />
+              </button>
             </div>
-          </div>
+          </section>
 
-          {stats.expenseByCategory.length > 0 && (
-            <div className="glass-card rounded-2xl p-6">
-              <h3 className="text-lg font-semibold text-white mb-6">Por Categoria</h3>
-              <div className="h-60">
+          {/* ── Saldos que não mudam durante o dia (FIN-018/FIN-073). ── */}
+          <section aria-label="Saldos" className={`panel rounded-2xl grid divide-y sm:divide-y-0 sm:divide-x divide-white/[0.07] ${hasInvestments ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
+            <div className="px-5 md:px-6 py-4">
+              <p className="text-sm text-textMuted">Saldo em contas</p>
+              <p className={`text-[22px] leading-8 font-bold ${stats.realBalance < 0 ? 'text-red-400' : stats.realBalance === 0 ? 'text-textMuted' : 'text-white'}`}>{signed(stats.realBalance)}</p>
+              <p className="text-xs text-textMuted">Contas correntes, sem investimentos</p>
+            </div>
+            {hasInvestments && (
+              <button type="button" onClick={() => onNavigate('investments')} className="px-5 md:px-6 py-4 text-left hover:bg-white/[0.02] transition-colors">
+                <p className="text-sm text-textMuted">Investimentos</p>
+                <p className="text-[22px] leading-8 font-bold text-white">{signed(stats.investmentBalance)}</p>
+                <p className="text-xs text-textMuted">{describeHoldings(investmentHoldings)}</p>
+              </button>
+            )}
+            <button type="button" onClick={() => onNavigate('debts')} className="px-5 md:px-6 py-4 text-left hover:bg-white/[0.02] transition-colors">
+              <p className="text-sm text-textMuted">Total em dívidas</p>
+              <p className={`text-[22px] leading-8 font-bold ${stats.totalOwed === 0 ? 'text-textMuted' : 'text-white'}`}>{fmt(stats.totalOwed)}</p>
+              <p className="text-xs text-textMuted">Cartão, parcelas futuras e dívidas cadastradas</p>
+            </button>
+          </section>
+
+          {/* ── Fluxo e categorias ── */}
+          <div className="grid gap-3 lg:grid-cols-3">
+            <section aria-labelledby="flow-title" className="panel rounded-2xl p-5 md:p-6 lg:col-span-2">
+              <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
+                <h2 id="flow-title" className="text-base font-medium text-white">
+                  {chartPeriod === '30d' ? 'Entradas menos saídas, por dia' : 'Entradas menos saídas, por mês'}
+                </h2>
+                <div role="group" aria-label="Período" className="flex p-0.5 rounded-md bg-white/[0.06]">
+                  {([['30d', 'Últimos 30 dias'], ['all', 'Por mês']] as const).map(([value, label]) => (
+                    <button key={value} type="button" aria-pressed={chartPeriod === value} onClick={() => onChangeChartPeriod(value)}
+                      className={`h-7 px-3 text-xs rounded transition-colors ${chartPeriod === value ? 'bg-card text-white font-medium' : 'text-textMuted hover:text-white'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="h-[272px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <RechartsTooltip
-                      contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                      itemStyle={{ color:'var(--color-textMain)' }}
-                      formatter={(v, name) => [fmt(Number(v)), name]}/>
-                    <Pie data={stats.expenseByCategory} dataKey="amount" nameKey="name"
-                      innerRadius="45%" outerRadius="75%" paddingAngle={2} stroke="none">
-                      {stats.expenseByCategory.map((e, i) => (
-                        <Cell key={e.name} fill={PIE_COLORS[i % PIE_COLORS.length]}/>
-                      ))}
-                    </Pie>
-                    <Legend iconType="circle" iconSize={8}
-                      formatter={v => <span style={{ color:'var(--color-textMuted)', fontSize:11 }}>{v}</span>}/>
-                  </PieChart>
+                  <BarChart data={flowData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                    <CartesianGrid vertical={false}/>
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} interval={chartPeriod === '30d' ? 5 : 0} tickMargin={6}/>
+                    <YAxis axisLine={false} tickLine={false} tickFormatter={axisMoney} width={60} ticks={flowTicks} domain={[flowTicks[0], flowTicks[flowTicks.length - 1]]} interval={0}/>
+                    <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6}/>
+                    <RechartsTooltip {...tooltipStyle} formatter={(v) => [signed(Number(v)), 'Entradas − saídas']}/>
+                    <Bar dataKey="balance" maxBarSize={chartPeriod === '30d' ? 14 : 36} isAnimationActive={false}>
+                      {flowData.map(d => <Cell key={d.name} fill={d.balance < 0 ? 'var(--chart-muted)' : 'var(--chart-ink)'}/>)}
+                    </Bar>
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
+              <p className="text-xs text-textMuted mt-2">Barra para cima: entrou mais do que saiu. Transferências entre suas contas não contam.</p>
+            </section>
+
+            <section aria-labelledby="category-title" className="panel rounded-2xl p-5 md:p-6">
+              <h2 id="category-title" className="text-base font-medium text-white mb-4">Gastos por categoria</h2>
+              {stats.expenseByCategory.length === 0 ? (
+                <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">Nenhum gasto registrado ainda.</p>
+              ) : (
+                <div className="flex flex-col sm:flex-row lg:flex-col gap-5 items-center sm:items-start lg:items-center">
+                  <div className="relative w-32 h-32 shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={stats.expenseByCategory} dataKey="amount" nameKey="name"
+                          innerRadius="80%" outerRadius="100%" paddingAngle={1.5} stroke="none" isAnimationActive={false} startAngle={90} endAngle={-270}>
+                          {stats.expenseByCategory.map((e, i) => (
+                            <Cell key={e.name} fill="var(--color-accent)" fillOpacity={RING_OPACITY[i] ?? 0.12}/>
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-xs text-textMuted">Total</span>
+                      <span className="text-sm font-bold text-white">{fmt(categoryTotal)}</span>
+                    </div>
+                  </div>
+                  <table className="w-full text-[13px]">
+                    <caption className="sr-only">Gastos por categoria</caption>
+                    <tbody>
+                      {stats.expenseByCategory.map((c, i) => (
+                        <tr key={c.name}>
+                          <td className="py-1 pr-2 w-3">
+                            <span className="block w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-accent)', opacity: RING_OPACITY[i] ?? 0.12 }}/>
+                          </td>
+                          <td className="py-1 pr-2 text-white truncate max-w-0 w-full">{c.name}</td>
+                          <td className="py-1 pr-2 text-right text-white whitespace-nowrap">{fmt(c.amount)}</td>
+                          <td className="py-1 text-right text-textMuted whitespace-nowrap">
+                            {categoryTotal > 0 ? `${((c.amount / categoryTotal) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%` : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* ── Para onde o saldo vai (FIN-059) e o orçamento do mês (FIN-046). ── */}
+          {(hasProjection || budgetProgress.length > 0) && (
+            <div className={`grid gap-3 items-start ${hasProjection && budgetProgress.length > 0 ? 'lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]' : ''}`}>
+              {hasProjection && (
+                <section aria-labelledby="projection-title" className="panel rounded-2xl p-5 md:p-6">
+                  <div className="flex justify-between items-baseline gap-3 mb-4">
+                    <h2 id="projection-title" className="text-base font-medium text-white">Saldo projetado</h2>
+                    <span className="text-xs text-textMuted">Próximos 6 meses</span>
+                  </div>
+                  <div className="h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={projection} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                        <CartesianGrid vertical={false}/>
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tickMargin={6}/>
+                        <YAxis axisLine={false} tickLine={false} tickFormatter={axisMoney} width={60} ticks={projectionTicks} domain={[projectionTicks[0], projectionTicks[projectionTicks.length - 1]]} interval={0}/>
+                        <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6}/>
+                        <RechartsTooltip {...tooltipStyle} formatter={(v) => [signed(Number(v)), 'Saldo ao fim do mês']}/>
+                        <Bar dataKey="balance" maxBarSize={36} isAnimationActive={false}>
+                          {projection.map(p => <Cell key={p.month} fill={p.balance < 0 ? 'var(--color-red-500)' : 'var(--chart-ink)'}/>)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-xs text-textMuted mt-2">
+                    Saldo de hoje, mais o salário de cada mês, menos a fatura, as parcelas do cartão e as dívidas.
+                  </p>
+                </section>
+              )}
+
+              {budgetProgress.length > 0 && (
+                <section aria-labelledby="budget-title" className="panel rounded-2xl p-5 md:p-6">
+                  <div className="flex justify-between items-baseline gap-3 mb-4">
+                    <h2 id="budget-title" className="text-base font-medium text-white">Orçamento de {monthName}</h2>
+                    <button type="button" onClick={() => onNavigate('budgets')} className="text-xs text-textMuted hover:text-white transition-colors">
+                      Ver todos ({budgetProgress.length})
+                    </button>
+                  </div>
+                  <ul className="space-y-3.5">
+                    {[...budgetProgress].sort((a, b) => b.percentage - a.percentage).slice(0, 5).map(b => (
+                      <li key={b.id}>
+                        <div className="flex justify-between gap-3 text-sm mb-1.5">
+                          <span className="text-white truncate">{b.category}</span>
+                          <span className="whitespace-nowrap">
+                            <span className={b.isOverLimit ? 'text-red-400 font-medium' : 'text-white'}>{fmt(b.spent)}</span>
+                            <span className="text-textMuted"> de {fmt(b.limit)}</span>
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+                          <div className="h-full rounded-full"
+                            style={{ width: `${Math.min(100, b.percentage)}%`, backgroundColor: b.isOverLimit ? 'var(--color-red-500)' : 'var(--chart-ink)' }} />
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* FIN-059: projeção de saldo — só aparece quando há algo a projetar
-          (salário ou dívida em aberto), senão seria uma linha reta. */}
-      {projection.some(p => p.salaryDelta > 0 || p.debtDelta > 0) && (
-        <div className="glass-card rounded-2xl p-6 mb-8">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-lg font-semibold text-white">Projeção de Saldo</h3>
-            <span className="text-[10px] uppercase tracking-wider font-bold text-textMuted bg-white/5 px-2.5 py-1 rounded-full border border-white/5">
-              Próximos 6 meses
-            </span>
-          </div>
-          <div className="h-60">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={projection}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false}/>
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize:10 }}/>
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
-                <ReferenceLine y={0} stroke="var(--color-textMuted)" strokeOpacity={0.4}/>
-                <RechartsTooltip
-                  cursor={{ fill:'rgba(255,255,255,0.04)' }}
-                  contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                  formatter={(v) => [`${Number(v) < 0 ? '−' : ''}${fmt(Number(v))}`, 'Saldo projetado']}
-                  labelStyle={{ color:'var(--color-textMuted)' }}
-                />
-                <Bar dataKey="balance" radius={[4,4,0,0]} maxBarSize={40} animationDuration={1000}>
-                  {projection.map(p => (
-                    <Cell key={p.month} fill={p.balance < 0 ? '#ef4444' : '#10b981'}/>
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="text-xs text-textMuted mt-3">
-            Saldo real de hoje somado ao salário de cada mês e descontadas as dívidas do mês: fatura do cartão, parcelas e dívidas em aberto.
-          </p>
         </div>
       )}
     </>

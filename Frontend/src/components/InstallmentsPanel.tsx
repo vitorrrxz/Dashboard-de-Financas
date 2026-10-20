@@ -9,7 +9,6 @@ import {
   type DueItem, type InstallmentPurchase,
 } from '../utils/installments';
 import { MonthNavigator, MonthTotal } from './MonthNavigator';
-import { readableColor } from '../utils/theme';
 
 interface InstallmentsPanelProps {
   transactions: Transaction[];
@@ -25,10 +24,7 @@ interface InstallmentsPanelProps {
   view: 'due' | 'purchases';
 }
 
-/** Mesma cor da categoria "Cartão de Crédito" no DebtManager. */
-const CARD_COLOR = '#ec4899';
-const DEBT_COLOR = '#f59e0b';
-const DONE_COLOR = '#14b8a6';
+
 
 /**
  * Parte superior da aba Dívidas (FIN-094): mês de referência com o valor total a pagar no
@@ -57,7 +53,7 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill, vie
     return (
       <section>
         <div className="flex items-baseline justify-between gap-3 mb-4 flex-wrap">
-          <h3 className="text-lg font-semibold text-white">Compras parceladas no cartão</h3>
+          <h3 className="text-base font-medium text-white">Compras parceladas no cartão</h3>
           {purchases.length > 0 && (
             <p className="text-xs text-textMuted">
               {activeCount} em andamento · {purchases.length - activeCount} concluída(s)
@@ -65,7 +61,7 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill, vie
           )}
         </div>
         {purchases.length === 0 ? (
-          <div className="glass-card rounded-xl p-8 text-center text-sm text-textMuted">
+          <div className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">
             Nenhuma compra parcelada encontrada nas transações do cartão.
           </div>
         ) : (
@@ -80,30 +76,30 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill, vie
   return (
     <div className="space-y-6">
       {/* Mês de referência + valor total a pagar no mês */}
-      <div className="glass-card rounded-2xl p-4 flex flex-wrap items-end justify-between gap-4">
+      <div className="panel rounded-2xl p-4 flex flex-wrap items-end justify-between gap-4">
         <MonthNavigator id="debt-month" value={month} months={months} onChange={setMonth}/>
         <div className="flex flex-wrap items-end gap-6">
-          <MonthTotal label={showBill ? 'Fatura do cartão' : 'Parcelas do cartão'} value={card} color={readableColor(CARD_COLOR)}/>
-          <MonthTotal label="Dívidas" value={totals.debt} color={readableColor(DEBT_COLOR)}/>
+          <MonthTotal label={showBill ? 'Fatura do cartão' : 'Parcelas do cartão'} value={card} color="var(--color-textMain)"/>
+          <MonthTotal label="Dívidas" value={totals.debt} color="var(--color-textMain)"/>
           <MonthTotal label="Valor total" value={Math.round((card + totals.debt) * 100) / 100} color="var(--color-textMain)"/>
         </div>
       </div>
 
       {/* Vencimentos do mês */}
-      <section className="glass-card rounded-2xl p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Vencimentos de {formatMonthLabel(month)}</h3>
+      <section className="panel rounded-2xl p-6">
+        <h3 className="text-base font-medium text-white mb-4">Vencimentos de {formatMonthLabel(month)}</h3>
         {items.length === 0 ? (
-          <p className="text-center text-textMuted py-8 text-sm">Nenhuma parcela neste mês.</p>
+          <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">Nenhuma parcela neste mês.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-textMuted">
-                  <th className="pb-3 font-semibold">Data</th>
-                  <th className="pb-3 font-semibold">Descrição</th>
-                  <th className="pb-3 font-semibold">Parcela</th>
-                  <th className="pb-3 font-semibold">Situação</th>
-                  <th className="pb-3 font-semibold text-right">Valor</th>
+                <tr className="border-b border-[var(--line)] text-xs text-textMuted">
+                  <th className="pb-2 font-normal">Data</th>
+                  <th className="pb-2 font-normal">Descrição</th>
+                  <th className="pb-2 font-normal">Parcela</th>
+                  <th className="pb-2 font-normal">Situação</th>
+                  <th className="pb-2 font-normal text-right">Valor</th>
                 </tr>
               </thead>
               <tbody className="text-sm divide-y divide-white/5">
@@ -126,11 +122,11 @@ function dueStatus(item: DueItem, today: string): { label: string; className: st
   if (item.source === 'card') {
     return item.date <= today
       ? { label: 'Lançada na fatura', className: 'text-textMuted' }
-      : { label: 'A lançar', className: 'text-pink-300' };
+      : { label: 'A lançar', className: 'text-white' };
   }
   return item.date < today
     ? { label: 'Vencida', className: 'text-red-400' }
-    : { label: 'A vencer', className: 'text-amber-300' };
+    : { label: 'A vencer', className: 'text-white' };
 }
 
 /** Linha da lista de vencimentos do mês. */
@@ -142,29 +138,29 @@ function DueRow({ item, today }: { item: DueItem; today: string }) {
       <td className="py-3 text-textMuted whitespace-nowrap">{formatDateBR(item.date, { day: '2-digit', month: '2-digit' })}</td>
       <td className="py-3 text-white">
         <span className="inline-flex items-center gap-2">
-          <Icon size={13} aria-hidden="true" style={{ color: item.source === 'card' ? CARD_COLOR : DEBT_COLOR }}/>
+          <Icon size={13} aria-hidden="true" className="text-textMuted shrink-0"/>
           {item.name}
         </span>
       </td>
       <td className="py-3 text-textMuted whitespace-nowrap">
         {item.number}/{item.totalInstallments}
         {item.estimated && (
-          <span className="ml-2 text-[10px] uppercase tracking-wider opacity-70"
+          <span className="ml-2 text-xs opacity-70"
             title="Parcela deduzida: não veio nos dados sincronizados">estimada</span>
         )}
       </td>
       <td className="py-3"><span className={`text-xs font-medium ${status.className}`}>{status.label}</span></td>
-      <td className="py-3 text-right font-semibold text-white whitespace-nowrap">{formatBRL(item.amount)}</td>
+      <td className="py-3 text-right font-medium text-white whitespace-nowrap">{formatBRL(item.amount)}</td>
     </tr>
   );
 }
 
 /** Célula de valor do card de compra parcelada. */
-function InfoCell({ label, value, color }: { label: string; value: string; color?: string }) {
+function InfoCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
+    <div>
       <p className="text-xs text-textMuted mb-0.5">{label}</p>
-      <p className="text-sm font-bold" style={{ color: color ? readableColor(color) : 'var(--color-textMain)' }}>{value}</p>
+      <p className="text-sm font-bold text-white">{value}</p>
     </div>
   );
 }
@@ -175,16 +171,16 @@ function PurchaseCard({ purchase: p, accountName }: { purchase: InstallmentPurch
   const pct = p.totalInstallments > 0 ? (p.chargedInstallments / p.totalInstallments) * 100 : 0;
   const estimatedCount = p.installments.filter(i => i.estimated).length;
   const lastDate = p.installments[p.installments.length - 1].date;
-  const barColor = done ? DONE_COLOR : CARD_COLOR;
+  const barColor = done ? 'var(--color-teal-500)' : 'var(--color-accent)';
 
   return (
-    <div className="glass-card rounded-xl p-5" style={{ borderLeft: `3px solid ${barColor}` }}>
+    <div className="panel rounded-xl p-5">
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="min-w-0">
-          <h4 className="text-sm font-semibold text-white truncate" title={p.name}>{p.name}</h4>
+          <h4 className="text-sm font-medium text-white truncate" title={p.name}>{p.name}</h4>
           <p className="text-xs text-textMuted mt-0.5">{[accountName, p.category].filter(Boolean).join(' · ')}</p>
         </div>
-        {done && <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent shrink-0">Concluída</span>}
+        {done && <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: 'var(--fg-6)' }}>Concluída</span>}
       </div>
 
       <div className="mb-3">
@@ -192,21 +188,21 @@ function PurchaseCard({ purchase: p, accountName }: { purchase: InstallmentPurch
           <span>{p.chargedInstallments}/{p.totalInstallments} parcelas lançadas</span>
           <span>{pct.toFixed(0)}%</span>
         </div>
-        <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-7)' }}
+        <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}
           role="progressbar" aria-valuemin={0} aria-valuemax={p.totalInstallments} aria-valuenow={p.chargedInstallments}
           aria-label={`${p.chargedInstallments} de ${p.totalInstallments} parcelas lançadas`}>
           <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: barColor }}/>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 text-center">
-        <InfoCell label="Parcela" value={formatBRL(p.installmentAmount)} color={CARD_COLOR}/>
+      <div className="grid grid-cols-3 gap-3">
+        <InfoCell label="Parcela" value={formatBRL(p.installmentAmount)}/>
         <InfoCell label="Restante" value={formatBRL(p.remainingAmount)}/>
         <InfoCell label={done ? 'Última' : 'Próxima'}
           value={formatDateBR(p.nextDate ?? lastDate, { day: '2-digit', month: '2-digit', year: '2-digit' })}/>
       </div>
 
-      <p className="text-[11px] text-textMuted mt-3">
+      <p className="text-xs text-textMuted mt-3">
         Total da compra: {formatBRL(p.totalAmount)}
         {estimatedCount > 0 && ` · ${estimatedCount} parcela(s) estimada(s)`}
       </p>

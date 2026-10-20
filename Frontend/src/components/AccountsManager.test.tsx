@@ -44,7 +44,7 @@ describe('AccountsManager — moedas (FIN-076)', () => {
 
   it('o seletor de moeda tem rótulo associado, e os campos de valor seguem a moeda escolhida', () => {
     renderManager();
-    fireEvent.click(screen.getByRole('button', { name: /Adicionar Conta/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Adicionar conta/ }));
     const select = screen.getByLabelText('Moeda');
     expect(select).toHaveValue('BRL');
     fireEvent.change(select, { target: { value: 'EUR' } });
@@ -61,7 +61,7 @@ describe('AccountsManager — moedas (FIN-076)', () => {
 
   it('salva a moeda escolhida', async () => {
     const { onAdd } = renderManager();
-    fireEvent.click(screen.getByRole('button', { name: /Adicionar Conta/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Adicionar conta/ }));
     fireEvent.change(screen.getByLabelText('Nome da Conta'), { target: { value: 'Nomad' } });
     fireEvent.change(screen.getByLabelText('Banco / Operadora'), { target: { value: 'Nomad' } });
     fireEvent.change(screen.getByLabelText('Moeda'), { target: { value: 'USD' } });

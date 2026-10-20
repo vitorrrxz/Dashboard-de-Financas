@@ -15,7 +15,7 @@ export function InvestmentsPage({ investments, accounts, onAdd, onUpdate, onDele
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-1">Investimentos</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Investimentos</h1>
         <p className="text-textMuted text-sm">Quanto você aplicou, quanto vale hoje e como a carteira está distribuída</p>
       </div>
       <InvestmentsManager

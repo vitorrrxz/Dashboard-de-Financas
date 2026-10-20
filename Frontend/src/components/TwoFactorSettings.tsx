@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
+
 import { apiFetch } from '../services/api';
 import { FormField } from './shared/FormField';
 import {
@@ -26,8 +26,8 @@ function remainingText(remaining: number | null): string | null {
 }
 
 const primaryButton = 'px-4 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors disabled:opacity-50';
-const primaryStyle = { background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' };
-const secondaryButton = 'px-4 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50';
+const primaryStyle = { background: 'var(--color-primary)' };
+const secondaryButton = 'px-4 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50';
 
 /**
  * FIN-078 — ativação e desativação da verificação em duas etapas (TOTP). Ativar tem dois passos:
@@ -181,7 +181,7 @@ export function TwoFactorSettings({ token }: { token: string }) {
           </p>
           <ul aria-label="Códigos de recuperação" className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-sm mb-4">
             {recoveryCodes.map(c => (
-              <li key={c} className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-center tracking-wider">{c}</li>
+              <li key={c} className="px-3 py-2 rounded-lg bg-white/5 border border-[var(--line)] text-white text-center">{c}</li>
             ))}
           </ul>
           <div className="flex flex-wrap gap-3">
@@ -289,13 +289,10 @@ export function TwoFactorSettings({ token }: { token: string }) {
   };
 
   return (
-    <section aria-labelledby="twofa-title" className="glass-card rounded-2xl p-6">
+    <section aria-labelledby="twofa-title" className="panel rounded-2xl p-6">
       <div className="flex items-start gap-3 mb-5">
-        <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 shrink-0">
-          <ShieldCheck size={20} className="text-primary" />
-        </div>
         <div>
-          <h2 id="twofa-title" className="text-lg font-semibold text-white">Verificação em duas etapas</h2>
+          <h2 id="twofa-title" className="text-base font-medium text-white">Verificação em duas etapas</h2>
           <p className="text-sm text-textMuted">
             Além da senha, o login pede um código de 6 dígitos do aplicativo autenticador do celular (Google Authenticator,
             Microsoft Authenticator, Authy, 1Password…).

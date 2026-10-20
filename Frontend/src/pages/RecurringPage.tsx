@@ -17,7 +17,7 @@ export function RecurringPage({
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-1">Recorrências</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Recorrências</h1>
         <p className="text-textMuted text-sm">Lançamentos que se repetem — salário, aluguel, assinaturas</p>
       </div>
       <RecurringManager

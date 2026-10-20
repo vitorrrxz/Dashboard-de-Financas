@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Mail, Lock, User, ArrowRight, ArrowLeft, ShieldCheck } from 'lucide-react';
 import { apiFetch } from '../services/api';
 import { recoveryNotice } from '../utils/twoFactor';
+import { FinFlowMark } from './FinFlowMark';
 
 type AuthUser = { id: string; name: string; email: string };
 
@@ -28,8 +29,8 @@ function isAuthUser(value: unknown): value is AuthUser {
   return typeof u.id === 'string' && typeof u.name === 'string' && typeof u.email === 'string';
 }
 
-const inputClass = 'w-full bg-white/5 border border-white/10 rounded-xl pl-11 pr-4 py-3 text-white focus:outline-none focus:border-primary/50 transition-colors';
-const labelClass = 'block text-xs font-semibold text-textMuted uppercase tracking-wide mb-1.5 ml-1';
+const inputClass = 'w-full bg-white/5 border border-[var(--line)] rounded-xl pl-11 pr-4 py-3 text-white focus:outline-none focus:border-primary/50 transition-colors';
+const labelClass = 'block text-xs font-semibold text-textMuted mb-1.5 ml-1';
 
 export function AuthForm({ onLogin }: AuthFormProps) {
   const [isLogin, setIsLogin] = useState(true);
@@ -96,19 +97,14 @@ export function AuthForm({ onLogin }: AuthFormProps) {
   const submitLabel = twoFactorStep ? 'Verificar' : isLogin ? 'Entrar no Sistema' : 'Criar Conta';
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden"
-         style={{ backgroundColor: 'var(--color-background)' }}>
-      {/* Background glow effects */}
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 rounded-full blur-[100px] pointer-events-none" style={{ backgroundColor: 'rgba(99,102,241,0.15)' }} />
-      <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style={{ backgroundColor: 'rgba(168,85,247,0.1)' }} />
-
-      <div className="glass-card w-full max-w-md p-8 rounded-3xl z-10 mx-4">
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center font-bold text-2xl text-on-accent mb-4"
-            style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>
-            F
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="panel w-full max-w-sm p-8 rounded-2xl mx-4">
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-6">
+            <FinFlowMark />
+            <span className="text-sm font-medium text-white">FinFlow</span>
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">{title}</h2>
+          <h2 className="text-2xl font-medium tracking-tight text-white mb-1">{title}</h2>
           <p className="text-textMuted text-sm">{subtitle}</p>
         </div>
 
@@ -185,8 +181,8 @@ export function AuthForm({ onLogin }: AuthFormProps) {
           )}
 
           <button type="submit" disabled={loading}
-            className="w-full py-3.5 mt-2 rounded-xl text-on-accent font-bold tracking-wide flex items-center justify-center gap-2 shadow-xl transition-all disabled:opacity-50"
-            style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>
+            className="w-full py-3.5 mt-2 rounded-xl text-on-accent font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+            style={{ background: 'var(--color-primary)' }}>
             {loading ? 'Aguarde...' : submitLabel}
             {!loading && <ArrowRight size={18} />}
           </button>

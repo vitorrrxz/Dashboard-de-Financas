@@ -31,11 +31,11 @@ describe('useTheme (FIN-083)', () => {
     localStorage.clear();
   });
 
-  it('sem preferência salva, aplica o tema escuro', () => {
-    mockSystemTheme(true);
+  it('sem preferência salva, aplica o tema claro — mesmo com o sistema no escuro', () => {
+    mockSystemTheme(false);
     const { result } = renderHook(() => useTheme());
-    expect(result.current).toMatchObject({ preference: 'dark', resolved: 'dark' });
-    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(result.current).toMatchObject({ preference: 'light', resolved: 'light' });
+    expect(document.documentElement.dataset.theme).toBe('light');
   });
 
   it('aplica a preferência salva e persiste a nova escolha', () => {

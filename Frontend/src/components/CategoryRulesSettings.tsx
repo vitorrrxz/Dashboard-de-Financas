@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react';
-import { Plus, Tags, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { apiFetch } from '../services/api';
-import { CATEGORY_COLORS } from '../utils/categories';
+import { CATEGORIES } from '../utils/categories';
 
 interface CategoryRule {
   id: string;
@@ -9,10 +9,9 @@ interface CategoryRule {
   category: string;
 }
 
-const CATEGORIES = Object.keys(CATEGORY_COLORS);
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const byMatch = (a: CategoryRule, b: CategoryRule) => a.match.localeCompare(b.match, 'pt-BR');
-const labelClass = 'block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide';
+const labelClass = 'block text-xs font-medium text-textMuted mb-1.5 tracking-wide';
 
 /**
  * FIN-106 — regras de categoria (FIN-105): a transação nova, importada ou da Pluggy, cuja descrição
@@ -61,13 +60,10 @@ export function CategoryRulesSettings({ token }: { token: string }) {
   };
 
   return (
-    <section aria-labelledby={`${id}-title`} className="glass-card rounded-2xl p-6">
+    <section aria-labelledby={`${id}-title`} className="panel rounded-2xl p-6">
       <div className="flex items-start gap-3 mb-5">
-        <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 shrink-0">
-          <Tags size={20} className="text-primary" aria-hidden="true" />
-        </div>
         <div>
-          <h2 id={`${id}-title`} className="text-lg font-bold text-white">Regras de categoria</h2>
+          <h2 id={`${id}-title`} className="text-base font-medium text-white">Regras de categoria</h2>
           <p className="text-sm text-textMuted">
             A transação nova — importada ou da Pluggy — cuja descrição contém o texto entra com a categoria da regra.
             Sem acento e sem diferenciar maiúsculas; havendo mais de uma, vale a de texto mais longo.
@@ -113,7 +109,7 @@ export function CategoryRulesSettings({ token }: { token: string }) {
           </select>
         </div>
         <button type="submit" className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-on-accent"
-          style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+          style={{ background: 'var(--color-primary)' }}>
           <Plus size={16} aria-hidden="true" /> Adicionar regra
         </button>
       </form>

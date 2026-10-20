@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { X, Plus, Trash2, Edit2, Repeat, Pause, Play, Sparkles } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, Pause, Play } from 'lucide-react';
+import { formatBRL } from '../utils/money';
 import type { Account, RecurrenceFrequency, RecurringTransaction, Transaction } from '../types';
-import { CATEGORY_COLORS, EXPENSE_CATEGORIES } from '../utils/categories';
+import { CATEGORIES, EXPENSE_CATEGORIES } from '../utils/categories';
 import { todayISO } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
 import {
@@ -82,7 +83,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
   // Ao contrário do orçamento (só despesas), uma recorrência pode ser receita — por isso a
   // lista usa TODAS as categorias conhecidas, e não `EXPENSE_CATEGORIES`: sem "Receita"
   // disponível, não daria para categorizar um salário recorrente.
-  const categories = Array.from(new Set([...Object.keys(CATEGORY_COLORS), ...transactionCategories]));
+  const categories = Array.from(new Set([...CATEGORIES, ...transactionCategories]));
 
   /** Abre o modal em modo "criar", com a próxima ocorrência sugerida para hoje. */
   const openAdd = () => {
@@ -148,13 +149,10 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
   return (
     <div>
       {suggestions.length > 0 && (
-        <div className="glass-card rounded-xl p-4 mb-4">
-          <div className="flex items-center gap-2 mb-1">
-            <Sparkles size={16} className="text-amber-300 shrink-0" />
-            <h3 className="text-sm font-semibold text-white">Assinaturas encontradas</h3>
-          </div>
+        <div className="panel rounded-xl p-4 mb-4">
+          <h3 className="text-sm font-medium text-white mb-1">Assinaturas encontradas nas suas transações</h3>
           <p className="text-xs text-textMuted mb-3">
-            Total mensal aproximado: R$ {suggestionsMonthlyTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            Cerca de {formatBRL(suggestionsMonthlyTotal)} por mês. Crie a recorrência para lançá-las sozinhas, ou ignore.
           </p>
           <div className="space-y-2">
             {suggestions.map(sub => (
@@ -165,12 +163,11 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
                     {FREQUENCY_LABELS[sub.frequency]} · {sub.occurrences}x · {sub.category}
                   </p>
                 </div>
-                <p className="text-sm font-semibold text-red-400 shrink-0">
-                  R$ {Math.abs(sub.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                <p className="text-sm font-medium text-white shrink-0">
+                  {formatBRL(sub.amount)}
                 </p>
-                <button onClick={() => handleCreateFromSuggestion(sub)}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg text-on-accent shrink-0 whitespace-nowrap"
-                  style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                <button type="button" onClick={() => handleCreateFromSuggestion(sub)}
+                  className="h-8 text-sm px-3 rounded-md text-white bg-card border border-[var(--control)] hover:border-[var(--color-textMuted)] shrink-0 whitespace-nowrap transition-colors">
                   Criar recorrência
                 </button>
                 <button onClick={() => handleDismissSuggestion(sub.key)} title="Ignorar sugestão"
@@ -186,34 +183,21 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
 
       <div className="space-y-3 mb-4">
         {recurring.length === 0 && (
-          <div className="glass-card rounded-xl p-8 flex flex-col items-center text-center">
-            <Repeat size={32} className="text-textMuted mb-3" />
-            <p className="text-white font-medium mb-1">Nenhuma recorrência cadastrada</p>
-            <p className="text-textMuted text-sm">Cadastre salário, aluguel e assinaturas para lançá-los automaticamente</p>
-          </div>
+          <p className="text-sm text-textMuted">Nenhuma recorrência ainda. Cadastre aluguel e assinaturas para lançá-los sozinhos na data.</p>
         )}
 
         {recurring.map(rec => {
           const account = accounts.find(a => a.id === rec.accountId);
           return (
-            <div key={rec.id} className={`glass-card rounded-xl p-4 flex items-center gap-4 ${rec.active ? '' : 'opacity-60'}`}>
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                style={{
-                  backgroundColor: rec.amount >= 0 ? 'rgba(20,184,166,0.15)' : 'rgba(236,72,153,0.15)',
-                  border: `1px solid ${rec.amount >= 0 ? 'rgba(20,184,166,0.3)' : 'rgba(236,72,153,0.3)'}`,
-                  color: rec.amount >= 0 ? 'var(--text-positive)' : 'var(--text-pink)',
-                }}>
-                <Repeat size={18} />
-              </div>
-
+            <div key={rec.id} className={`panel rounded-xl p-4 flex items-center gap-4 ${rec.active ? '' : 'opacity-60'}`}>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-semibold text-white truncate">{rec.name}</p>
+                  <p className="text-sm font-medium text-white truncate">{rec.name}</p>
                   <span className="text-xs px-2 py-0.5 rounded-full text-textMuted" style={{ backgroundColor: 'var(--fg-5)' }}>
                     {FREQUENCY_LABELS[rec.frequency]}
                   </span>
                   {!rec.active && (
-                    <span className="text-xs px-2 py-0.5 rounded-full text-amber-300" style={{ backgroundColor: 'rgba(245,158,11,0.12)' }}>
+                    <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: 'var(--fg-6)', color: 'var(--color-textMain)' }}>
                       Pausada
                     </span>
                   )}
@@ -226,8 +210,8 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
               </div>
 
               <div className="text-right shrink-0">
-                <p className={`text-lg font-bold ${rec.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
-                  {rec.amount >= 0 ? '+' : '-'}R$ {Math.abs(rec.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                <p className={`text-base font-medium ${rec.amount >= 0 ? 'text-teal-400' : 'text-white'}`}>
+                  {rec.amount >= 0 ? '+' : '−'}{formatBRL(rec.amount)}
                 </p>
               </div>
 
@@ -238,10 +222,10 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
                   className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
                   {rec.active ? <Pause size={14} /> : <Play size={14} />}
                 </button>
-                <button onClick={() => openEdit(rec)} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                <button type="button" onClick={() => openEdit(rec)} aria-label={`Editar ${rec.name}`} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
                   <Edit2 size={14} />
                 </button>
-                <button onClick={() => handleDelete(rec.id)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
+                <button type="button" onClick={() => handleDelete(rec.id)} aria-label={`Excluir ${rec.name}`} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
                   <Trash2 size={14} />
                 </button>
               </div>
@@ -251,16 +235,15 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
       </div>
 
       <button onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
-        style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
-        <Plus size={16} /> Adicionar Recorrência
+        className="w-full h-12 rounded-xl border border-dashed border-[var(--control)] text-sm text-textMuted hover:text-white hover:border-[var(--color-textMuted)] flex items-center justify-center gap-2 transition-colors">
+        <Plus size={15} /> Adicionar recorrência
       </button>
 
       {showForm && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-md panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-white">{editingId ? 'Editar Recorrência' : 'Nova Recorrência'}</h3>
+              <h3 className="text-base font-medium text-white">{editingId ? 'Editar Recorrência' : 'Nova Recorrência'}</h3>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
                 <X size={18} />
               </button>
@@ -319,9 +302,9 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
+              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 transition-colors">Cancelar</button>
               <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
-                style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                style={{ background: 'var(--color-primary)' }}>
                 {editingId ? 'Salvar' : 'Adicionar'}
               </button>
             </div>

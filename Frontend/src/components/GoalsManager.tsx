@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { X, Plus, Trash2, Edit2, Target, CheckCircle2, AlertTriangle, Link2 } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, Link2 } from 'lucide-react';
 import type { Account, Goal, Investment } from '../types';
 import { computeGoalProgress, linkedGoalAmount } from '../utils/goals';
 import { todayISO } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
 import { FormField } from './shared/FormField';
+import { formatBRL } from '../utils/money';
 
 type GoalFormData = Omit<Goal, 'id' | 'createdAt'>;
 /** Como a meta acumula: digitado à mão, ou seguindo o saldo de uma conta/o valor de um investimento (FIN-113). */
@@ -117,46 +118,31 @@ export function GoalsManager({ goals, accounts, investments, onAdd, onUpdate, on
     <div>
       <div className="space-y-3 mb-4">
         {goals.length === 0 && (
-          <div className="glass-card rounded-xl p-8 flex flex-col items-center text-center">
-            <Target size={32} className="text-textMuted mb-3" />
-            <p className="text-white font-medium mb-1">Nenhuma meta cadastrada</p>
-            <p className="text-textMuted text-sm">Defina quanto quer juntar e até quando, e acompanhe o progresso aqui</p>
-          </div>
+          <p className="text-sm text-textMuted">Nenhuma meta ainda. Defina quanto quer juntar e até quando; ligada a uma conta ou investimento, ela anda sozinha.</p>
         )}
 
         {goals.map(goal => {
           const progress = computeGoalProgress(goal);
-          const barColor = progress.isAchieved ? 'bg-teal-400' : progress.isOverdue ? 'bg-red-400' : 'bg-primary';
+          const barColor = progress.isAchieved ? 'var(--color-teal-500)' : progress.isOverdue ? 'var(--color-red-500)' : 'var(--color-accent)';
           return (
-            <div key={goal.id} className="glass-card rounded-xl p-4">
+            <div key={goal.id} className="panel rounded-xl p-4">
               <div className="flex items-center gap-4">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
-                  style={{
-                    backgroundColor: progress.isAchieved ? 'rgba(20,184,166,0.15)' : progress.isOverdue ? 'rgba(239,68,68,0.15)' : 'rgba(99,102,241,0.15)',
-                    border: `1px solid ${progress.isAchieved ? 'rgba(20,184,166,0.3)' : progress.isOverdue ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.3)'}`,
-                    color: progress.isAchieved ? 'var(--text-positive)' : progress.isOverdue ? 'var(--text-negative)' : 'var(--color-primary)',
-                  }}>
-                  {progress.isAchieved ? <CheckCircle2 size={18} /> : progress.isOverdue ? <AlertTriangle size={18} /> : <Target size={18} />}
-                </div>
-
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{goal.name}</p>
+                  <p className="text-sm font-medium text-white truncate">{goal.name}</p>
                   <p className="text-xs text-textMuted">
-                    R$ {goal.currentAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} de R$ {goal.targetAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    {formatBRL(goal.currentAmount)} de {formatBRL(goal.targetAmount)}
                     {' · '}
-                    {progress.isAchieved
-                      ? 'meta atingida'
-                      : `faltam R$ ${progress.remaining.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                    {progress.isAchieved ? <span className="text-teal-400">meta atingida</span> : `faltam ${formatBRL(progress.remaining)}`}
                   </p>
                   {(goal.accountId || goal.investmentId) && (
-                    <p className="text-[11px] text-textMuted flex items-center gap-1 mt-0.5">
+                    <p className="text-xs text-textMuted flex items-center gap-1 mt-0.5">
                       <Link2 size={11} className="shrink-0" /> Ligada a {linkedSourceName(goal, accounts, investments)}
                     </p>
                   )}
                 </div>
 
                 <div className="text-right shrink-0">
-                  <p className={`text-lg font-bold ${progress.isAchieved ? 'text-teal-400' : progress.isOverdue ? 'text-red-400' : 'text-white'}`}>
+                  <p className={`text-base font-medium ${progress.isOverdue ? 'text-red-400' : 'text-white'}`}>
                     {Math.round(progress.percentage)}%
                   </p>
                   <p className={`text-xs ${progress.isOverdue ? 'text-red-400' : 'text-textMuted'}`}>
@@ -165,18 +151,18 @@ export function GoalsManager({ goals, accounts, investments, onAdd, onUpdate, on
                 </div>
 
                 <div className="flex gap-1 shrink-0">
-                  <button onClick={() => openEdit(goal)} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                  <button type="button" onClick={() => openEdit(goal)} aria-label={`Editar a meta ${goal.name}`} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
                     <Edit2 size={14} />
                   </button>
-                  <button onClick={() => handleDelete(goal.id)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
+                  <button type="button" onClick={() => handleDelete(goal.id)} aria-label={`Excluir a meta ${goal.name}`} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
                     <Trash2 size={14} />
                   </button>
                 </div>
               </div>
 
               <div className="h-1.5 rounded-full overflow-hidden mt-3" style={{ backgroundColor: 'var(--fg-8)' }}>
-                <div className={`h-full rounded-full transition-all ${barColor}`}
-                  style={{ width: `${Math.min(100, progress.percentage)}%` }} />
+                <div className="h-full rounded-full transition-all"
+                  style={{ width: `${Math.min(100, progress.percentage)}%`, backgroundColor: barColor }} />
               </div>
             </div>
           );
@@ -184,16 +170,15 @@ export function GoalsManager({ goals, accounts, investments, onAdd, onUpdate, on
       </div>
 
       <button onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
-        style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
-        <Plus size={16} /> Adicionar Meta
+        className="w-full h-12 rounded-xl border border-dashed border-[var(--control)] text-sm text-textMuted hover:text-white hover:border-[var(--color-textMuted)] flex items-center justify-center gap-2 transition-colors">
+        <Plus size={15} /> Adicionar meta
       </button>
 
       {showForm && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-md panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-white">{editingId ? 'Editar Meta' : 'Nova Meta'}</h3>
+              <h3 className="text-base font-medium text-white">{editingId ? 'Editar meta' : 'Nova meta'}</h3>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
                 <X size={18} />
               </button>
@@ -261,9 +246,9 @@ export function GoalsManager({ goals, accounts, investments, onAdd, onUpdate, on
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
+              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 transition-colors">Cancelar</button>
               <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
-                style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                style={{ background: 'var(--color-primary)' }}>
                 {editingId ? 'Salvar' : 'Adicionar'}
               </button>
             </div>

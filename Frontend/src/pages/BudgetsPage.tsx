@@ -15,7 +15,7 @@ export function BudgetsPage({ budgetProgress, onAdd, onUpdate, onDelete, existin
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-1">Orçamento</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Orçamento</h1>
         <p className="text-textMuted text-sm">Limite de gasto mensal por categoria</p>
       </div>
       <BudgetManager

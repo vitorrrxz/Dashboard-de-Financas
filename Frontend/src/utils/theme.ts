@@ -9,9 +9,9 @@ export type ResolvedTheme = 'dark' | 'light';
 export const THEME_STORAGE_KEY = 'finflow_theme';
 export const THEME_PREFERENCES: readonly ThemePreference[] = ['dark', 'light', 'system'];
 /** Cor da barra do navegador e do sistema (`<meta name="theme-color">`): o fundo de cada tema. */
-export const THEME_COLORS: Record<ResolvedTheme, string> = { dark: '#0a0a0f', light: '#f3f4f9' };
-/** Sem preferência salva, o tema escuro — o visual original do app. */
-export const DEFAULT_THEME: ThemePreference = 'dark';
+export const THEME_COLORS: Record<ResolvedTheme, string> = { dark: '#000000', light: '#f2f4f7' };
+/** Sem preferência salva, o tema claro — o do estilo livro-caixa. */
+export const DEFAULT_THEME: ThemePreference = 'light';
 
 export function isThemePreference(value: unknown): value is ThemePreference {
   return typeof value === 'string' && (THEME_PREFERENCES as readonly string[]).includes(value);
@@ -55,13 +55,4 @@ export function resolveTheme(preference: ThemePreference, systemPrefersLight: bo
 export function applyTheme(theme: ResolvedTheme, doc: Document = document): void {
   doc.documentElement.dataset.theme = theme;
   doc.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLORS[theme]);
-}
-
-/**
- * Uma cor de dado (categoria, tipo de pagamento) usada como TEXTO, legível nos dois temas: pura
- * no escuro e misturada com a cor de contraste no claro, onde tons como o âmbar puro ficariam
- * ilegíveis sobre o fundo branco. A proporção vem de `--tint-strength` (index.css).
- */
-export function readableColor(hex: string): string {
-  return `color-mix(in srgb, ${hex} var(--tint-strength), var(--color-white))`;
 }

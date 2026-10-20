@@ -13,16 +13,19 @@ import { formatBRL } from '../utils/money';
 import { formatRelativeTime } from '../utils/dates';
 import { FormField } from './shared/FormField';
 
-/** Cor e ícone de cada tipo — usados no card da posição e na barra de alocação. */
-const TYPE_META: Record<InvestmentType, { color: string; icon: React.ReactNode }> = {
-  fixed_income: { color: '#14b8a6', icon: <Landmark size={18} /> },
-  stocks:       { color: '#6366f1', icon: <TrendingUp size={18} /> },
-  funds:        { color: '#a855f7', icon: <Layers size={18} /> },
-  crypto:       { color: '#f59e0b', icon: <Bitcoin size={18} /> },
-  other:        { color: '#9ca3af', icon: <Shapes size={18} /> },
+/** Fatias da alocação (já ordenadas do maior para o menor): um só tom, do mais forte ao mais claro. */
+const SLICE_OPACITY = [1, 0.7, 0.5, 0.35, 0.22];
+
+/** Ícone de cada tipo, no card da posição. */
+const TYPE_META: Record<InvestmentType, { icon: React.ReactNode }> = {
+  fixed_income: { icon: <Landmark size={16} /> },
+  stocks:       { icon: <TrendingUp size={16} /> },
+  funds:        { icon: <Layers size={16} /> },
+  crypto:       { icon: <Bitcoin size={16} /> },
+  other:        { icon: <Shapes size={16} /> },
 };
 
-/** Cor e ícone de um tipo vindo da API; um tipo desconhecido usa os de "Outros". */
+/** Ícone de um tipo vindo da API; um tipo desconhecido usa o de "Outros". */
 function typeMeta(type: string) {
   return isInvestmentType(type) ? TYPE_META[type] : TYPE_META.other;
 }
@@ -191,25 +194,26 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
     setForm(f => ({ ...f, accountId, currency: account ? currencyOf(account) : f.currency }));
   };
 
-  const gainColor = (gain: number) => (gain < 0 ? 'text-red-400' : 'text-teal-400');
+  // Resultado zero não é ganho: fica em cinza, sem cor de status.
+  const gainColor = (gain: number) => (gain < 0 ? 'text-red-400' : gain > 0 ? 'text-teal-400' : 'text-textMuted');
   const symbol = currencySymbol(form.currency);
   const editingOriginal = editingId ? investments.find(i => i.id === editingId) : undefined;
 
   return (
     <div>
       {/* Resumo da carteira — FIN-029: coluna única abaixo de `sm` */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <div className="glass-card rounded-2xl p-5">
-          <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Valor Atual</p>
-          <p className="text-2xl font-bold text-white">{formatBRL(summary.current)}</p>
+      <div className="panel rounded-2xl grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-white/[0.07] mb-6">
+        <div className="p-5">
+          <p className="text-sm text-textMuted mb-1">Valor atual</p>
+          <p className={`text-2xl font-bold ${summary.current === 0 ? 'text-textMuted' : 'text-white'}`}>{formatBRL(summary.current)}</p>
           <p className="text-xs text-textMuted mt-1">{investments.length} posição(ões)</p>
         </div>
-        <div className="glass-card rounded-2xl p-5">
-          <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Total Aplicado</p>
-          <p className="text-2xl font-bold text-white">{formatBRL(summary.invested)}</p>
+        <div className="p-5">
+          <p className="text-sm text-textMuted mb-1">Total aplicado</p>
+          <p className={`text-2xl font-bold ${summary.invested === 0 ? 'text-textMuted' : 'text-white'}`}>{formatBRL(summary.invested)}</p>
         </div>
-        <div className="glass-card rounded-2xl p-5">
-          <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Resultado</p>
+        <div className="p-5">
+          <p className="text-sm text-textMuted mb-1">Resultado</p>
           <p className={`text-2xl font-bold ${gainColor(summary.gain)}`}>{formatSignedMoney(summary.gain, BASE_CURRENCY)}</p>
           <p className="text-xs text-textMuted mt-1">
             {summary.percentage === null ? 'sem valor aplicado' : `${formatSignedPercent(summary.percentage)} sobre o aplicado`}
@@ -227,19 +231,19 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
 
       {/* Alocação por tipo */}
       {summary.allocation.length > 0 && (
-        <section className="glass-card rounded-2xl p-5 mb-6" aria-labelledby="allocation-title">
-          <h3 id="allocation-title" className="text-sm font-semibold text-white mb-3">Alocação por tipo</h3>
+        <section className="panel rounded-2xl p-5 mb-6" aria-labelledby="allocation-title">
+          <h3 id="allocation-title" className="text-base font-medium text-white mb-3">Alocação por tipo</h3>
           {/* A barra é só visual; os números estão na lista logo abaixo. */}
-          <div className="flex h-2.5 rounded-full overflow-hidden mb-4" aria-hidden="true" style={{ backgroundColor: 'var(--fg-8)' }}>
-            {summary.allocation.map(slice => (
-              <div key={slice.type} style={{ width: `${slice.share}%`, backgroundColor: TYPE_META[slice.type].color }} />
+          <div className="flex gap-0.5 h-2.5 rounded-full overflow-hidden mb-4" aria-hidden="true" style={{ backgroundColor: 'var(--fg-8)' }}>
+            {summary.allocation.map((slice, i) => (
+              <div key={slice.type} style={{ width: `${slice.share}%`, backgroundColor: 'var(--color-accent)', opacity: SLICE_OPACITY[i] ?? 0.2 }} />
             ))}
           </div>
           <ul className="space-y-2">
-            {summary.allocation.map(slice => (
+            {summary.allocation.map((slice, i) => (
               <li key={slice.type} className="flex items-center justify-between gap-3 text-sm">
                 <span className="flex items-center gap-2 min-w-0">
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" aria-hidden="true" style={{ backgroundColor: TYPE_META[slice.type].color }} />
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" aria-hidden="true" style={{ backgroundColor: 'var(--color-accent)', opacity: SLICE_OPACITY[i] ?? 0.2 }} />
                   <span className="text-white truncate">{INVESTMENT_TYPE_LABELS[slice.type]}</span>
                   <span className="text-xs text-textMuted">({slice.count})</span>
                 </span>
@@ -255,7 +259,7 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
       {/* FIN-073: como cada conta de investimento entra no patrimônio — sem isto, o saldo
           digitado da conta "sumir" do total ao cadastrar a primeira posição pareceria erro. */}
       {investmentAccounts.length > 0 && (
-        <section className="glass-card rounded-2xl p-5 mb-6" aria-labelledby="investment-accounts-title">
+        <section className="panel rounded-2xl p-5 mb-6" aria-labelledby="investment-accounts-title">
           <div className="flex items-center gap-2 mb-3">
             <Info size={16} className="text-textMuted" aria-hidden="true" />
             <h3 id="investment-accounts-title" className="text-sm font-semibold text-white">Contas de investimento no patrimônio</h3>
@@ -291,13 +295,9 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
       {/* Posições */}
       <div className="space-y-3 mb-4">
         {investments.length === 0 && (
-          <div className="glass-card rounded-xl p-8 flex flex-col items-center text-center">
-            <TrendingUp size={32} className="text-textMuted mb-3" aria-hidden="true" />
-            <p className="text-white font-medium mb-1">Nenhum investimento cadastrado</p>
-            <p className="text-textMuted text-sm">
-              Cadastre suas aplicações — CDB, Tesouro, ações, fundos, cripto — para acompanhar quanto rendem e como a carteira está distribuída
-            </p>
-          </div>
+          <p className="text-sm text-textMuted">
+            Nenhum investimento ainda. Cadastre suas aplicações — CDB, Tesouro, ações, fundos, cripto — para acompanhar quanto rendem e como a carteira está distribuída.
+          </p>
         )}
 
         {sorted.map(inv => {
@@ -307,13 +307,10 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
           const accountName = inv.accountId ? accountNames.get(inv.accountId) : undefined;
           const updated = updatedLabel(inv.updatedAt);
           return (
-            <div key={inv.id} className="glass-card rounded-xl p-4 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" aria-hidden="true"
-                style={{ backgroundColor: `${meta.color}25`, border: `1px solid ${meta.color}40`, color: meta.color }}>
-                {meta.icon}
-              </div>
+            <div key={inv.id} className="panel rounded-xl p-4 flex items-center gap-4">
+              <span className="text-textMuted shrink-0" aria-hidden="true">{meta.icon}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">{inv.name}</p>
+                <p className="text-sm font-medium text-white truncate">{inv.name}</p>
                 <p className="text-xs text-textMuted truncate">
                   {investmentTypeLabel(inv.type)}
                   {accountName && ` · ${accountName}`}
@@ -321,7 +318,7 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
                 </p>
               </div>
               <div className="text-right shrink-0">
-                <p className="text-lg font-bold text-white">{formatMoney(inv.currentValue, currency)}</p>
+                <p className="text-base font-medium text-white">{formatMoney(inv.currentValue, currency)}</p>
                 <p className={`text-xs ${gainColor(result.gain)}`}>
                   {formatSignedMoney(result.gain, currency)}{result.percentage !== null && ` (${formatSignedPercent(result.percentage)})`}
                 </p>
@@ -342,17 +339,16 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
       </div>
 
       <button type="button" onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
-        style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
-        <Plus size={16} aria-hidden="true" /> Adicionar Investimento
+        className="w-full h-12 rounded-xl border border-dashed border-[var(--control)] text-sm text-textMuted hover:text-white hover:border-[var(--color-textMuted)] flex items-center justify-center gap-2 transition-colors">
+        <Plus size={15} aria-hidden="true" /> Adicionar investimento
       </button>
 
       {showForm && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
           <div role="dialog" aria-modal="true" aria-labelledby="investment-form-title"
-            className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+            className="w-full max-w-md panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
-              <h3 id="investment-form-title" className="text-lg font-bold text-white">
+              <h3 id="investment-form-title" className="text-base font-medium text-white">
                 {editingId ? 'Editar Investimento' : 'Novo Investimento'}
               </h3>
               <button type="button" onClick={() => setShowForm(false)} aria-label="Fechar"
@@ -419,12 +415,12 @@ export function InvestmentsManager({ investments, accounts, onAdd, onUpdate, onD
 
             <div className="flex gap-3 mt-6">
               <button type="button" onClick={() => setShowForm(false)}
-                className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">
+                className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 transition-colors">
                 Cancelar
               </button>
               <button type="button" onClick={handleSave} disabled={saving}
                 className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                style={{ background: 'var(--color-primary)' }}>
                 {saving ? 'Salvando...' : editingId ? 'Salvar' : 'Adicionar'}
               </button>
             </div>

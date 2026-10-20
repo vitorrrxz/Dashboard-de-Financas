@@ -1,20 +1,12 @@
 import { useState, useRef } from 'react';
-import { X, Plus, Trash2, Edit2, TrendingDown, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
 import type { Debt, DebtCategory, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
 import { isDebtOverdue, isDebtPaid, computeNextInstallment } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
 import { downloadCSV, exportDateSuffix, formatCurrencyCSV } from '../utils/export';
 import { FormField } from './shared/FormField';
-import { readableColor } from '../utils/theme';
-
-const CATEGORY_COLORS: Record<DebtCategory, string> = {
-  'Empréstimo':        '#f59e0b',
-  'Financiamento':     '#3b82f6',
-  'Cartão de Crédito': '#ec4899',
-  'Pessoal':           '#a855f7',
-  'Outros':            '#6b7280',
-};
+import { formatBRL } from '../utils/money';
 
 const DEBT_CATEGORIES: DebtCategory[] = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
 
@@ -259,7 +251,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
           <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
           <button
             onClick={handleImportClick}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all hover:bg-white/10 border border-white/10 text-white"
+            className="h-9 px-3 flex items-center gap-2 rounded-md text-sm text-white bg-card border border-[var(--control)] hover:border-[var(--color-textMuted)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Upload size={14} />
             Importar CSV
@@ -268,17 +260,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             onClick={exportCSV}
             disabled={debts.length === 0}
             title={debts.length === 0 ? 'Adicione dívidas para exportar' : 'Exportar dívidas como CSV'}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
-            style={{
-              background: debts.length === 0
-                ? 'var(--fg-4)'
-                : 'linear-gradient(135deg, #f59e0b22, #ec489922)',
-              backgroundColor: debts.length === 0 ? undefined : 'rgba(245,158,11,0.1)',
-              border: `1px solid ${debts.length === 0 ? 'var(--fg-6)' : 'rgba(245,158,11,0.3)'}`,
-              color: debts.length === 0 ? 'var(--color-textMuted)' : 'var(--text-warning)',
-              cursor: debts.length === 0 ? 'not-allowed' : 'pointer',
-              opacity: debts.length === 0 ? 0.5 : 1,
-            }}
+            className="h-9 px-3 flex items-center gap-2 rounded-md text-sm text-white bg-card border border-[var(--control)] hover:border-[var(--color-textMuted)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Download size={14} />
             Exportar CSV
@@ -289,34 +271,26 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       {/* Debt Cards */}
       <div className="space-y-4 mb-4">
         {debts.length === 0 && (
-          <div className="glass-card rounded-xl p-10 flex flex-col items-center text-center">
-            <TrendingDown size={32} className="text-textMuted mb-3" />
-            <p className="text-white font-medium mb-1">Nenhuma dívida cadastrada</p>
-            <p className="text-textMuted text-sm">Adicione empréstimos, financiamentos ou outras dívidas</p>
-          </div>
+          <p className="text-sm text-textMuted">Nenhuma dívida cadastrada. Empréstimos, financiamentos e acordos entram aqui; as compras parceladas do cartão aparecem sozinhas.</p>
         )}
 
         {debts.map(debt => {
           const pct = progress(debt);
           const paid = isPaid(debt);
           const overdue = isOverdue(debt);
-          const color = CATEGORY_COLORS[debt.category];
           const isExpanded = expandedId === debt.id;
           const isGroup = !!(debt.subItems && debt.subItems.length > 0);
 
           return (
-            <div key={debt.id} className="glass-card rounded-xl overflow-hidden" style={{ borderLeft: `3px solid ${color}` }}>
+            <div key={debt.id} className="panel rounded-xl overflow-hidden">
               <div className="p-5">
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="text-sm font-semibold text-white">{debt.name}</h4>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: `${color}20`, color: readableColor(color) }}>
-                        {debt.category}
-                      </span>
-                      {isGroup && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400">Fatura Grupal</span>}
-                      {paid && <span className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent flex items-center gap-1"><CheckCircle size={10} /> Quitada</span>}
-                      {overdue && <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400 flex items-center gap-1"><AlertCircle size={10} /> Vencida</span>}
+                      <h4 className="text-sm font-medium text-white">{debt.name}</h4>
+                      <span className="text-xs text-textMuted">{debt.category}{isGroup ? ' · fatura agrupada' : ''}</span>
+                      {paid && <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: 'var(--fg-6)' }}><CheckCircle size={11} className="text-teal-400" /> Quitada</span>}
+                      {overdue && <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-medium flex items-center gap-1"><AlertCircle size={11} /> Vencida</span>}
                     </div>
                     {debt.description && <p className="text-xs text-textMuted mt-0.5">{debt.description}</p>}
                   </div>
@@ -324,15 +298,14 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                     {!paid && (
                       <button onClick={() => handlePayInstallment(debt)}
                         title={isGroup ? 'Registrar pagamento da fatura' : 'Marcar parcela como paga'}
-                        className="px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                        style={{ backgroundColor: 'rgba(20,184,166,0.1)', color: 'var(--color-accent)', border: '1px solid rgba(20,184,166,0.2)' }}>
-                        {isGroup ? '✓ Pagar Fatura' : '+ Pagar parcela'}
+                        className="h-8 px-3 rounded-md text-sm text-white bg-card border border-[var(--control)] hover:border-[var(--color-textMuted)] transition-colors">
+                        {isGroup ? 'Pagar fatura' : 'Pagar parcela'}
                       </button>
                     )}
-                    <button onClick={() => openEdit(debt)} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                    <button type="button" onClick={() => openEdit(debt)} aria-label={`Editar ${debt.name}`} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
                       <Edit2 size={13} />
                     </button>
-                    <button onClick={() => handleDelete(debt.id)} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
+                    <button type="button" onClick={() => handleDelete(debt.id)} aria-label={`Excluir ${debt.name}`} className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-textMuted hover:text-red-400">
                       <Trash2 size={13} />
                     </button>
                   </div>
@@ -344,23 +317,23 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                     <span>{debt.paidInstallments}/{debt.totalInstallments} {isGroup ? 'fatura paga' : 'parcelas pagas'}</span>
                     <span>{pct.toFixed(0)}%</span>
                   </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-7)' }}>
+                  <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
                     <div className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, backgroundColor: paid ? '#14b8a6' : color }} />
+                      style={{ width: `${pct}%`, backgroundColor: paid ? 'var(--color-teal-500)' : 'var(--color-accent)' }} />
                   </div>
                 </div>
 
                 {/* Financial Info */}
-                <div className="grid grid-cols-3 gap-3 text-center mb-1">
-                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
+                <div className="grid grid-cols-3 gap-3 mb-1">
+                  <div>
                     <p className="text-xs text-textMuted mb-0.5">Total</p>
-                    <p className="text-sm font-bold text-white">R$ {remaining(debt).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    <p className="text-sm font-bold text-white">{formatBRL(remaining(debt))}</p>
                   </div>
-                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
+                  <div>
                     <p className="text-xs text-textMuted mb-0.5">{isGroup ? 'Subtotal' : 'Parcela'}</p>
-                    <p className="text-sm font-bold" style={{ color: readableColor(color) }}>R$ {debt.monthlyPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    <p className="text-sm font-bold text-white">{formatBRL(debt.monthlyPayment)}</p>
                   </div>
-                  <div className="rounded-lg p-2.5" style={{ backgroundColor: 'var(--fg-4)' }}>
+                  <div>
                     <p className="text-xs text-textMuted mb-0.5">Vencimento</p>
                     <p className={`text-sm font-bold ${overdue ? 'text-red-400' : 'text-white'}`}>
                       {paid ? '—' : formatDateBR(debt.nextDueDate, { day: '2-digit', month: '2-digit' })}
@@ -382,8 +355,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
               {isGroup && isExpanded && (
                 <div className="border-t border-white/5 bg-black/20 p-4 animate-in slide-in-from-top-2 duration-300">
                   <div className="max-h-60 overflow-y-auto pr-2">
-                    <table className="w-full text-left text-[11px]">
-                      <thead className="text-textMuted uppercase tracking-wider">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-textMuted">
                         <tr>
                           <th className="pb-2">Local/Descrição</th>
                           <th className="pb-2 text-right">Valor</th>
@@ -395,15 +368,15 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                             <td className="py-2 text-white font-medium max-w-[150px] truncate">{item.name}</td>
                             <td className={`py-2 text-right font-bold ${item.amount < 0 ? 'text-accent' : 'text-white'}`}>
                               R$ {Math.abs(item.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                              {item.amount < 0 && <span className="ml-1 text-[10px] opacity-70">(Estorno)</span>}
+                              {item.amount < 0 && <span className="ml-1 text-xs opacity-70">(Estorno)</span>}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                  <div className="mt-4 pt-3 border-t border-white/10 flex justify-between items-center">
-                    <span className="text-[10px] text-textMuted">Total da fatura importada</span>
+                  <div className="mt-4 pt-3 border-t border-[var(--line)] flex justify-between items-center">
+                    <span className="text-xs text-textMuted">Total da fatura importada</span>
                     <span className="text-sm font-bold text-white">R$ {debt.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
@@ -414,7 +387,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       </div>
 
       <button onClick={openAdd}
-        className="w-full py-3 rounded-xl border border-dashed border-white/10 hover:border-red-400/40 text-textMuted hover:text-white text-sm flex items-center justify-center gap-2 transition-all">
+        className="w-full py-3 rounded-xl border border-dashed border-[var(--line)] hover:border-red-400/40 text-textMuted hover:text-white text-sm flex items-center justify-center gap-2 transition-all">
         <Plus size={16} /> Adicionar Dívida
       </button>
 
@@ -434,9 +407,9 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="w-full max-w-md glass-card rounded-2xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-md panel rounded-2xl p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-white">{editing ? 'Editar Dívida' : 'Nova Dívida'}</h3>
+              <h3 className="text-base font-medium text-white">{editing ? 'Editar Dívida' : 'Nova Dívida'}</h3>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
                 <X size={18} />
               </button>
@@ -490,9 +463,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
-                style={{ background: 'linear-gradient(135deg, #f59e0b, #ec4899)' }}>
+              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 transition-colors">Cancelar</button>
+              <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-medium bg-primary hover:opacity-90 transition-opacity">
                 {editing ? 'Salvar' : 'Adicionar'}
               </button>
             </div>
@@ -502,9 +474,9 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       {/* Group Naming Modal */}
       {pendingGroup && (
         <div className="fixed inset-0 bg-black/80 z-[60] flex items-center justify-center p-4" onClick={() => setPendingGroup(null)}>
-          <div className="w-full max-w-sm glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-sm panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold text-white">Importar Fatura</h3>
+              <h3 className="text-base font-medium text-white">Importar Fatura</h3>
               <button onClick={() => setPendingGroup(null)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted">
                 <X size={18} />
               </button>
@@ -554,9 +526,9 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             </div>
 
             <div className="flex gap-3 mt-8">
-              <button onClick={() => setPendingGroup(null)} className="flex-1 py-2.5 text-sm text-textMuted hover:bg-white/5 rounded-xl border border-white/10 transition-colors">Cancelar</button>
-              <button onClick={finalizeGroupImport} className="flex-1 py-2.5 text-sm text-on-accent font-bold rounded-xl shadow-lg transition-all hover:brightness-110 active:scale-95" style={{ background: 'linear-gradient(135deg, #3b82f6, #6366f1)' }}>
-                Salvar Fatura
+              <button onClick={() => setPendingGroup(null)} className="flex-1 py-2.5 text-sm text-textMuted hover:bg-white/5 rounded-xl border border-[var(--line)] transition-colors">Cancelar</button>
+              <button onClick={finalizeGroupImport} className="flex-1 py-2.5 text-sm text-on-accent font-medium rounded-xl bg-primary hover:opacity-90 transition-opacity">
+                Salvar fatura
               </button>
             </div>
           </div>

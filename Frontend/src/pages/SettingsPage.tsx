@@ -11,13 +11,15 @@ interface SettingsPageProps {
   theme: ReturnType<typeof useTheme>;
   token: string;
   onRestored: (summary: string) => void;
+  hasTransactions: boolean;
+  onClearTransactions: () => void;
 }
 
-export function SettingsPage({ settingsNotice, onDismissNotice, theme, token, onRestored }: SettingsPageProps) {
+export function SettingsPage({ settingsNotice, onDismissNotice, theme, token, onRestored, hasTransactions, onClearTransactions }: SettingsPageProps) {
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-1">Configurações</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Configurações</h1>
         <p className="text-textMuted text-sm">Aparência, regras de categoria, segurança da conta e backup dos dados</p>
       </div>
       <div className="space-y-6 max-w-3xl">
@@ -34,6 +36,16 @@ export function SettingsPage({ settingsNotice, onDismissNotice, theme, token, on
         <CategoryRulesSettings token={token} />
         <TwoFactorSettings token={token} />
         <BackupSettings token={token} onRestored={onRestored} />
+        {hasTransactions && (
+          <section aria-labelledby="danger-title" className="pt-6 border-t border-[var(--line)]">
+            <h2 id="danger-title" className="text-base font-medium text-white">Apagar todas as transações</h2>
+            <p className="text-sm text-textMuted mt-1 mb-4">Remove todas as transações importadas e lançadas. Contas, dívidas e metas ficam. Não dá para desfazer — faça um backup antes.</p>
+            <button type="button" onClick={onClearTransactions}
+              className="h-9 px-4 rounded-md text-sm font-medium text-red-400 border border-red-400/40 hover:bg-red-500/10 transition-colors">
+              Apagar transações
+            </button>
+          </section>
+        )}
       </div>
     </>
   );

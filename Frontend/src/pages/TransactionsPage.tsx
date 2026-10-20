@@ -34,10 +34,12 @@ interface TransactionsPageProps {
 }
 
 const TX_FILTERS = [
-  { key: 'all',     label: 'Todas',     color: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.4)',  text: 'var(--text-indigo)' },
-  { key: 'income',  label: '↑ Receitas', color: 'rgba(20,184,166,0.12)', border: 'rgba(20,184,166,0.4)', text: 'var(--text-positive)' },
-  { key: 'expense', label: '↓ Despesas', color: 'rgba(239,68,68,0.12)',  border: 'rgba(239,68,68,0.4)',  text: 'var(--text-negative)' },
+  { key: 'all',     label: 'Todas' },
+  { key: 'income',  label: 'Receitas' },
+  { key: 'expense', label: 'Despesas' },
 ] as const;
+
+const SECONDARY = 'h-9 px-3 flex items-center gap-2 rounded-md text-sm text-white bg-card border border-[var(--control)] hover:border-[var(--color-textMuted)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 
 export function TransactionsPage({
   filtered, txMonth, onChangeTxMonth, txMonths, monthTotals, hiddenInstallments, onGoToDebts,
@@ -46,42 +48,41 @@ export function TransactionsPage({
 }: TransactionsPageProps) {
   return (
     <>
-      <div className="mb-6 flex justify-between items-end">
+      <div className="mb-6 flex flex-wrap justify-between items-end gap-3">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-1">Transações</h1>
-          <p className="text-textMuted text-sm">{filtered.length} registros</p>
+          <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Transações</h1>
+          <p className="text-textMuted text-sm">{filtered.length === 1 ? '1 transação' : `${filtered.length.toLocaleString('pt-BR')} transações`} no recorte</p>
         </div>
         <div className="flex gap-2">
           {/* FIN-060/FIN-061: exportam exatamente o recorte visível (busca + filtro). */}
           <button onClick={onExportCSV} disabled={filtered.length === 0}
             title={filtered.length === 0 ? 'Nenhuma transação para exportar' : 'Exportar as transações filtradas em CSV'}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            <Download size={15}/> CSV
+            className={SECONDARY}>
+            <Download size={14}/> CSV
           </button>
           <button onClick={onExportPDF} disabled={filtered.length === 0 || exportingPDF}
             title={filtered.length === 0 ? 'Nenhuma transação para exportar' : 'Exportar as transações filtradas em PDF'}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            <FileText size={15}/> {exportingPDF ? 'Gerando...' : 'PDF'}
+            className={SECONDARY}>
+            <FileText size={14}/> {exportingPDF ? 'Gerando...' : 'PDF'}
           </button>
           <button onClick={onShowImport}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm text-on-accent font-medium transition-colors"
-            style={{ backgroundColor:'var(--color-primary)' }}>
-            <Upload size={15}/> Importar
+            className="h-9 px-4 flex items-center gap-2 rounded-md text-sm text-on-accent font-medium bg-primary hover:opacity-90 transition-opacity">
+            <Upload size={14}/> Importar extrato
           </button>
         </div>
       </div>
 
       {/* FIN-093: mês de referência + total do recorte. Fica acima dos filtros de
           tipo porque delimita o conjunto sobre o qual eles atuam. */}
-      <div className="glass-card rounded-2xl p-4 mb-5 flex flex-wrap items-end justify-between gap-4">
+      <div className="panel rounded-2xl p-4 mb-5 flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-wrap items-end gap-4">
           <MonthNavigator id="tx-month" value={txMonth} months={txMonths} onChange={onChangeTxMonth} allowAll/>
           <AccountFilter id="tx-account" accounts={accounts} value={accountId} onChange={onChangeAccount}/>
         </div>
 
         <div className="flex flex-wrap items-end gap-6">
-          <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-accent)"/>
-          <MonthTotal label="Despesas" value={monthTotals.expense} color="var(--text-negative)"/>
+          <MonthTotal label="Receitas" value={monthTotals.income} color="var(--color-textMain)"/>
+          <MonthTotal label="Despesas" value={monthTotals.expense} color="var(--color-textMain)"/>
           <MonthTotal label="Valor total" value={monthTotals.balance} signed
             color={monthTotals.balance >= 0 ? 'var(--color-textMain)' : 'var(--text-negative)'}/>
         </div>
@@ -94,29 +95,22 @@ export function TransactionsPage({
           {hiddenInstallments} {hiddenInstallments === 1 ? 'lançamento parcelado' : 'lançamentos parcelados'}
           {txMonth === ALL_MONTHS ? '' : ' deste mês'} {hiddenInstallments === 1 ? 'está' : 'estão'} em{' '}
           <button type="button" onClick={onGoToDebts}
-            className="text-primary font-medium hover:underline">
-            Dívidas e Parcelamentos
+            className="text-white font-medium underline underline-offset-2 hover:no-underline">
+            Dívidas e parcelamentos
           </button>.
         </p>
       )}
-      <div className="flex gap-2 mb-5">
-        {TX_FILTERS.map(f => (
-          <button key={f.key} onClick={() => onChangeTxFilter(f.key)}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all duration-200"
-            style={{
-              backgroundColor: txFilter === f.key ? f.color : 'var(--fg-4)',
-              borderColor: txFilter === f.key ? f.border : 'var(--fg-8)',
-              color: txFilter === f.key ? f.text : 'var(--color-textMuted)',
-              borderWidth: 1
-            }}>
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="glass-card rounded-2xl p-6">
+      <div className="panel rounded-2xl p-5 md:p-6">
+        <div role="group" aria-label="Tipo de transação" className="inline-flex p-0.5 rounded-md bg-white/[0.06] mb-4">
+          {TX_FILTERS.map(f => (
+            <button key={f.key} type="button" aria-pressed={txFilter === f.key} onClick={() => onChangeTxFilter(f.key)}
+              className={`h-7 px-3 text-sm rounded transition-colors ${txFilter === f.key ? 'bg-card text-white font-medium' : 'text-textMuted hover:text-white'}`}>
+              {f.label}
+            </button>
+          ))}
+        </div>
         {filtered.length === 0 ? (
-          <p className="text-center text-textMuted py-12 text-sm">Nenhuma transação encontrada.</p>
+          <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">Nenhuma transação neste recorte.</p>
         ) : (
           <TxTable
             rows={filtered.slice(0, 200)}
@@ -132,7 +126,7 @@ export function TransactionsPage({
           aparece quando esse limite foi atingido, permitindo acessar o restante. */}
       {txHasMore && (
         <button onClick={onLoadMore} disabled={txLoadingMore}
-          className="w-full mt-4 py-3 rounded-xl border border-white/10 text-sm text-textMuted hover:text-white hover:bg-white/5 transition-all disabled:opacity-50">
+          className={`${SECONDARY} w-full justify-center mt-3`}>
           {txLoadingMore ? 'Carregando...' : 'Carregar transações mais antigas'}
         </button>
       )}

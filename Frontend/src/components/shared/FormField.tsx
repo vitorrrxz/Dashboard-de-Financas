@@ -1,5 +1,5 @@
 // FIN-087 — extraído de AccountsManager.tsx e DebtManager.tsx, onde existiam duas cópias
-// idênticas deste componente (label uppercase + espaçamento padrão usado em todos os
+// idênticas deste componente (label + espaçamento padrão usado em todos os
 // formulários de modal do app).
 //
 // `htmlFor` é opcional (nem todo uso passa um `id` para o controle interno), mas quando
@@ -9,7 +9,7 @@
 export function FormField({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">{label}</label>
+      <label htmlFor={htmlFor} className="block text-xs font-medium text-textMuted mb-1.5">{label}</label>
       {children}
     </div>
   );

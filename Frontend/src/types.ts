@@ -57,7 +57,7 @@ export interface Debt {
 }
 
 // FIN-042 — orçamento mensal por categoria (Fase 3). `category` é texto livre, casando
-// com `Transaction.category` (que também não é um enum fechado — ver CATEGORY_COLORS
+// com `Transaction.category` (que também não é um enum fechado — ver CATEGORIES
 // em App.tsx e CATEGORY_RULES em parsers.ts).
 export interface Budget {
   id: string;

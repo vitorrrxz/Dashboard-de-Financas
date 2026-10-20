@@ -1,8 +1,8 @@
-import { Monitor, Moon, Palette, Sun } from 'lucide-react';
+import { Monitor, Moon, Sun } from 'lucide-react';
 import type { ThemePreference } from '../utils/theme';
 
 const OPTIONS: { value: ThemePreference; label: string; hint: string; icon: typeof Sun }[] = [
-  { value: 'dark', label: 'Escuro', hint: 'O visual original do FinFlow.', icon: Moon },
+  { value: 'dark', label: 'Escuro', hint: 'Fundo preto, mais confortável à noite.', icon: Moon },
   { value: 'light', label: 'Claro', hint: 'Fundo claro, melhor em ambientes iluminados.', icon: Sun },
   { value: 'system', label: 'Igual ao sistema', hint: 'Acompanha o tema do celular ou do computador.', icon: Monitor },
 ];
@@ -19,13 +19,10 @@ interface ThemeSettingsProps {
  */
 export function ThemeSettings({ preference, onChange }: ThemeSettingsProps) {
   return (
-    <section aria-labelledby="theme-title" className="glass-card rounded-2xl p-6">
+    <section aria-labelledby="theme-title" className="panel rounded-2xl p-6">
       <div className="flex items-start gap-3 mb-5">
-        <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 shrink-0">
-          <Palette size={20} className="text-primary" />
-        </div>
         <div>
-          <h2 id="theme-title" className="text-lg font-semibold text-white">Aparência</h2>
+          <h2 id="theme-title" className="text-base font-medium text-white">Aparência</h2>
           <p className="text-sm text-textMuted">O tema escolhido fica salvo neste navegador.</p>
         </div>
       </div>
@@ -37,8 +34,8 @@ export function ThemeSettings({ preference, onChange }: ThemeSettingsProps) {
             const checked = preference === value;
             return (
               <div key={value}
-                className={`relative flex items-start gap-3 p-3 rounded-xl border transition-colors focus-within:ring-2 focus-within:ring-primary/50 ${
-                  checked ? 'border-primary/60 bg-primary/10' : 'border-white/10 hover:bg-white/5'
+                className={`relative flex items-start gap-3 p-3 rounded-xl border transition-colors focus-within:ring-2 focus-within:ring-accent/60 ${
+                  checked ? 'border-[var(--color-textMuted)] bg-white/[0.04]' : 'border-[var(--line)] hover:bg-white/5'
                 }`}>
                 <input id={`theme-${value}`} type="radio" name="theme" value={value} checked={checked}
                   onChange={() => onChange(value)} aria-describedby={`theme-${value}-hint`}

@@ -28,7 +28,7 @@ function renderManager(props: Partial<Parameters<typeof InvestmentsManager>[0]> 
 }
 
 function openAddForm() {
-  fireEvent.click(screen.getByRole('button', { name: /Adicionar Investimento/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Adicionar investimento/ }));
 }
 
 afterEach(() => {
@@ -38,7 +38,7 @@ afterEach(() => {
 describe('InvestmentsManager', () => {
   it('mostra o estado vazio', () => {
     renderManager();
-    expect(screen.getByText('Nenhum investimento cadastrado')).toBeInTheDocument();
+    expect(screen.getByText(/Nenhum investimento ainda/)).toBeInTheDocument();
   });
 
   it('mostra o resultado de cada posição e da carteira, sem percentual quando não há valor aplicado', () => {

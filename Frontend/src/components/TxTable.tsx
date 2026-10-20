@@ -2,8 +2,7 @@ import { useState, useId } from 'react';
 import { Edit2, Trash2, X } from 'lucide-react';
 import { BASE_CURRENCY, currencyOf, currencySymbol, formatMoney } from '../utils/currency';
 import { formatDateBR } from '../utils/dates';
-import { CATEGORY_COLORS } from '../utils/categories';
-import { readableColor } from '../utils/theme';
+import { CATEGORIES } from '../utils/categories';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from '../utils/paymentTypes';
 import type { Account, PaymentType, Transaction } from '../types';
 
@@ -66,51 +65,35 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
   };
 
   return (
-    <div className="overflow-x-auto min-h-[400px]">
+    <div className="relative overflow-x-auto">
       <table className="w-full text-left border-collapse">
         <thead>
-          <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-textMuted">
-            <th className="pb-3 font-semibold w-24">Data</th>
-            <th className="pb-3 font-semibold">Descrição</th>
-            <th className="pb-3 font-semibold">Categoria</th>
-            <th className="pb-3 font-semibold">Tipo</th>
-            <th className="pb-3 font-semibold text-right">Valor</th>
-            <th className="pb-3 font-semibold w-20 text-right">Ações</th>
+          <tr className="border-b border-[var(--line)] text-xs text-textMuted">
+            <th className="pb-2 font-normal w-24 hidden sm:table-cell">Data</th>
+            <th className="pb-2 font-normal">Descrição</th>
+            <th className="pb-2 font-normal hidden sm:table-cell">Categoria</th>
+            <th className="pb-2 font-normal hidden md:table-cell">Tipo</th>
+            <th className="pb-2 font-normal text-right">Valor</th>
+            <th className="pb-2 font-normal w-20"><span className="sr-only">Ações</span></th>
           </tr>
         </thead>
         <tbody className="text-sm divide-y divide-white/5">
           {rows.map(t => {
             const pt = PAYMENT_TYPE_META[t.paymentType ?? 'debit'] ?? PAYMENT_TYPE_META['debit'];
             return (
-              <tr key={t.id} className="group hover:bg-white/[0.02] transition-colors">
-                <td className="py-4 text-textMuted">{formatDateBR(t.date)}</td>
-                <td className="py-4 font-medium text-white">{t.name}</td>
-                <td className="py-4">
-                  <span className="px-2.5 py-1 rounded-full text-xs border"
-                    style={{
-                      backgroundColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}15` : 'var(--fg-5)',
-                      borderColor: CATEGORY_COLORS[t.category] ? `${CATEGORY_COLORS[t.category]}30` : 'var(--fg-10)',
-                      color: CATEGORY_COLORS[t.category] ? readableColor(CATEGORY_COLORS[t.category]) : 'var(--color-textMuted)'
-                    }}>
-                    {t.category}
-                  </span>
+              <tr key={t.id} className="group hover:bg-white/[0.03] transition-colors">
+                <td className="py-3 pr-3 text-textMuted whitespace-nowrap hidden sm:table-cell">{formatDateBR(t.date)}</td>
+                <td className="py-3 pr-3 text-white">
+                  {t.name}
+                  {/* No celular, data, categoria e tipo descem para uma segunda linha em vez de sumir. */}
+                  <span className="block sm:hidden text-xs text-textMuted mt-0.5">{formatDateBR(t.date)} · {t.category} · {pt.label}</span>
                 </td>
-                <td className="py-4">
-                  <span
-                    className="px-2.5 py-1 rounded-full text-xs font-semibold border"
-                    style={{
-                      backgroundColor: `${pt.color}15`,
-                      borderColor: `${pt.color}35`,
-                      color: readableColor(pt.color),
-                    }}
-                  >
-                    {pt.label}
-                  </span>
-                </td>
-                <td className={`py-4 text-right font-bold ${t.amount >= 0 ? 'text-teal-400' : 'text-red-400'}`}>
+                <td className="py-3 pr-3 text-white hidden sm:table-cell">{t.category}</td>
+                <td className="py-3 pr-3 text-textMuted hidden md:table-cell">{pt.label}</td>
+                <td className={`py-3 text-right font-medium whitespace-nowrap ${t.amount > 0 ? 'text-teal-400' : 'text-white'}`}>
                   {formatTxAmount(t)}
                 </td>
-                <td className="py-4">
+                <td className="py-3 pl-2">
                   {/* FIN-099: tela de toque não tem "passar o mouse" — lá as ações ficam sempre visíveis,
                       e em qualquer tela aparecem quando o foco do teclado chega a elas. */}
                   <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
@@ -132,9 +115,9 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
 
       {editing && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setEditing(null)}>
-          <div className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-md panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-white">Editar Transação</h3>
+              <h3 className="text-base font-medium text-white">Editar Transação</h3>
               <button type="button" onClick={() => setEditing(null)} aria-label="Fechar" className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
                 <X size={18} aria-hidden="true" />
               </button>
@@ -142,16 +125,16 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
 
             <div className="space-y-4">
               <div>
-                <label htmlFor={`${fieldId}-name`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Descrição</label>
+                <label htmlFor={`${fieldId}-name`} className="block text-xs font-medium text-textMuted mb-1.5">Descrição</label>
                 <input id={`${fieldId}-name`} value={form.name ?? ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="input-field" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor={`${fieldId}-date`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Data</label>
+                  <label htmlFor={`${fieldId}-date`} className="block text-xs font-medium text-textMuted mb-1.5">Data</label>
                   <input id={`${fieldId}-date`} type="date" value={form.date ?? ''} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className="input-field" />
                 </div>
                 <div>
-                  <label htmlFor={`${fieldId}-amount`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">
+                  <label htmlFor={`${fieldId}-amount`} className="block text-xs font-medium text-textMuted mb-1.5">
                     Valor ({currencySymbol(currencyOf(accounts.find(a => a.id === form.accountId) ?? {}))})
                   </label>
                   <input id={`${fieldId}-amount`} type="number" step="0.01" value={form.amount ?? 0} onChange={e => setForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} className="input-field" />
@@ -159,27 +142,27 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor={`${fieldId}-category`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Categoria</label>
+                  <label htmlFor={`${fieldId}-category`} className="block text-xs font-medium text-textMuted mb-1.5">Categoria</label>
                   <select id={`${fieldId}-category`} value={form.category ?? ''} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="input-field">
-                    {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label htmlFor={`${fieldId}-type`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Tipo</label>
+                  <label htmlFor={`${fieldId}-type`} className="block text-xs font-medium text-textMuted mb-1.5">Tipo</label>
                   <select id={`${fieldId}-type`} value={form.paymentType ?? 'debit'} onChange={e => setForm(f => ({ ...f, paymentType: e.target.value as PaymentType }))} className="input-field">
                     {Object.entries(PAYMENT_TYPE_META).map(([v, m]) => <option key={v} value={v}>{m.label}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label htmlFor={`${fieldId}-account`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Conta</label>
+                <label htmlFor={`${fieldId}-account`} className="block text-xs font-medium text-textMuted mb-1.5">Conta</label>
                 <select id={`${fieldId}-account`} value={form.accountId ?? ''} onChange={e => setForm(f => ({ ...f, accountId: e.target.value }))} className="input-field">
                   <option value="">Sem conta vinculada</option>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
               {onCreateRule && form.category !== editing.category && (
-                <fieldset className="space-y-3 p-3 rounded-xl border border-white/10">
+                <fieldset className="space-y-3 p-3 rounded-xl border border-[var(--line)]">
                   <legend className="sr-only">Regra de categoria</legend>
                   <label className="flex items-start gap-2 text-sm text-textMuted cursor-pointer">
                     <input type="checkbox" className="mt-0.5" checked={rule.create}
@@ -189,7 +172,7 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
                   {rule.create && (
                     <>
                       <div>
-                        <label htmlFor={`${fieldId}-rule`} className="block text-xs font-medium text-textMuted mb-1.5 uppercase tracking-wide">Texto na descrição</label>
+                        <label htmlFor={`${fieldId}-rule`} className="block text-xs font-medium text-textMuted mb-1.5">Texto na descrição</label>
                         <input id={`${fieldId}-rule`} value={rule.match} onChange={e => setRule(r => ({ ...r, match: e.target.value }))} className="input-field" />
                       </div>
                       <label className="flex items-center gap-2 text-sm text-textMuted cursor-pointer">
@@ -204,9 +187,9 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setEditing(null)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
+              <button onClick={() => setEditing(null)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 transition-colors">Cancelar</button>
               <button onClick={handleSave} disabled={saving} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                style={{ background: 'var(--color-primary)' }}>
                 {saving ? 'Salvando...' : 'Salvar'}
               </button>
             </div>

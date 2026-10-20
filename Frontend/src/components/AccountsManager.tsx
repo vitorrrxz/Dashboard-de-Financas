@@ -108,7 +108,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
   const renderAccount = (acc: Account, toggle?: { open: boolean; onToggle: () => void; controls: string; label: string }) => {
     const currency = currencyOf(acc);
     return (
-      <div key={acc.id} className="glass-card rounded-xl p-4 flex items-center gap-4">
+      <div key={acc.id} className="panel rounded-xl p-4 flex items-center gap-4">
         {toggle && (
           <button type="button" onClick={toggle.onToggle} aria-expanded={toggle.open} aria-controls={toggle.controls}
             aria-label={`${toggle.open ? 'Esconder' : 'Mostrar'} ${toggle.label}`}
@@ -116,16 +116,14 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
             <ChevronRight size={16} aria-hidden="true" className={`transition-transform ${toggle.open ? 'rotate-90' : ''}`} />
           </button>
         )}
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white"
-          style={{ backgroundColor: `${acc.color}25`, border: `1px solid ${acc.color}40`, color: acc.color }}>
-          {ACCOUNT_TYPE_ICONS[acc.type]}
-        </div>
+        <span className="text-textMuted shrink-0" aria-hidden="true">{ACCOUNT_TYPE_ICONS[acc.type]}</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-white truncate">{acc.name}</p>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: acc.color }} aria-hidden="true" />
+            <p className="text-sm font-medium text-white truncate">{acc.name}</p>
             {/* FIN-076: a moeda só aparece quando não é real, para não poluir o caso comum. */}
             {currency !== BASE_CURRENCY && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md text-amber-300" style={{ backgroundColor: 'rgba(245,158,11,0.12)' }}>
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-white/[0.06] text-white">
                 {currency}
               </span>
             )}
@@ -138,15 +136,15 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
                 <span>Limite: {formatMoney(acc.limit, currency)}</span>
               </div>
               <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--fg-8)' }}>
-                <div className="h-full rounded-full bg-red-400 transition-all"
-                  style={{ width: `${Math.min(100, ((acc.pendingBill ?? 0) / acc.limit) * 100)}%` }} />
+                <div className="h-full rounded-full transition-all" style={{ backgroundColor: 'var(--chart-ink)',
+                  width: `${Math.min(100, ((acc.pendingBill ?? 0) / acc.limit) * 100)}%` }} />
               </div>
             </div>
           )}
         </div>
         <div className="text-right shrink-0">
-          <p className={`text-lg font-bold ${acc.type === 'credit' ? 'text-red-400' : (acc.balance >= 0 ? 'text-white' : 'text-red-400')}`}>
-            {acc.type === 'credit' ? '-' : ''}{formatMoney(acc.type === 'credit' ? (acc.pendingBill ?? 0) : acc.balance, currency)}
+          <p className={`text-base font-bold ${acc.type !== 'credit' && acc.balance < 0 ? 'text-red-400' : 'text-white'}`}>
+            {acc.type === 'credit' ? '−' : ''}{formatMoney(acc.type === 'credit' ? (acc.pendingBill ?? 0) : acc.balance, currency)}
           </p>
           {acc.type === 'credit' && (acc.closingDay || acc.dueDay) && (
             <p className="text-xs text-textMuted">
@@ -176,17 +174,17 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
   return (
     <div>
       {/* Summary Strip — FIN-029: coluna única abaixo de `sm` para não espremer valores monetários */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div className="glass-card rounded-2xl p-5">
-          <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Saldo Real Total</p>
+      <div className="panel rounded-2xl grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-white/[0.07] mb-6">
+        <div className="p-5">
+          <p className="text-sm text-textMuted mb-1">Saldo em contas</p>
           <p className={`text-2xl font-bold ${totalBalance >= 0 ? 'text-white' : 'text-red-400'}`}>
             {formatBRL(totalBalance)}
           </p>
           <p className="text-xs text-textMuted mt-1">{accounts.filter(a => a.type !== 'credit').length} conta(s)</p>
         </div>
-        <div className="glass-card rounded-2xl p-5">
-          <p className="text-xs text-textMuted uppercase tracking-wide mb-1">Faturas Pendentes (Cartão)</p>
-          <p className="text-2xl font-bold text-red-400">
+        <div className="p-5">
+          <p className="text-sm text-textMuted mb-1">Faturas em aberto</p>
+          <p className="text-2xl font-bold text-white">
             {formatBRL(totalCredit)}
           </p>
           <p className="text-xs text-textMuted mt-1">{accounts.filter(a => a.type === 'credit').length} cartão(ões)</p>
@@ -203,11 +201,7 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
       {/* Account Cards — agrupadas por banco: conta corrente e cartão do mesmo banco ficam juntos. */}
       <div className="space-y-6 mb-4">
         {accounts.length === 0 && (
-          <div className="glass-card rounded-xl p-8 flex flex-col items-center text-center">
-            <Landmark size={32} className="text-textMuted mb-3" />
-            <p className="text-white font-medium mb-1">Nenhuma conta cadastrada</p>
-            <p className="text-textMuted text-sm">Adicione suas contas e cartões para ver seu saldo real</p>
-          </div>
+          <p className="text-sm text-textMuted">Nenhuma conta ainda. Cadastre a conta corrente e o cartão para ver o saldo e as faturas.</p>
         )}
         {groupByBank(accounts).map(group => {
           const ids = new Set(group.accounts.map(a => a.id));
@@ -217,13 +211,13 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
           return (
           <section key={group.key} aria-label={group.bank}>
             <div className="flex items-baseline justify-between mb-2 px-1">
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-medium text-white">
                 {group.bank} <span className="text-xs font-normal text-textMuted">· {group.accounts.length} conta(s)</span>
               </h3>
               {/* Com uma conta só, o total repetiria o valor do card. */}
               {group.accounts.length > 1 && (
-                <span className="text-sm font-semibold" style={{ color: net >= 0 ? 'var(--text-gain)' : 'var(--text-negative)' }}>
-                  {net < 0 ? '-' : ''}{formatBRL(Math.abs(net))}
+                <span className={`text-sm font-medium ${net < 0 ? 'text-red-400' : 'text-white'}`}>
+                  {net < 0 ? '−' : ''}{formatBRL(Math.abs(net))}
                 </span>
               )}
             </div>
@@ -251,17 +245,16 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
       </div>
 
       <button onClick={openAdd}
-        className="w-full py-3.5 rounded-xl font-semibold text-on-accent text-sm flex items-center justify-center gap-2 transition-all shadow-lg"
-        style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
-        <Plus size={16} /> Adicionar Conta
+        className="w-full h-12 rounded-xl border border-dashed border-[var(--control)] text-sm text-textMuted hover:text-white hover:border-[var(--color-textMuted)] flex items-center justify-center gap-2 transition-colors">
+        <Plus size={15} /> Adicionar conta
       </button>
 
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
-          <div className="w-full max-w-md glass-card rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-md panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold text-white">{editing ? 'Editar Conta' : 'Nova Conta'}</h3>
+              <h3 className="text-base font-medium text-white">{editing ? 'Editar Conta' : 'Nova Conta'}</h3>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
                 <X size={18} />
               </button>
@@ -355,9 +348,9 @@ export function AccountsManager({ accounts, onAdd, onUpdate, onDelete, rates = n
             </div>
 
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 transition-colors">Cancelar</button>
+              <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 transition-colors">Cancelar</button>
               <button onClick={handleSave} className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors"
-                style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))' }}>
+                style={{ background: 'var(--color-primary)' }}>
                 {editing ? 'Salvar' : 'Adicionar'}
               </button>
             </div>

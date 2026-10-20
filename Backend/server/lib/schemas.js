@@ -71,7 +71,7 @@ export const debtUpdateSchema = debtSchema.partial();
 // FIN-042/FIN-043 — orçamento mensal por categoria (Fase 3). `category` é texto livre
 // (não um enum fechado, ao contrário de `debtSchema.category`) porque precisa casar com a
 // categoria de qualquer transação — inclusive categorias digitadas manualmente pelo
-// usuário na importação, que não pertencem a uma lista fixa (ver `CATEGORY_COLORS` em
+// usuário na importação, que não pertencem a uma lista fixa (ver `CATEGORIES` em
 // App.tsx e `CATEGORY_RULES` em parsers.ts). `monthlyLimit` exige > 0: um orçamento de
 // R$0 não tem sentido de negócio e, sem essa validação, `computeBudgetProgress`
 // (src/utils/budget.ts) precisaria tratar divisão por zero.

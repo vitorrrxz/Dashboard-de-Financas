@@ -53,7 +53,7 @@ describe('PluggyConnectButton (FIN-107)', () => {
 
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
     expect(consoleError).toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Conectar Banco' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Conectar banco' })).toBeEnabled();
     expect(onSyncComplete).not.toHaveBeenCalled();
   });
 
@@ -96,7 +96,7 @@ describe('PluggyConnectButton (FIN-107)', () => {
     const onSyncComplete = vi.fn();
     render(<PluggyConnectButton token="tk" onSyncComplete={onSyncComplete} />);
 
-    const connect = screen.getByRole('button', { name: 'Conectar Banco' });
+    const connect = screen.getByRole('button', { name: 'Conectar banco' });
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
     fireEvent.click(connect);
 

@@ -1,11 +1,10 @@
 // @vitest-environment node
-// FIN-083 — tema claro: o script do index.html concorda com resolveTheme, os tokens de cor dos
-// dois temas têm contraste WCAG AA, e nenhum componente voltou a usar cores fixas do tema escuro.
+// FIN-083 — temas: o script do index.html concorda com resolveTheme, os tokens de cor dos dois
+// temas têm contraste WCAG AA, e nenhum componente voltou a usar cores fixas do tema escuro antigo.
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import vm from 'vm';
 import { resolveTheme, isThemePreference, THEME_COLORS } from '../src/utils/theme.ts';
-import { CATEGORY_COLORS } from '../src/utils/categories.ts';
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -26,8 +25,6 @@ const contrast = (a, b) => {
   const [l1, l2] = [luminance(a), luminance(b)].sort((x, y) => y - x);
   return (l1 + 0.05) / (l2 + 0.05);
 };
-/** color-mix(in srgb, a p, b) — o que readableColor() produz. */
-const mix = (a, p, b) => a.map((v, i) => v * p + b[i] * (1 - p));
 
 /* ------------------------------ tokens do CSS ------------------------------ */
 const css = read('src/index.css');
@@ -37,74 +34,50 @@ function block(selector) {
   const body = css.slice(css.indexOf('{', start) + 1, css.indexOf('}', start));
   return Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m => [m[1], m[2].trim()]));
 }
-const themeTokens = block('@theme');
+// O claro é a base (@theme + :root); o escuro sobrescreve em :root[data-theme="dark"].
+const themeTokens = block('@theme {');
 const rootTokens = block(':root {');
-const light = block(':root[data-theme="light"]');
-const dark = { ...rootTokens, ...themeTokens, '--color-white': '#ffffff' };
-const lightAll = { ...dark, ...light };
+const darkOverrides = block(':root[data-theme="dark"]');
+const light = { ...rootTokens, ...themeTokens };
+const dark = { ...light, ...darkOverrides };
 const rgb = (tokens, name) => {
   const value = tokens[name];
   expect(value, `${name} não é uma cor hexadecimal`).toMatch(/^#[0-9a-f]{3,6}$/i);
   return hexToRgb(value);
 };
 
-// Cores de dado exibidas como texto: categorias, tipos de pagamento e categorias de dívida.
-const DATA_COLORS = [...new Set([
-  ...Object.values(CATEGORY_COLORS),
-  '#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#a855f7', '#6b7280',
-])];
-
 describe('tokens de cor dos temas (FIN-083)', () => {
-  it('todo token de cor do @theme tem valor no tema claro', () => {
+  it('todo token de cor do @theme tem valor no tema escuro', () => {
     const colorTokens = Object.keys(themeTokens).filter(name => name.startsWith('--color-'));
-    for (const name of colorTokens) expect(light, `${name} sem valor no tema claro`).toHaveProperty(name);
+    for (const name of colorTokens) expect(darkOverrides, `${name} sem valor no tema escuro`).toHaveProperty(name);
   });
 
-  it('as variáveis de apoio do tema escuro têm valor no tema claro', () => {
+  it('as variáveis de apoio do tema claro têm valor no tema escuro', () => {
     const themed = Object.keys(rootTokens).filter(name => !name.startsWith('--fg-'));
-    for (const name of themed) expect(light, `${name} sem valor no tema claro`).toHaveProperty(name);
+    for (const name of themed) expect(darkOverrides, `${name} sem valor no tema escuro`).toHaveProperty(name);
   });
 
-  it('texto principal e secundário com contraste AA (4,5:1) sobre fundo e cartão, nos dois temas', () => {
-    for (const tokens of [dark, lightAll]) {
-      for (const text of ['--color-textMain', '--color-textMuted']) {
+  it('texto, status, primária, acento e eixos com contraste AA (4,5:1) sobre fundo e cartão, nos dois temas', () => {
+    for (const [theme, tokens] of [['claro', light], ['escuro', dark]]) {
+      const texts = Object.keys(tokens).filter(name => /^--color-(red|teal|amber|pink|orange|blue|indigo|emerald|green)-\d+$/.test(name) || name.startsWith('--text-'));
+      expect(texts.length).toBeGreaterThan(10);
+      for (const name of [...texts, '--color-textMain', '--color-textMuted', '--color-primary', '--color-accent', '--color-white', '--chart-axis']) {
         for (const surface of ['--color-background', '--color-card']) {
-          expect(contrast(rgb(tokens, text), rgb(tokens, surface)), `${text} sobre ${surface}`).toBeGreaterThanOrEqual(4.5);
+          expect(contrast(rgb(tokens, name), rgb(tokens, surface)), `${theme}: ${name} sobre ${surface}`).toBeGreaterThanOrEqual(4.5);
         }
       }
     }
   });
 
-  it('no claro, os tons de texto redefinidos, a primária e o acento têm contraste AA', () => {
-    const texts = Object.keys(light).filter(name => /^--color-(red|teal|amber|pink|orange|blue|indigo)-\d+$/.test(name) || name.startsWith('--text-'));
-    expect(texts.length).toBeGreaterThan(10);
-    for (const name of [...texts, '--color-primary', '--color-accent', '--color-white', '--chart-axis']) {
-      for (const surface of ['--color-background', '--color-card']) {
-        expect(contrast(rgb(lightAll, name), rgb(lightAll, surface)), `${name} sobre ${surface}`).toBeGreaterThanOrEqual(4.5);
-      }
-    }
-  });
-
-  it('no claro, texto branco (text-on-accent) sobre a primária e a secundária tem contraste AA', () => {
-    for (const name of ['--color-primary', '--color-secondary']) {
-      expect(contrast([255, 255, 255], rgb(lightAll, name)), `branco sobre ${name}`).toBeGreaterThanOrEqual(4.5);
-    }
-  });
-
-  it('cores de dado como texto (readableColor) ficam legíveis no claro', () => {
-    const strength = parseFloat(light['--tint-strength']) / 100;
-    expect(dark['--tint-strength']).toBe('100%');
-    for (const color of DATA_COLORS) {
-      const text = mix(hexToRgb(color), strength, rgb(lightAll, '--color-white'));
-      for (const surface of ['--color-background', '--color-card']) {
-        expect(contrast(text, rgb(lightAll, surface)), `${color} sobre ${surface}`).toBeGreaterThanOrEqual(4.5);
-      }
+  it('texto do botão primário (text-on-accent) sobre a primária tem contraste AA, nos dois temas', () => {
+    for (const tokens of [light, dark]) {
+      expect(contrast(rgb(tokens, '--on-primary'), rgb(tokens, '--color-primary'))).toBeGreaterThanOrEqual(4.5);
     }
   });
 
   it('a cor da barra do navegador de cada tema é o fundo do tema', () => {
-    expect(THEME_COLORS.dark).toBe(dark['--color-background']);
     expect(THEME_COLORS.light).toBe(light['--color-background']);
+    expect(THEME_COLORS.dark).toBe(dark['--color-background']);
   });
 });
 
@@ -114,7 +87,7 @@ describe('script de tema do index.html (FIN-083)', () => {
 
   /** Roda o script inline com o armazenamento e a preferência de sistema dados; devolve o tema aplicado. */
   function runInlineScript(stored, systemLight, { withMatchMedia = true } = {}) {
-    const meta = { content: THEME_COLORS.dark, setAttribute(name, value) { if (name === 'content') this.content = value; } };
+    const meta = { content: THEME_COLORS.light, setAttribute(name, value) { if (name === 'content') this.content = value; } };
     const documentElement = { dataset: {} };
     const sandbox = {
       localStorage: { getItem: key => (key === 'finflow_theme' ? stored : null) },
@@ -133,7 +106,7 @@ describe('script de tema do index.html (FIN-083)', () => {
   it('concorda com resolveTheme em todas as combinações de preferência e sistema', () => {
     for (const stored of [null, 'dark', 'light', 'system', 'azul']) {
       for (const systemLight of [true, false]) {
-        const expected = resolveTheme(isThemePreference(stored) ? stored : 'dark', systemLight);
+        const expected = resolveTheme(isThemePreference(stored) ? stored : 'light', systemLight);
         const { theme, themeColor } = runInlineScript(stored, systemLight);
         expect(theme, `${stored} / sistema claro: ${systemLight}`).toBe(expected);
         expect(themeColor).toBe(THEME_COLORS[expected]);
@@ -141,15 +114,15 @@ describe('script de tema do index.html (FIN-083)', () => {
     }
   });
 
-  it('sem matchMedia ou com armazenamento bloqueado, fica no escuro', () => {
-    expect(runInlineScript('system', true, { withMatchMedia: false }).theme).toBe('dark');
+  it('sem matchMedia ou com armazenamento bloqueado, fica no claro', () => {
+    expect(runInlineScript('system', true, { withMatchMedia: false }).theme).toBe('light');
     const documentElement = { dataset: {} };
     vm.runInNewContext(script, {
       localStorage: { getItem: () => { throw new Error('SecurityError'); } },
       window: {},
       document: { documentElement, querySelector: () => null },
     });
-    expect(documentElement.dataset.theme).toBe('dark');
+    expect(documentElement.dataset.theme).toBe('light');
   });
 });
 

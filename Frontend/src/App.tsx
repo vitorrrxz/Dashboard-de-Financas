@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import {
-  LayoutDashboard, Wallet, ArrowRightLeft, Upload, Trash2,
-  Search, TrendingDown, TrendingUp, Loader2,
+  LayoutDashboard, Wallet, Upload,
+  Search, TrendingUp, Loader2,
   LogOut, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, BarChart3, Settings
 } from 'lucide-react';
 import { ImportModal } from './components/ImportModal';
 import { NavItem } from './components/NavItem';
+import { FinFlowMark } from './components/FinFlowMark';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from './utils/paymentTypes';
 import { NotificationBell } from './components/NotificationBell';
 import { AuthForm } from './components/AuthForm';
@@ -24,7 +25,7 @@ const InvestmentsPage = lazy(() => import('./pages/InvestmentsPage').then(m => (
 const ReportsPage = lazy(() => import('./pages/ReportsPage').then(m => ({ default: m.ReportsPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const PluggyConnectButton = lazy(() => import('./components/PluggyConnectButton').then(m => ({ default: m.PluggyConnectButton })));
-import { toCents, toReais } from './utils/money';
+import { formatBRL as fmt, toCents, toReais } from './utils/money';
 import { apiFetch, ApiError } from './services/api';
 import { accountIdsOf, inAccounts } from './utils/accountGroups';
 
@@ -53,7 +54,14 @@ import type {
   NotificationType, RecurringTransaction, Salary, Transaction, PaymentType,
 } from './types';
 
-export type Tab = 'dashboard' | 'transactions' | 'accounts' | 'debts' | 'budgets' | 'goals' | 'investments' | 'recurring' | 'reports' | 'settings';
+const TABS = ['dashboard', 'transactions', 'accounts', 'debts', 'budgets', 'goals', 'investments', 'recurring', 'reports', 'settings'] as const;
+export type Tab = (typeof TABS)[number];
+
+/** A aba vive no endereço (#contas…): voltar, recarregar e abrir em outra aba mantêm a tela. */
+const tabFromHash = (): Tab => {
+  const hash = window.location.hash.slice(1);
+  return (TABS as readonly string[]).includes(hash) ? (hash as Tab) : 'dashboard';
+};
 
 // Login desativado temporariamente — ver `local-session` em Backend/server/routes/auth.js.
 const AUTH_DISABLED = import.meta.env.VITE_AUTH_DISABLED === 'true';
@@ -70,10 +78,6 @@ const NOTIFICATION_TAB: Record<NotificationType, Tab> = {
 interface NotificationsResponse {
   notifications: AppNotification[];
   unreadCount: number;
-}
-
-function fmt(v: number) {
-  return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
 }
 
 /** FIN-117 — estado de carregamento (acessível) de uma aba carregada sob demanda. */
@@ -235,7 +239,7 @@ export default function App() {
   const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
   const [loading, setLoading] = useState(!!token);
 
-  const [activeTab, setActiveTab]     = useState<Tab>('dashboard');
+  const [activeTab, setActiveTab]     = useState<Tab>(tabFromHash);
   const [showImport, setShowImport]   = useState(false);
   const [search, setSearch]           = useState('');
   const [txFilter, setTxFilter]       = useState<'all' | 'income' | 'expense'>('all');
@@ -259,6 +263,16 @@ export default function App() {
     initialFocusRef: drawerCloseRef,
     returnFocusRef: menuButtonRef,
   });
+  useEffect(() => {
+    if (window.location.hash.slice(1) !== activeTab) window.location.hash = activeTab;
+    window.scrollTo(0, 0);
+  }, [activeTab]);
+  useEffect(() => {
+    // Só hashes de aba trocam a tela — o #main-content do "pular para o conteúdo" não.
+    const onHash = () => { if ((TABS as readonly string[]).includes(window.location.hash.slice(1))) setActiveTab(tabFromHash()); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   // FIN-083: tema claro/escuro — aplicado ao documento também na tela de login.
   const theme = useTheme();
   const [notifications, setNotifications] = useState<AppNotification[]>([]); // FIN-066
@@ -432,7 +446,7 @@ export default function App() {
 
   /** Remove todas as transações do usuário, com confirmação. */
   const handleClearTransactions = async () => {
-    if (!confirm('Remover todas as transações?')) return;
+    if (!confirm(`Apagar as ${transactions.length} transações? Não dá para desfazer.`)) return;
     await fetchAPI('/api/transactions/bulk', 'DELETE');
     setTxs([]);
     setTxHasMore(false);
@@ -1023,38 +1037,31 @@ export default function App() {
   const hasAccounts = accounts.length > 0;
   const isEmpty     = transactions.length === 0;
 
-  // Badges da navegação (barra lateral, ver render abaixo).
-  const accountsBadge = accounts.length > 0 ? accounts.length : undefined;
-  const unpaidDebtsCount = debts.filter(d => d.paidInstallments < d.totalInstallments).length;
-  const debtsBadge = unpaidDebtsCount > 0 ? unpaidDebtsCount : undefined;
-  const debtsBadgeColor = stats.overdueDebts.length > 0 ? '#ef4444' : undefined;
-  const budgetsBadge = budgets.length > 0 ? budgets.length : undefined;
-  const budgetsBadgeColor = overBudget.length > 0 ? '#ef4444' : undefined;
-  const goalsBadge = goals.length > 0 ? goals.length : undefined;
-  const investmentsBadge = investments.length > 0 ? investments.length : undefined;
-  const activeRecurringCount = recurring.filter(r => r.active).length;
-  const recurringBadge = activeRecurringCount > 0 ? activeRecurringCount : undefined;
+  // Contadores da navegação: só onde há o que resolver (dívida vencida, orçamento estourado).
+  const debtsBadge = stats.overdueDebts.length > 0 ? stats.overdueDebts.length : undefined;
+  const budgetsBadge = overBudget.length > 0 ? overBudget.length : undefined;
+
+  const go = (tab: Tab) => { setActiveTab(tab); setMobileNavOpen(false); };
 
   if (!token) {
     return AUTH_DISABLED && !localSessionFailed
-      ? <div className="h-screen w-full flex items-center justify-center bg-background text-white">Entrando...</div>
+      ? <div className="h-screen w-full flex items-center justify-center bg-background text-textMuted">Entrando…</div>
       : <AuthForm onLogin={handleLogin} />;
   }
-  if (loading) return <div className="h-screen w-full flex items-center justify-center bg-background text-white">Carregando Banco de Dados...</div>;
+  if (loading) return <div role="status" className="h-screen w-full flex items-center justify-center bg-background text-textMuted">Carregando seus dados…</div>;
   if (loadError) return (
-    <div className="h-screen w-full flex items-center justify-center p-6" style={{ backgroundColor: 'var(--color-background)' }}>
-      <div role="alert" className="glass-card rounded-2xl p-8 max-w-md text-center">
-        <WifiOff size={32} className="mx-auto mb-4 text-amber-400" aria-hidden="true"/>
-        <h1 className="text-xl font-bold text-white mb-2">Sem conexão com o servidor</h1>
+    <div className="h-screen w-full flex items-center justify-center p-6 bg-background">
+      <div role="alert" className="panel rounded-2xl p-8 max-w-md">
+        <WifiOff size={20} className="mb-4 text-textMuted" aria-hidden="true"/>
+        <h1 className="text-lg font-medium text-white mb-2">Sem conexão com o servidor</h1>
         <p className="text-sm text-textMuted mb-6">{loadError}</p>
-        <div className="flex flex-wrap gap-3 justify-center">
+        <div className="flex flex-wrap gap-2">
           <button type="button" onClick={retryLoad}
-            className="px-5 py-2.5 rounded-xl text-sm text-on-accent font-semibold"
-            style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>
+            className="h-9 px-4 rounded-md text-sm font-medium bg-primary text-on-accent hover:opacity-90 transition-opacity">
             Tentar de novo
           </button>
           <button type="button" onClick={handleLogout}
-            className="px-5 py-2.5 rounded-xl text-sm text-textMuted border border-white/10 hover:bg-white/5 hover:text-white transition-colors">
+            className="h-9 px-4 rounded-md text-sm text-white bg-white/[0.06] hover:bg-white/10 transition-colors">
             Sair
           </button>
         </div>
@@ -1064,151 +1071,110 @@ export default function App() {
 
   // ---------- Render ----------
   return (
-    <div className="flex h-screen overflow-hidden relative" style={{ backgroundColor: 'var(--color-background)' }}>
-      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 rounded-full blur-[100px] pointer-events-none" style={{ backgroundColor: 'rgba(99,102,241,0.12)' }} />
-      <div className="absolute bottom-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none" style={{ backgroundColor: 'rgba(168,85,247,0.07)' }} />
-
+    <div className="flex min-h-screen bg-background">
       {/* FIN-081: primeiro item focável da página — leva direto ao conteúdo, pulando o menu. */}
       <a href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-xl focus:bg-primary focus:text-on-accent focus:text-sm focus:font-semibold">
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-md focus:bg-primary focus:text-on-accent focus:text-sm focus:font-medium">
         Pular para o conteúdo
       </a>
 
-      {/* ── Sidebar (FIN-028/FIN-081: gaveta que desliza em mobile, estática em md+) ── */}
+      {/* ── Barra lateral (FIN-028/FIN-081: gaveta que desliza em mobile, estática em md+) ── */}
       <div aria-hidden="true" onClick={() => setMobileNavOpen(false)}
-        className={`fixed inset-0 bg-black/70 z-40 md:hidden transition-opacity duration-200 motion-reduce:transition-none
+        className={`fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity duration-200 motion-reduce:transition-none
           ${mobileNavOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
       <aside id="app-sidebar" ref={drawerRef} inert={drawer.hidden}
         {...(drawer.modal ? { role: 'dialog', 'aria-modal': true, 'aria-label': 'Menu de navegação' } : {})}
         {...drawer.swipeHandlers}
-        className={`w-64 glass-panel border-r border-white/5 flex flex-col justify-between z-50
+        className={`w-60 shrink-0 bg-background border-r border-white/[0.07] flex flex-col z-50 overflow-y-auto
           fixed inset-y-0 left-0 transition-transform duration-200 ease-out motion-reduce:transition-none
           ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}
-          md:static md:z-10 md:translate-x-0 md:transition-none`}>
-        <div>
-          <div className="p-6 flex items-center justify-between text-white">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg text-on-accent"
-                style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))' }}>F</div>
-              <span className="text-xl font-bold">Fin<span style={{ color: 'var(--color-primary)', fontWeight: 300 }}>Flow</span></span>
+          md:sticky md:top-0 md:h-screen md:z-10 md:translate-x-0 md:transition-none`}>
+        <div className="h-14 px-4 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <FinFlowMark />
+            <div className="min-w-0 leading-tight">
+              <p className="text-sm font-medium text-white">FinFlow</p>
+              {user?.name && <p className="text-xs text-textMuted truncate">{user.name}</p>}
             </div>
-            <button ref={drawerCloseRef} type="button" onClick={() => setMobileNavOpen(false)} aria-label="Fechar menu"
-              className="md:hidden p-1.5 rounded-lg text-textMuted hover:text-white hover:bg-white/10 transition-colors">
-              <X size={18}/>
-            </button>
           </div>
-
-          <nav aria-label="Principal" className="mt-4 px-4 space-y-1">
-            <NavItem icon={<LayoutDashboard size={18}/>} label="Dashboard" active={activeTab==='dashboard'} onClick={() => { setActiveTab('dashboard'); setMobileNavOpen(false); }} />
-
-            <div className="space-y-1">
-              <NavItem icon={<Wallet size={18}/>} label="Contas" active={activeTab==='accounts'} onClick={() => { setActiveTab('accounts'); setMobileNavOpen(false); }} badge={accountsBadge} />
-
-              {accounts.length > 0 && (
-                <div className="ml-6 pl-2 border-l border-white/10 space-y-1 mt-1 transition-all">
-                  <NavItem icon={<ArrowRightLeft size={16}/>} label="Transações" active={activeTab==='transactions'} onClick={() => { setActiveTab('transactions'); setMobileNavOpen(false); }} isSubItem />
-                  <NavItem icon={<TrendingDown size={16}/>} label="Dívidas" active={activeTab==='debts'} onClick={() => { setActiveTab('debts'); setMobileNavOpen(false); }} isSubItem
-                    badge={debtsBadge}
-                    badgeColor={debtsBadgeColor}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* FIN-045 */}
-            <NavItem icon={<PiggyBank size={18}/>} label="Orçamento" active={activeTab==='budgets'} onClick={() => { setActiveTab('budgets'); setMobileNavOpen(false); }}
-              badge={budgetsBadge}
-              badgeColor={budgetsBadgeColor}
-            />
-
-            {/* FIN-051 */}
-            <NavItem icon={<Target size={18}/>} label="Metas" active={activeTab==='goals'} onClick={() => { setActiveTab('goals'); setMobileNavOpen(false); }}
-              badge={goalsBadge}
-            />
-
-            {/* FIN-072 */}
-            <NavItem icon={<TrendingUp size={18}/>} label="Investimentos" active={activeTab==='investments'} onClick={() => { setActiveTab('investments'); setMobileNavOpen(false); }}
-              badge={investmentsBadge}
-            />
-
-            {/* FIN-056 */}
-            <NavItem icon={<Repeat size={18}/>} label="Recorrências" active={activeTab==='recurring'} onClick={() => { setActiveTab('recurring'); setMobileNavOpen(false); }}
-              badge={recurringBadge}
-            />
-
-            {/* FIN-062/FIN-063/FIN-064 */}
-            <NavItem icon={<BarChart3 size={18}/>} label="Relatórios" active={activeTab==='reports'} onClick={() => { setActiveTab('reports'); setMobileNavOpen(false); }} />
-
-            {/* FIN-078/FIN-079/FIN-080/FIN-083 */}
-            <NavItem icon={<Settings size={18}/>} label="Configurações" active={activeTab==='settings'} onClick={() => { setActiveTab('settings'); setMobileNavOpen(false); }} />
-          </nav>
+          <button ref={drawerCloseRef} type="button" onClick={() => setMobileNavOpen(false)} aria-label="Fechar menu"
+            className="md:hidden p-1.5 rounded-md text-textMuted hover:text-white hover:bg-white/[0.06] transition-colors">
+            <X size={16}/>
+          </button>
         </div>
 
-        <div className="p-5 space-y-2">
-          <div className="mb-4 flex items-center justify-between bg-white/5 p-3 rounded-xl border border-white/5">
-              <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-white truncate">{user?.name}</p>
-                  <p className="text-xs text-textMuted truncate">{user?.email}</p>
-              </div>
-              <button type="button" onClick={handleLogout} aria-label="Sair da conta" title="Sair da conta"
-                className="p-2 ml-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors">
-                  <LogOut size={14}/>
-              </button>
-          </div>
+        <nav aria-label="Principal" className="mt-2 px-2 space-y-0.5">
+          <NavItem icon={<LayoutDashboard size={16} strokeWidth={1.75}/>} label="Visão geral" active={activeTab==='dashboard'} onClick={() => go('dashboard')} />
+          <NavItem icon={<Wallet size={16} strokeWidth={1.75}/>} label="Contas" active={activeTab==='accounts'} onClick={() => go('accounts')} />
+          {accounts.length > 0 && (
+            <>
+              <NavItem icon={null} label="Transações" active={activeTab==='transactions'} onClick={() => go('transactions')} isSubItem />
+              <NavItem icon={null} label="Dívidas" active={activeTab==='debts'} onClick={() => go('debts')} isSubItem badge={debtsBadge} />
+            </>
+          )}
+          {/* FIN-045 */}
+          <NavItem icon={<PiggyBank size={16} strokeWidth={1.75}/>} label="Orçamento" active={activeTab==='budgets'} onClick={() => go('budgets')} badge={budgetsBadge} />
+          {/* FIN-051 */}
+          <NavItem icon={<Target size={16} strokeWidth={1.75}/>} label="Metas" active={activeTab==='goals'} onClick={() => go('goals')} />
+          {/* FIN-072 */}
+          <NavItem icon={<TrendingUp size={16} strokeWidth={1.75}/>} label="Investimentos" active={activeTab==='investments'} onClick={() => go('investments')} />
+          {/* FIN-056 */}
+          <NavItem icon={<Repeat size={16} strokeWidth={1.75}/>} label="Recorrências" active={activeTab==='recurring'} onClick={() => go('recurring')} />
+          {/* FIN-062/FIN-063/FIN-064 */}
+          <NavItem icon={<BarChart3 size={16} strokeWidth={1.75}/>} label="Relatórios" active={activeTab==='reports'} onClick={() => go('reports')} />
+        </nav>
 
-          <button onClick={() => { setActiveTab('accounts'); setMobileNavOpen(false); }}
-            className="w-full py-3 rounded-xl text-sm font-semibold text-on-accent flex items-center justify-center gap-2 transition-all shadow-lg"
-            style={{ background: 'linear-gradient(135deg,var(--color-primary),var(--color-secondary))', boxShadow: '0 4px 20px rgba(99,102,241,0.25)' }}>
-            <Wallet size={15}/> Gerenciar Contas
-          </button>
-          <button onClick={() => { setShowImport(true); setMobileNavOpen(false); }}
-            className="w-full py-3 rounded-xl border border-white/10 text-xs font-medium text-textMuted hover:text-white flex items-center justify-center gap-2 transition-all hover:bg-white/5">
-            <Upload size={14}/> Importação Manual
-          </button>
+        <div className="mt-auto p-3 space-y-3">
           {token && (
             <Suspense fallback={<PluggyButtonLoadingFallback />}>
-            <PluggyConnectButton token={token} onSyncComplete={handlePluggySyncComplete} />
+              <PluggyConnectButton token={token} onSyncComplete={handlePluggySyncComplete} />
             </Suspense>
           )}
-          {transactions.length > 0 && (
-            <button onClick={handleClearTransactions}
-              className="w-full py-2.5 rounded-xl border border-red-500/10 text-red-400 hover:bg-red-500/10 text-xs font-medium flex items-center justify-center gap-2 transition-all">
-              <Trash2 size={14}/> Limpar Transações
+          <div className="space-y-0.5">
+            <NavItem icon={<Upload size={16} strokeWidth={1.75}/>} label="Importar extrato" active={false} onClick={() => { setShowImport(true); setMobileNavOpen(false); }} />
+            {/* FIN-078/FIN-079/FIN-080/FIN-083 */}
+            <NavItem icon={<Settings size={16} strokeWidth={1.75}/>} label="Configurações" active={activeTab==='settings'} onClick={() => go('settings')} />
+          </div>
+          <div className="flex items-center justify-between gap-2 px-2.5 pt-3 border-t border-white/[0.07]">
+            <p className="text-xs text-textMuted truncate">{user?.email}</p>
+            <button type="button" onClick={handleLogout} aria-label="Sair da conta" title="Sair da conta"
+              className="p-1.5 rounded-md text-textMuted hover:text-white hover:bg-white/[0.06] transition-colors">
+              <LogOut size={14}/>
             </button>
-          )}
+          </div>
         </div>
       </aside>
-      {/* ── Main Content ── */}
-      <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto z-10 custom-scrollbar focus:outline-none">
-        <header className="sticky top-0 z-20 backdrop-blur-xl bg-background/80 border-b border-white/5 px-4 md:px-8 py-5 flex justify-between items-center gap-3">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            {/* FIN-028: botão hambúrguer, único ponto de entrada para a navegação em mobile */}
+      {/* ── Conteúdo ── */}
+      <main id="main-content" tabIndex={-1} className="flex-1 min-w-0 focus:outline-none">
+        <header className="h-14 px-4 md:px-8 flex justify-between items-center gap-3">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            {/* FIN-028: botão de menu, único ponto de entrada para a navegação em mobile */}
             <button ref={menuButtonRef} type="button" onClick={() => setMobileNavOpen(true)}
               aria-label="Abrir menu" aria-expanded={mobileNavOpen} aria-controls="app-sidebar"
-              className="md:hidden p-2 rounded-full hover:bg-white/5 transition-colors text-white shrink-0">
-              <Menu size={22}/>
+              className="md:hidden p-2 -ml-2 rounded-md hover:bg-white/[0.06] transition-colors text-white shrink-0">
+              <Menu size={20}/>
             </button>
-            <div className="relative w-full max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" size={18} />
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-textMuted" size={14} aria-hidden="true" />
               {/* FIN-040: só troca para a aba Transações na transição vazio→preenchido
                   (1ª tecla), não a cada tecla — evita arrancar o usuário de outra aba a
                   cada caractere digitado. */}
-              <input type="search" aria-label="Buscar transações" placeholder="Buscar transações, contas..." value={search}
+              <input type="search" aria-label="Buscar transações" placeholder="Buscar transações" value={search}
                 onChange={e => {
                   const v = e.target.value;
                   if (v && !search) setActiveTab('transactions');
                   setSearch(v);
                 }}
-                className="w-full bg-white/5 border border-white/10 rounded-full pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-primary/50 transition-colors" />
+                className="input-field !pl-8" />
             </div>
           </div>
-          <div className="flex items-center gap-2 md:gap-4 relative">
+          <div className="flex items-center gap-1 relative">
             {/* FIN-083: atalho entre claro e escuro — a escolha completa, com "igual ao sistema", fica em Configurações. */}
             <button type="button" onClick={() => theme.setPreference(theme.resolved === 'dark' ? 'light' : 'dark')}
               aria-label={theme.resolved === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
               title={theme.resolved === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
-              className="p-2 rounded-full hover:bg-white/5 transition-colors text-textMuted hover:text-white">
-              {theme.resolved === 'dark' ? <Sun size={20} aria-hidden="true"/> : <Moon size={20} aria-hidden="true"/>}
+              className="p-2 rounded-md hover:bg-white/[0.06] transition-colors text-textMuted hover:text-white">
+              {theme.resolved === 'dark' ? <Sun size={16} aria-hidden="true"/> : <Moon size={16} aria-hidden="true"/>}
             </button>
             {/* FIN-066: central de notificações persistidas no servidor (substitui FIN-039). */}
             <NotificationBell notifications={notifications} unreadCount={unreadCount}
@@ -1216,7 +1182,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="p-8 max-w-7xl mx-auto pb-24">
+        <div className="px-4 md:px-8 pt-2 pb-16 max-w-[1240px]">
 
           {activeTab === 'dashboard' && (
             <DashboardPage
@@ -1363,6 +1329,8 @@ export default function App() {
                 theme={theme}
                 token={token}
                 onRestored={handleRestored}
+                hasTransactions={transactions.length > 0}
+                onClearTransactions={handleClearTransactions}
               />
             </Suspense>
           )}

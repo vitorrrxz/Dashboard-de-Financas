@@ -5,7 +5,6 @@ import type { Transaction } from '../utils/parsers';
 import type { PaymentType, Account } from '../types';
 import { formatDateBR } from '../utils/dates';
 import { BASE_CURRENCY, currencyOf, formatMoney } from '../utils/currency';
-import { readableColor } from '../utils/theme';
 
 interface ImportModalProps {
   onClose: () => void;
@@ -15,33 +14,29 @@ interface ImportModalProps {
 
 type UploadState = 'idle' | 'dragging' | 'loading' | 'success' | 'error';
 
-const PAYMENT_TYPES: { value: PaymentType; label: string; description: string; color: string; icon: React.ReactNode }[] = [
+const PAYMENT_TYPES: { value: PaymentType; label: string; description: string; icon: React.ReactNode }[] = [
   {
     value: 'debit',
     label: 'Débito',
     description: 'Extrato de conta corrente/poupança',
-    color: '#3b82f6',
     icon: <Banknote size={16} />,
   },
   {
     value: 'credit',
     label: 'Crédito',
     description: 'Fatura de cartão de crédito',
-    color: '#ec4899',
     icon: <CreditCard size={16} />,
   },
   {
     value: 'pix',
     label: 'PIX',
     description: 'Transferências e cobranças via PIX',
-    color: '#10b981',
     icon: <Smartphone size={16} />,
   },
   {
     value: 'pix_installment',
     label: 'PIX Parcelado',
     description: 'PIX parcelado — entra nas dívidas automaticamente',
-    color: '#f59e0b',
     icon: <LayoutList size={16} />,
   },
 ];
@@ -107,14 +102,14 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="w-full max-w-2xl glass-card rounded-2xl p-8 relative"
+        className="w-full max-w-2xl panel rounded-2xl p-8 relative"
         onClick={e => e.stopPropagation()}
         style={{ border: '1px solid var(--fg-10)' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-white">Importar Extrato</h2>
+            <h2 className="text-lg font-medium text-white">Importar extrato</h2>
             <p className="text-sm text-textMuted mt-1">Suporte a OFX (Itaú, Bradesco, BB, Santander) e CSV (Nubank, Inter)</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
@@ -124,34 +119,32 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
 
         {/* Payment Type Selector — always visible */}
         <div className="mb-5">
-          <p className="text-xs font-semibold text-textMuted uppercase tracking-wider mb-2">Tipo de Pagamento</p>
+          <p className="text-sm text-textMuted mb-2">Tipo de pagamento</p>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {PAYMENT_TYPES.map(p => (
               <button
                 key={p.value}
                 onClick={() => setPaymentType(p.value)}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-all duration-200"
-                style={{
-                  backgroundColor: paymentType === p.value ? `${p.color}18` : 'var(--fg-3)',
-                  borderColor: paymentType === p.value ? `${p.color}60` : 'var(--fg-8)',
-                  color: paymentType === p.value ? readableColor(p.color) : 'var(--color-textMuted)',
-                  boxShadow: paymentType === p.value ? `0 0 14px ${p.color}18` : 'none',
-                }}
+                type="button"
+                aria-pressed={paymentType === p.value}
+                className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-center transition-colors ${
+                  paymentType === p.value ? 'border-[var(--color-textMuted)] text-white bg-white/[0.04]' : 'border-[var(--line)] text-textMuted hover:text-white hover:border-[var(--color-textMuted)]'
+                }`}
               >
-                <span style={{ color: paymentType === p.value ? readableColor(p.color) : 'var(--color-textMuted)' }}>{p.icon}</span>
-                <span className="text-xs font-bold">{p.label}</span>
+                <span aria-hidden="true">{p.icon}</span>
+                <span className="text-sm font-medium">{p.label}</span>
               </button>
             ))}
           </div>
           <p className="text-xs text-textMuted mt-2 text-center">
             {selectedPayment.description}
             {willCreateDebt && (
-              <span className="ml-1.5 font-semibold" style={{ color: selectedPayment.color }}>
-                · Gera dívida automática ✦
+              <span className="ml-1.5 font-medium text-white">
+                · Gera uma dívida automática
               </span>
             )}
             {isDebtType && !willCreateDebt && (
-              <span className="ml-1.5 font-semibold text-amber-300">
+              <span className="ml-1.5 font-medium text-amber-300">
                 · Conta em {currency}: sem dívida automática
               </span>
             )}
@@ -166,7 +159,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center cursor-pointer transition-all duration-200 ${
               state === 'dragging'
                 ? 'border-primary bg-primary/10'
-                : 'border-white/10 hover:border-white/30 hover:bg-white/[0.02]'
+                : 'border-[var(--line)] hover:border-[var(--color-textMuted)] hover:bg-white/[0.02]'
             }`}
             onClick={() => document.getElementById('file-input')?.click()}
           >
@@ -182,7 +175,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             <p className="text-textMuted text-sm text-center">Formatos aceitos: .OFX, .QFX, .CSV</p>
             <div className="flex gap-2 mt-4 flex-wrap justify-center">
               {['Nubank (.csv)', 'Itaú (.ofx)', 'Bradesco (.ofx)', 'BB (.ofx)', 'Inter (.csv)'].map(b => (
-                <span key={b} className="text-xs px-3 py-1 bg-white/5 border border-white/10 rounded-full text-textMuted">{b}</span>
+                <span key={b} className="text-xs px-3 py-1 bg-white/5 border border-[var(--line)] rounded-full text-textMuted">{b}</span>
               ))}
             </div>
           </div>
@@ -225,12 +218,12 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
               </div>
 
               <div className="flex flex-col gap-1 items-end">
-                <label htmlFor="import-account" className="text-[10px] text-textMuted uppercase font-bold pr-2">Importar para:</label>
+                <label htmlFor="import-account" className="text-xs text-textMuted font-bold pr-2">Importar para:</label>
                 <select
                   id="import-account"
                   value={selectedAccountId}
                   onChange={e => setSelectedAccountId(e.target.value)}
-                  className="bg-black/40 border border-white/10 rounded-lg py-1.5 px-3 text-xs text-white focus:outline-none focus:border-accent transition-colors cursor-pointer"
+                  className="input-field !w-auto"
                 >
                   {accounts.map(acc => (
                     <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
@@ -242,14 +235,9 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             {/* Auto-debt notice */}
             {willCreateDebt && (
               <div
-                className="mb-4 p-3 rounded-xl flex items-center gap-2.5 text-xs font-medium"
-                style={{
-                  backgroundColor: `${selectedPayment.color}12`,
-                  border: `1px solid ${selectedPayment.color}35`,
-                  color: selectedPayment.color,
-                }}
+                className="mb-4 p-3 rounded-xl flex items-center gap-2.5 text-sm text-white border border-[var(--control)]"
               >
-                <span>{selectedPayment.icon}</span>
+                <span className="text-textMuted" aria-hidden="true">{selectedPayment.icon}</span>
                 <span>
                   Uma dívida de <strong>{formatMoney(expense, currency)}</strong> será criada automaticamente
                   na aba <strong>Dívidas</strong> como "{selectedPayment.label}".
@@ -258,7 +246,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             )}
             {isDebtType && !willCreateDebt && (
               <div className="mb-4 p-3 rounded-xl flex items-center gap-2.5 text-xs font-medium text-amber-300"
-                style={{ backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                style={{ border: '1px solid color-mix(in srgb, var(--color-amber-500) 40%, transparent)' }}>
                 <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
                 <span>
                   A conta de destino está em {currency}. Dívidas são registradas em real, então nenhuma dívida
@@ -270,8 +258,8 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
             {/* Preview table */}
             <div className="max-h-52 overflow-y-auto rounded-xl border border-white/5">
               <table className="w-full text-left">
-                <thead className="sticky top-0 bg-card/80 backdrop-blur">
-                  <tr className="text-xs text-textMuted uppercase tracking-wider">
+                <thead className="sticky top-0 bg-card">
+                  <tr className="text-xs text-textMuted">
                     <th className="px-4 py-3 font-medium">Descrição</th>
                     <th className="px-4 py-3 font-medium">Categoria</th>
                     <th className="px-4 py-3 font-medium">Data</th>
@@ -283,7 +271,7 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
                     <tr key={tx.id} className="border-t border-white/5 hover:bg-white/[0.02]">
                       <td className="px-4 py-2.5 text-sm text-white max-w-[180px] truncate">{tx.name}</td>
                       <td className="px-4 py-2.5">
-                        <span className="text-xs px-2 py-1 bg-white/5 border border-white/10 rounded-full text-textMuted">{tx.category}</span>
+                        <span className="text-xs px-2 py-1 bg-white/5 border border-[var(--line)] rounded-full text-textMuted">{tx.category}</span>
                       </td>
                       <td className="px-4 py-2.5 text-xs text-textMuted">{formatDateBR(tx.date)}</td>
                       <td className={`px-4 py-2.5 text-sm font-semibold text-right ${tx.amount > 0 ? 'text-accent' : 'text-white'}`}>
@@ -300,16 +288,12 @@ export function ImportModal({ onClose, onImport, accounts }: ImportModalProps) {
 
             {/* Actions */}
             <div className="flex gap-3 mt-4">
-              <button onClick={() => { setState('idle'); setPreview([]); }} className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm text-textMuted transition-colors">
+              <button onClick={() => { setState('idle'); setPreview([]); }} className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 border border-[var(--line)] rounded-xl text-sm text-textMuted transition-colors">
                 Cancelar
               </button>
               <button
                 onClick={handleConfirm}
-                className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-all shadow-lg active:scale-95"
-                style={{
-                  background: `linear-gradient(135deg, ${selectedPayment.color}cc, ${selectedPayment.color}88)`,
-                  boxShadow: `0 4px 20px ${selectedPayment.color}30`,
-                }}
+                className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-medium bg-primary hover:opacity-90 transition-opacity"
               >
                 <div className="flex items-center justify-center gap-2">
                   <FileText size={16} />

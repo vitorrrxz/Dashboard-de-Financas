@@ -13,7 +13,7 @@ export function ReportsPage({ transactions, accounts, debts, investments, netWor
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-1">Relatórios</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Relatórios</h1>
         <p className="text-textMuted text-sm">Patrimônio líquido e comparativos de receitas e despesas</p>
       </div>
       <ReportsView

@@ -39,7 +39,7 @@ export function DebtsPage({ transactionsBase, debts, accounts, accountId, onChan
     <>
       <div className="mb-6 flex flex-wrap justify-between items-end gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-1">Dívidas e Parcelamentos</h1>
+          <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Dívidas e parcelamentos</h1>
           <p className="text-textMuted text-sm">Compras parceladas no cartão, dívidas cadastradas e o que vence em cada mês</p>
         </div>
         <AccountFilter id="debts-account" accounts={accounts} value={accountId} onChange={onChangeAccount}/>

@@ -14,7 +14,7 @@ export function AccountsPage({ accounts, onAdd, onUpdate, onDelete, rates }: Acc
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-white mb-1">Contas e Cartões</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Contas e cartões</h1>
         <p className="text-textMuted text-sm">Seu saldo real e faturas pendentes</p>
       </div>
       <AccountsManager

@@ -16,7 +16,7 @@ interface MonthNavigatorProps {
 }
 
 const ARROW_CLASS =
-  'p-2.5 rounded-xl border border-white/10 text-textMuted hover:text-white hover:bg-white/5 ' +
+  'h-9 w-9 flex items-center justify-center rounded-md border border-[var(--control)] bg-card text-textMuted hover:text-white hover:border-[var(--color-textMuted)] ' +
   'transition-colors disabled:opacity-30 disabled:cursor-not-allowed';
 
 /**
@@ -39,8 +39,8 @@ export function MonthNavigator({ id, value, months, onChange, allowAll = false }
         <ChevronLeft size={16} aria-hidden="true"/>
       </button>
       <div className="min-w-[170px]">
-        <label htmlFor={id} className="block text-[10px] uppercase tracking-wider text-textMuted mb-1">Mês de referência</label>
-        <select id={id} value={value} onChange={e => onChange(e.target.value)} className="input-field font-semibold">
+        <label htmlFor={id} className="block text-xs text-textMuted mb-1">Mês de referência</label>
+        <select id={id} value={value} onChange={e => onChange(e.target.value)} className="input-field font-medium">
           {allowAll && <option value={ALL_MONTHS}>Todos os meses</option>}
           {months.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
         </select>
@@ -62,8 +62,8 @@ export function MonthNavigator({ id, value, months, onChange, allowAll = false }
 export function MonthTotal({ label, value, color, signed }: { label: string; value: number; color: string; signed?: boolean }) {
   return (
     <div className="text-right">
-      <p className="text-[10px] uppercase tracking-wider text-textMuted mb-1">{label}</p>
-      <p className="text-xl font-bold tracking-tight" style={{ color }}>
+      <p className="text-xs text-textMuted mb-1">{label}</p>
+      <p className="text-xl font-bold" style={{ color }}>
         {signed && value < 0 ? '−' : ''}{formatBRL(value)}
       </p>
     </div>

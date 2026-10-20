@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, Legend,
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { Wallet, TrendingUp, CreditCard, TrendingDown, Scale, LineChart } from 'lucide-react';
+import { formatBRL as fmt } from '../utils/money';
+import { niceTicks } from '../utils/chart';
 import type { Account, Debt, Investment, NetWorthSnapshot, Transaction } from '../types';
 import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth, monthLabel, type NetWorth } from '../utils/reports';
 
@@ -17,10 +18,15 @@ interface ReportsViewProps {
   netWorthHistory: NetWorthSnapshot[];
 }
 
-/** Formata um valor em reais para exibição (mesmo formato usado no Dashboard). */
-function fmt(value: number): string {
-  return `R$ ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-}
+/** Eixo em milhares: "2 mil", "−1,5 mil". */
+const axisMoney = (v: number) => (v === 0 ? '0' : `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`);
+
+const tooltipStyle = {
+  contentStyle: { backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 6, fontSize: 12, padding: '6px 10px' },
+  labelStyle: { color: 'var(--color-textMuted)' },
+  itemStyle: { color: 'var(--color-textMain)', padding: 0 },
+  cursor: { fill: 'var(--fg-4)' },
+};
 
 /**
  * De onde vem o total de investimentos (FIN-073), quando há algo a explicar: as posições da
@@ -35,22 +41,17 @@ function investmentsDetail(netWorth: NetWorth): string | undefined {
   return undefined;
 }
 
-/** Card de composição do patrimônio: rótulo, valor e se entra somando ou subtraindo. */
-function CompositionCard({ title, amount, icon, negative, detail }: {
-  title: string; amount: number; icon: React.ReactNode; negative?: boolean; detail?: string;
+/** Uma parte do patrimônio: rótulo, valor e se entra somando ou subtraindo. */
+function CompositionCell({ title, amount, negative, detail }: {
+  title: string; amount: number; negative?: boolean; detail?: string;
 }) {
   return (
-    <div className="glass-card rounded-2xl p-5">
-      <div className="flex justify-between items-start mb-3">
-        <div className="p-2 rounded-xl" style={{ backgroundColor: 'var(--fg-3)', border: '1px solid var(--fg-5)' }}>
-          {icon}
-        </div>
-      </div>
-      <p className="text-xs font-medium text-textMuted mb-1">{title}</p>
-      <p className={`text-xl font-bold tracking-tight ${negative ? 'text-red-400' : 'text-white'}`}>
+    <div className="px-5 py-4">
+      <p className="text-sm text-textMuted">{title}</p>
+      <p className={`text-xl font-bold ${amount === 0 ? 'text-textMuted' : 'text-white'}`}>
         {negative && amount !== 0 ? '−' : ''}{fmt(amount)}
       </p>
-      {detail && <p className="text-[11px] text-textMuted mt-1">{detail}</p>}
+      {detail && <p className="text-xs text-textMuted mt-0.5">{detail}</p>}
     </div>
   );
 }
@@ -73,63 +74,50 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
   );
 
   const comparison = granularity === 'monthly' ? monthly : yearly;
+  const netWorthTicks = niceTicks(netWorthChart.map(h => h.total));
+  const comparisonTicks = niceTicks(comparison.flatMap(c => [c.income, c.expense]));
 
   return (
     <div className="space-y-8">
       {/* ── Patrimônio líquido (FIN-064) ── */}
       <section>
-        <div className="glass-card rounded-2xl p-6 mb-5">
-          <div className="flex items-center gap-3 mb-2">
-            <Scale size={20} style={{ color: 'var(--color-primary)' }} />
-            <h3 className="text-lg font-semibold text-white">Patrimônio Líquido</h3>
+        <div className="panel rounded-2xl">
+          <div className="p-5 md:p-6">
+            <h3 className="text-sm text-textMuted">Patrimônio líquido</h3>
+            <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${netWorth.total >= 0 ? 'text-white' : 'text-red-400'}`}>
+              {netWorth.total < 0 ? '−' : ''}{fmt(netWorth.total)}
+            </p>
+            <p className="text-sm text-textMuted mt-1">
+              {fmt(netWorth.assets)} em ativos {netWorth.liabilities > 0 ? `− ${fmt(netWorth.liabilities)} em passivos` : 'e nenhum passivo registrado'}
+            </p>
           </div>
-          <p className={`text-4xl font-bold tracking-tight ${netWorth.total >= 0 ? 'text-white' : 'text-red-400'}`}>
-            {netWorth.total < 0 ? '−' : ''}{fmt(netWorth.total)}
-          </p>
-          <p className="text-xs text-textMuted mt-2">
-            {fmt(netWorth.assets)} em ativos {netWorth.liabilities > 0 ? `− ${fmt(netWorth.liabilities)} em passivos` : 'sem passivos registrados'}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <CompositionCard title="Saldo em Contas" amount={netWorth.liquid}
-            icon={<Wallet size={18} style={{ color: 'var(--color-primary)' }} />} />
-          <CompositionCard title="Investimentos" amount={netWorth.investments} detail={investmentsDetail(netWorth)}
-            icon={<TrendingUp size={18} className="text-teal-400" />} />
-          <CompositionCard title="Faturas em Aberto" amount={netWorth.pendingBills} negative
-            icon={<CreditCard size={18} className="text-pink-400" />} />
-          <CompositionCard title="Dívidas em Aberto" amount={netWorth.debts} negative
-            icon={<TrendingDown size={18} className="text-amber-400" />} />
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/[0.07] border-t border-white/[0.07] rounded-b-2xl overflow-hidden [&>*]:bg-card">
+            <CompositionCell title="Saldo em contas" amount={netWorth.liquid} />
+            <CompositionCell title="Investimentos" amount={netWorth.investments} detail={investmentsDetail(netWorth)} />
+            <CompositionCell title="Faturas em aberto" amount={netWorth.pendingBills} negative />
+            <CompositionCell title="Dívidas em aberto" amount={netWorth.debts} negative />
+          </div>
         </div>
       </section>
 
       {/* ── Evolução do patrimônio (FIN-112) — só a partir do primeiro mês registrado. ── */}
       {netWorthChart.length > 0 && (
-        <section className="glass-card rounded-2xl p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <LineChart size={20} style={{ color: 'var(--color-primary)' }} />
-            <h3 className="text-lg font-semibold text-white">Evolução do Patrimônio</h3>
-          </div>
+        <section className="panel rounded-2xl p-6">
+          <h3 className="text-base font-medium text-white mb-4">Evolução do patrimônio</h3>
 
           <div className="h-60">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={netWorthChart} margin={{ left: -10, right: 10 }}>
-                <defs>
-                  <linearGradient id="nwg" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }}
-                  tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
-                <RechartsTooltip
-                  contentStyle={{ backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 12 }}
-                  labelStyle={{ color: 'var(--color-textMuted)' }}
-                  formatter={v => [fmt(Number(v)), 'Patrimônio']} />
-                <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2.5} fill="url(#nwg)" animationDuration={1000} />
-              </AreaChart>
+              <LineChart data={netWorthChart} margin={{ top: 8, left: 0, right: 16, bottom: 0 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tickMargin={6} />
+                <YAxis axisLine={false} tickLine={false} width={60} tickFormatter={axisMoney}
+                  ticks={netWorthTicks} domain={[netWorthTicks[0], netWorthTicks[netWorthTicks.length - 1]]} interval={0} />
+                <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6} />
+                <RechartsTooltip {...tooltipStyle} cursor={{ stroke: 'var(--chart-grid)' }}
+                  formatter={v => [`${Number(v) < 0 ? '−' : ''}${fmt(Number(v))}`, 'Patrimônio']} />
+                <Line type="linear" dataKey="total" stroke="var(--color-accent)" strokeWidth={2}
+                  dot={netWorthChart.length === 1} activeDot={{ r: 4 }} isAnimationActive={false} />
+              </LineChart>
             </ResponsiveContainer>
           </div>
 
@@ -137,24 +125,24 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
           <div className="overflow-x-auto mt-6">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-textMuted">
-                  <th className="pb-3 font-semibold">Mês</th>
-                  <th className="pb-3 font-semibold text-right">Contas</th>
-                  <th className="pb-3 font-semibold text-right">Investimentos</th>
-                  <th className="pb-3 font-semibold text-right">Passivos</th>
-                  <th className="pb-3 font-semibold text-right">Patrimônio</th>
+                <tr className="border-b border-[var(--line)] text-xs text-textMuted">
+                  <th className="pb-2 font-normal">Mês</th>
+                  <th className="pb-2 font-normal text-right">Contas</th>
+                  <th className="pb-2 font-normal text-right">Investimentos</th>
+                  <th className="pb-2 font-normal text-right">Passivos</th>
+                  <th className="pb-2 font-normal text-right">Patrimônio</th>
                 </tr>
               </thead>
               <tbody className="text-sm divide-y divide-white/5">
                 {[...netWorthChart].reverse().map(snapshot => (
                   <tr key={snapshot.month} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-3 text-white font-medium">{snapshot.label}</td>
-                    <td className={`py-3 text-right ${snapshot.liquid < 0 ? 'text-red-400' : 'text-textMuted'}`}>
+                    <td className="py-3 text-white">{snapshot.label}</td>
+                    <td className={`py-3 text-right ${snapshot.liquid < 0 ? 'text-red-400' : 'text-white'}`}>
                       {snapshot.liquid < 0 ? '−' : ''}{fmt(snapshot.liquid)}
                     </td>
-                    <td className="py-3 text-right text-teal-400">{fmt(snapshot.investments)}</td>
-                    <td className="py-3 text-right text-red-400">{snapshot.liabilities > 0 ? `−${fmt(snapshot.liabilities)}` : fmt(0)}</td>
-                    <td className={`py-3 text-right font-bold ${snapshot.total >= 0 ? 'text-white' : 'text-red-400'}`}>
+                    <td className="py-3 text-right text-white">{fmt(snapshot.investments)}</td>
+                    <td className="py-3 text-right text-white">{snapshot.liabilities > 0 ? `−${fmt(snapshot.liabilities)}` : fmt(0)}</td>
+                    <td className={`py-3 text-right font-medium ${snapshot.total >= 0 ? 'text-white' : 'text-red-400'}`}>
                       {snapshot.total < 0 ? '−' : ''}{fmt(snapshot.total)}
                     </td>
                   </tr>
@@ -166,41 +154,41 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
       )}
 
       {/* ── Comparativo receitas × despesas (FIN-062 / FIN-063) ── */}
-      <section className="glass-card rounded-2xl p-6">
+      <section className="panel rounded-2xl p-6">
         <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
-          <h3 className="text-lg font-semibold text-white">Receitas × Despesas</h3>
-          <div className="flex bg-white/5 p-1 rounded-xl border border-white/5">
-            <button onClick={() => setGranularity('monthly')}
-              className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${granularity === 'monthly' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}>
-              Mês a Mês
-            </button>
-            <button onClick={() => setGranularity('yearly')}
-              className={`px-3 py-1.5 text-[10px] uppercase font-bold rounded-lg transition-all ${granularity === 'yearly' ? 'bg-primary text-on-accent shadow-lg' : 'text-textMuted hover:text-white'}`}>
-              Ano a Ano
-            </button>
+          <h3 className="text-base font-medium text-white">Receitas e despesas</h3>
+          <div className="flex items-center gap-4">
+            <span className="hidden sm:flex items-center gap-3 text-xs text-textMuted">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--chart-ink)' }} />Receitas</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: 'var(--chart-muted)' }} />Despesas</span>
+            </span>
+            <div role="group" aria-label="Período" className="flex p-0.5 rounded-md bg-white/[0.06]">
+              {([['monthly', 'Mês a mês'], ['yearly', 'Ano a ano']] as const).map(([value, label]) => (
+                <button key={value} type="button" aria-pressed={granularity === value} onClick={() => setGranularity(value)}
+                  className={`h-7 px-3 text-xs rounded transition-colors ${granularity === value ? 'bg-card text-white font-medium' : 'text-textMuted hover:text-white'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         {comparison.length === 0 ? (
-          <p className="text-center text-textMuted py-12 text-sm">
+          <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">
             Nenhuma transação registrada ainda — importe um extrato para ver os comparativos.
           </p>
         ) : (
           <>
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={comparison} margin={{ left: -10, right: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }}
-                    tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
-                  <RechartsTooltip
-                    contentStyle={{ backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 12 }}
-                    labelStyle={{ color: 'var(--color-textMuted)' }}
-                    formatter={(v, name) => [fmt(Number(v)), name]} />
-                  <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                  <Bar dataKey="income" name="Receitas" fill="#14b8a6" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                  <Bar dataKey="expense" name="Despesas" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={28} />
+                <BarChart data={comparison} margin={{ top: 4, left: 0, right: 16, bottom: 0 }} barGap={2}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} tickMargin={6} />
+                  <YAxis axisLine={false} tickLine={false} width={60} tickFormatter={axisMoney}
+                    ticks={comparisonTicks} domain={[0, comparisonTicks[comparisonTicks.length - 1]]} interval={0} />
+                  <RechartsTooltip {...tooltipStyle} formatter={(v, name) => [fmt(Number(v)), name]} />
+                  <Bar dataKey="income" name="Receitas" fill="var(--chart-ink)" maxBarSize={24} isAnimationActive={false} />
+                  <Bar dataKey="expense" name="Despesas" fill="var(--chart-muted)" maxBarSize={24} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -210,20 +198,20 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
             <div className="overflow-x-auto mt-6">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-textMuted">
-                    <th className="pb-3 font-semibold">{granularity === 'monthly' ? 'Mês' : 'Ano'}</th>
-                    <th className="pb-3 font-semibold text-right">Receitas</th>
-                    <th className="pb-3 font-semibold text-right">Despesas</th>
-                    <th className="pb-3 font-semibold text-right">Saldo</th>
+                  <tr className="border-b border-[var(--line)] text-xs text-textMuted">
+                    <th className="pb-2 font-normal">{granularity === 'monthly' ? 'Mês' : 'Ano'}</th>
+                    <th className="pb-2 font-normal text-right">Receitas</th>
+                    <th className="pb-2 font-normal text-right">Despesas</th>
+                    <th className="pb-2 font-normal text-right">Saldo</th>
                   </tr>
                 </thead>
                 <tbody className="text-sm divide-y divide-white/5">
                   {[...comparison].reverse().map(row => (
                     <tr key={row.period} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-3 text-white font-medium">{row.label}</td>
-                      <td className="py-3 text-right text-teal-400">{fmt(row.income)}</td>
-                      <td className="py-3 text-right text-red-400">{fmt(row.expense)}</td>
-                      <td className={`py-3 text-right font-bold ${row.balance >= 0 ? 'text-white' : 'text-red-400'}`}>
+                      <td className="py-3 text-white">{row.label}</td>
+                      <td className="py-3 text-right text-white">{fmt(row.income)}</td>
+                      <td className="py-3 text-right text-white">{fmt(row.expense)}</td>
+                      <td className={`py-3 text-right font-medium ${row.balance >= 0 ? 'text-white' : 'text-red-400'}`}>
                         {row.balance < 0 ? '−' : ''}{fmt(row.balance)}
                       </td>
                     </tr>

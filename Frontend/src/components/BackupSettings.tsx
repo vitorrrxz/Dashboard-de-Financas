@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, Archive, Download, Upload } from 'lucide-react';
+import { AlertTriangle, Download, Upload } from 'lucide-react';
 import { apiFetch } from '../services/api';
 import { downloadJSON, exportDateSuffix } from '../utils/export';
 import {
@@ -11,7 +11,7 @@ import { FormField } from './shared/FormField';
 const UNEXPECTED = 'Resposta inesperada do servidor.';
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-const secondaryButton = 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/10 text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+const secondaryButton = 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-[var(--line)] text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 
 interface BackupSettingsProps {
   token: string;
@@ -112,13 +112,10 @@ export function BackupSettings({ token, onRestored }: BackupSettingsProps) {
   };
 
   return (
-    <section aria-labelledby="backup-title" className="glass-card rounded-2xl p-6">
+    <section aria-labelledby="backup-title" className="panel rounded-2xl p-6">
       <div className="flex items-start gap-3 mb-5">
-        <div className="p-2.5 rounded-xl bg-white/5 border border-white/5 shrink-0">
-          <Archive size={20} className="text-primary" />
-        </div>
         <div>
-          <h2 id="backup-title" className="text-lg font-semibold text-white">Backup dos seus dados</h2>
+          <h2 id="backup-title" className="text-base font-medium text-white">Backup dos seus dados</h2>
           <p className="text-sm text-textMuted">
             Um arquivo JSON com todas as suas contas, transações, dívidas, orçamentos, metas, recorrências e investimentos —
             para guardar uma cópia ou levar os dados para outra instalação do FinFlow.
