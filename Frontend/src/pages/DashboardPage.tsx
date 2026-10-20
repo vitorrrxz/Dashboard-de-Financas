@@ -5,11 +5,10 @@ import {
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, BarChart, Bar, Cell,
+  ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { describeConversion, type ExchangeRates } from '../utils/currency';
 import { describeHoldings, type InvestmentHoldings } from '../utils/investments';
-import { CATEGORY_COLORS } from '../utils/categories';
 import type { BudgetProgress } from '../utils/budget';
 import type { ProjectionPoint } from '../utils/projection';
 import type { ByPaymentType, FinancialStats } from '../hooks/useFinancialStats';
@@ -19,6 +18,10 @@ import { AccountOptions } from '../components/AccountFilter';
 import { activeBonus, biweeklyLeftovers, salaryPerMonth } from '../utils/salary';
 import { todayISO } from '../utils/debts';
 import { daysInMonth } from '../utils/dates';
+
+// Fatias por posição (o gráfico mostra no máximo 6 categorias): as da Pluggy vêm em inglês e não
+// estão em CATEGORY_COLORS, então todas cairiam na mesma cor.
+const PIE_COLORS = ['#6366f1', '#f59e0b', '#10b981', '#ec4899', '#06b6d4', '#a855f7'];
 
 function fmt(v: number) {
   return `R$ ${Math.abs(v).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
@@ -409,19 +412,20 @@ export function DashboardPage({
               <h3 className="text-lg font-semibold text-white mb-6">Por Categoria</h3>
               <div className="h-60">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stats.expenseByCategory} layout="vertical" margin={{ left:-10, right:10 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
-                    <XAxis type="number" hide/>
-                    <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize:11 }} width={80}/>
+                  <PieChart>
                     <RechartsTooltip
                       contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                      formatter={(v) => [fmt(Number(v)),'Gasto']}/>
-                    <Bar dataKey="amount" radius={[0,4,4,0]} barSize={14}>
-                      {stats.expenseByCategory.map(e => (
-                        <Cell key={e.name} fill={CATEGORY_COLORS[e.name] || '#6366f1'}/>
+                      itemStyle={{ color:'var(--color-textMain)' }}
+                      formatter={(v, name) => [fmt(Number(v)), name]}/>
+                    <Pie data={stats.expenseByCategory} dataKey="amount" nameKey="name"
+                      innerRadius="45%" outerRadius="75%" paddingAngle={2} stroke="none">
+                      {stats.expenseByCategory.map((e, i) => (
+                        <Cell key={e.name} fill={PIE_COLORS[i % PIE_COLORS.length]}/>
                       ))}
-                    </Bar>
-                  </BarChart>
+                    </Pie>
+                    <Legend iconType="circle" iconSize={8}
+                      formatter={v => <span style={{ color:'var(--color-textMuted)', fontSize:11 }}>{v}</span>}/>
+                  </PieChart>
                 </ResponsiveContainer>
               </div>
             </div>
