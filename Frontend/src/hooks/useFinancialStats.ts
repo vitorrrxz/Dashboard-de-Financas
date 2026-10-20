@@ -42,6 +42,8 @@ export interface FinancialStats {
   totalOwed: number;
   /** Dívidas do mês com o dia em que vencem: cartão pelo vencimento da fatura, parcela pelo vencimento. */
   monthOutflows: Outflow[];
+  /** Parcelas do cartão com data depois de hoje (ainda não lançadas), para a projeção de saldo. */
+  cardInstallmentsAhead: { date: string; amount: number }[];
   overdueDebts: Debt[];
   filteredTxsCount: number;
 }
@@ -151,7 +153,9 @@ export function computeFinancialStats(
     monthDebtsByType[kind] += d.monthlyPayment;
   });
   // Parcelas do cartão ainda não lançadas: as já lançadas estão na fatura pendente.
-  const futureCardInstallments = groupInstallmentPurchases(activeTxs, today).reduce((s, p) => s + p.remainingAmount, 0);
+  const purchases = groupInstallmentPurchases(activeTxs, today);
+  const futureCardInstallments = purchases.reduce((s, p) => s + p.remainingAmount, 0);
+  const cardInstallmentsAhead = purchases.flatMap(p => p.installments.filter(i => i.date > today));
   const totalOwed = totalActiveDebts + pendingBills + futureCardInstallments;
 
   // As mesmas dívidas de monthCardExpense + monthDebtPayments, com o dia de cada uma — para dividir a
@@ -182,7 +186,7 @@ export function computeFinancialStats(
   return {
     income, expense, importedBalance, balanceByMonth, dailyEvolution,
     expenseByCategory, monthExpense, monthExpenseByType, monthDebtsByType, monthCardExpense, realBalance, investmentBalance, pendingBills,
-    activeDebts: totalActiveDebts, monthDebtPayments, totalOwed, monthOutflows, overdueDebts,
+    activeDebts: totalActiveDebts, monthDebtPayments, totalOwed, monthOutflows, cardInstallmentsAhead, overdueDebts,
     filteredTxsCount: activeTxs.length,
   };
 }

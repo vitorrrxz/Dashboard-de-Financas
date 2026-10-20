@@ -2,6 +2,7 @@ import './env.js';
 import { PluggyClient } from 'pluggy-sdk';
 import { BASE_CURRENCY, CURRENCY_CODE_PATTERN, toCents } from './money.js';
 import { ruleCategory } from './categorization.js';
+import { translatePluggyCategory } from './pluggyCategories.js';
 
 // Pluggy Client — inicialização preguiçosa (lazy). O construtor do SDK lança exceção
 // síncrona ("Missing authorization for API communication") quando clientId/clientSecret
@@ -139,10 +140,10 @@ export function isCreditCardBillPayment(pluggyTx) {
 // corrente às vezes vem só como "Transfers"; pelo texto, vira "Pagamento de fatura", que fica fora
 // de receitas e despesas (FIN-103). No cartão, esses lançamentos nem chegam aqui (FIN-092). Só na
 // criação: numa nova sincronização, a categoria que o usuário escolheu fica. FIN-105: uma regra de
-// categoria do usuário vem antes de tudo.
+// categoria do usuário vem antes de tudo. A categoria da Pluggy é gravada em pt-BR (pluggyCategories.js).
 export function pluggyTransactionCategory(pluggyTx, rules = []) {
   return ruleCategory(rules, pluggyTx.description)
-    ?? (pluggyTx.amount < 0 && isCreditCardBillPayment(pluggyTx) ? 'Pagamento de fatura' : (pluggyTx.category || 'Outros'));
+    ?? (pluggyTx.amount < 0 && isCreditCardBillPayment(pluggyTx) ? 'Pagamento de fatura' : (translatePluggyCategory(pluggyTx.category) || 'Outros'));
 }
 
 // FIN-074 — moeda de uma conta vinda da Pluggy (`currencyCode`, ISO 4217). Código ausente ou

@@ -45,7 +45,7 @@ import {
 import { isInstallmentTransaction } from './utils/installments';
 import {
   BASE_CURRENCY, accountsInBase, currencyOf, foreignCurrencies,
-  investmentsInBase, parseExchangeRates, recurringInBase, transactionsInBase,
+  investmentsInBase, parseExchangeRates, transactionsInBase,
   type ExchangeRates,
 } from './utils/currency';
 import type {
@@ -773,7 +773,6 @@ export default function App() {
   const accountsBase = useMemo(() => accountsInBase(accounts, rates), [accounts, rates]);
   const transactionsBase = useMemo(() => transactionsInBase(transactions, rates), [transactions, rates]);
   const investmentsBase = useMemo(() => investmentsInBase(investments, rates), [investments, rates]);
-  const recurringBase = useMemo(() => recurringInBase(recurring, accounts, rates), [recurring, accounts, rates]);
 
   // FIN-112: guarda um retrato do patrimônio líquido de hoje, para o gráfico de evolução em
   // Relatórios. Roda de novo sempre que ele muda (contas, dívidas, investimentos ou a cotação que
@@ -855,10 +854,12 @@ export default function App() {
   const overBudget = budgetProgress.filter(b => b.isOverLimit); // FIN-047
 
   // FIN-058: projeção dos próximos 6 meses a partir do saldo real (contas líquidas),
-  // somando as recorrências previstas e descontando as parcelas de dívida previstas.
+  // somando o salário e descontando as dívidas de cada mês (fatura, parcelas do cartão e dívidas).
   const projection = useMemo(
-    () => computeBalanceProjection(stats.realBalance, recurringBase.items, debts, { months: 6 }),
-    [stats.realBalance, recurringBase, debts]
+    () => computeBalanceProjection(stats.realBalance, salary, debts, {
+      months: 6, currentBill: stats.monthCardExpense, cardInstallments: stats.cardInstallmentsAhead,
+    }),
+    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, salary, debts]
   );
 
   // Categorias que já aparecem nas transações do usuário, além das curadas em
@@ -1232,12 +1233,10 @@ export default function App() {
               missingCurrencies={missingCurrencies}
               hasInvestments={hasInvestments}
               investmentHoldings={investmentHoldings}
-              debts={debts}
               isEmpty={isEmpty}
               hasAccounts={hasAccounts}
               chartPeriod={chartPeriod}
               onChangeChartPeriod={setChartPeriod}
-              recurring={recurring}
               projection={projection}
               onNavigate={setActiveTab}
               onFilterTransactions={setTxFilter}

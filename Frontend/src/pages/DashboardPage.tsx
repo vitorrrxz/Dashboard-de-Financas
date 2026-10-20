@@ -5,14 +5,14 @@ import {
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  ResponsiveContainer, PieChart, Pie, Cell, Legend, BarChart, Bar, ReferenceLine,
 } from 'recharts';
 import { describeConversion, type ExchangeRates } from '../utils/currency';
 import { describeHoldings, type InvestmentHoldings } from '../utils/investments';
 import type { BudgetProgress } from '../utils/budget';
 import type { ProjectionPoint } from '../utils/projection';
 import type { ByPaymentType, FinancialStats } from '../hooks/useFinancialStats';
-import type { Account, Debt, RecurringTransaction, Salary, SalaryFrequency } from '../types';
+import type { Account, Salary, SalaryFrequency } from '../types';
 import type { Tab } from '../App';
 import { AccountOptions } from '../components/AccountFilter';
 import { activeBonus, biweeklyLeftovers, salaryPerMonth } from '../utils/salary';
@@ -178,12 +178,10 @@ interface DashboardPageProps {
   missingCurrencies: string[];
   hasInvestments: boolean;
   investmentHoldings: InvestmentHoldings;
-  debts: Debt[];
   isEmpty: boolean;
   hasAccounts: boolean;
   chartPeriod: '30d' | 'all';
   onChangeChartPeriod: (period: '30d' | 'all') => void;
-  recurring: RecurringTransaction[];
   projection: ProjectionPoint[];
   onNavigate: (tab: Tab) => void;
   onFilterTransactions: (filter: 'all' | 'income' | 'expense') => void;
@@ -195,8 +193,8 @@ interface DashboardPageProps {
 export function DashboardPage({
   accounts, dashboardAccountId, onChangeDashboardAccount, stats, overBudget, budgetProgress,
   usedCurrencies, rates, ratesFailed, conversionIssue, missingCurrencies, hasInvestments,
-  investmentHoldings, debts, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
-  recurring, projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary,
+  investmentHoldings, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
+  projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary,
 }: DashboardPageProps) {
   const month = todayISO().slice(0, 7);
   const bonus = activeBonus(salary, month);
@@ -434,8 +432,8 @@ export function DashboardPage({
       )}
 
       {/* FIN-059: projeção de saldo — só aparece quando há algo a projetar
-          (recorrência ativa ou dívida em aberto), senão seria uma linha reta. */}
-      {(recurring.some(r => r.active) || debts.length > 0) && (
+          (salário ou dívida em aberto), senão seria uma linha reta. */}
+      {projection.some(p => p.salaryDelta > 0 || p.debtDelta > 0) && (
         <div className="glass-card rounded-2xl p-6 mb-8">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-semibold text-white">Projeção de Saldo</h3>
@@ -445,27 +443,27 @@ export function DashboardPage({
           </div>
           <div className="h-60">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={projection}>
-                <defs>
-                  <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#14b8a6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
+              <BarChart data={projection}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                 <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize:10 }}/>
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize:10 }} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`}/>
+                <ReferenceLine y={0} stroke="var(--color-textMuted)" strokeOpacity={0.4}/>
                 <RechartsTooltip
+                  cursor={{ fill:'rgba(255,255,255,0.04)' }}
                   contentStyle={{ backgroundColor:'var(--tooltip-bg)', border:'1px solid var(--tooltip-border)', borderRadius:12 }}
-                  formatter={(v) => [fmt(Number(v)), 'Saldo projetado']}
+                  formatter={(v) => [`${Number(v) < 0 ? '−' : ''}${fmt(Number(v))}`, 'Saldo projetado']}
                   labelStyle={{ color:'var(--color-textMuted)' }}
                 />
-                <Area type="monotone" dataKey="balance" stroke="#14b8a6" strokeWidth={2.5} fill="url(#pg)" animationDuration={1000}/>
-              </AreaChart>
+                <Bar dataKey="balance" radius={[4,4,0,0]} maxBarSize={40} animationDuration={1000}>
+                  {projection.map(p => (
+                    <Cell key={p.month} fill={p.balance < 0 ? '#ef4444' : '#10b981'}/>
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
           <p className="text-xs text-textMuted mt-3">
-            Saldo real de hoje somado às recorrências ativas e descontadas as parcelas de dívidas em aberto.
+            Saldo real de hoje somado ao salário de cada mês e descontadas as dívidas do mês: fatura do cartão, parcelas e dívidas em aberto.
           </p>
         </div>
       )}

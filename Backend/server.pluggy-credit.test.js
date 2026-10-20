@@ -104,17 +104,19 @@ describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
       expect(OWN_TRANSFER_CATEGORIES).toContain(category); // fora de receitas e despesas (FIN-103)
     });
 
-    it('entrada "pagamento recebido" e compras comuns mantêm a categoria da Pluggy', () => {
-      expect(pluggyTransactionCategory({ amount: 1200, category: 'Transfers', description: 'Pagamento recebido' })).toBe('Transfers');
-      expect(pluggyTransactionCategory({ amount: -35.49, category: 'Groceries', description: 'Mercado' })).toBe('Groceries');
+    it('entrada "pagamento recebido" e compras comuns mantêm a categoria da Pluggy, traduzida', () => {
+      expect(pluggyTransactionCategory({ amount: 1200, category: 'Transfers', description: 'Pagamento recebido' })).toBe('Transferências');
+      expect(pluggyTransactionCategory({ amount: -35.49, category: 'Groceries', description: 'Mercado' })).toBe('Supermercado');
+      expect(pluggyTransactionCategory({ amount: -10, category: 'Categoria nova', description: 'X' })).toBe('Categoria nova');
       expect(pluggyTransactionCategory({ amount: -10, description: 'Sem categoria' })).toBe('Outros');
+      expect(OWN_TRANSFER_CATEGORIES).toContain(pluggyTransactionCategory({ amount: 500, category: 'Same person transfer', description: 'Pix' }));
     });
 
     it('a regra do usuário vem antes da categoria da Pluggy e da detecção de fatura (FIN-105)', () => {
       const rules = [{ match: 'uber', category: 'Transporte' }, { match: 'fatura', category: 'Compras' }];
       expect(pluggyTransactionCategory({ amount: -20, category: 'Taxi and ride-hailing', description: 'UBER *TRIP' }, rules)).toBe('Transporte');
       expect(pluggyTransactionCategory({ amount: -735.2, category: 'Transfers', description: 'Pagamento de fatura' }, rules)).toBe('Compras');
-      expect(pluggyTransactionCategory({ amount: -10, category: 'Groceries', description: 'Mercado' }, rules)).toBe('Groceries');
+      expect(pluggyTransactionCategory({ amount: -10, category: 'Groceries', description: 'Mercado' }, rules)).toBe('Supermercado');
     });
   });
 
