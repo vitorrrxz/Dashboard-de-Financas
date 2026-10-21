@@ -79,3 +79,22 @@ export function summarizeTransactions(transactions: Transaction[]): TransactionT
   }
   return { income, expense, balance: income - expense, count: transactions.length };
 }
+
+/** Filtro por categoria e por forma de pagamento (`null` = todas). Sem forma de pagamento conta como débito, como na tabela. */
+export function filterByCategoryAndType(
+  transactions: Transaction[],
+  category: string | null,
+  paymentType: string | null
+): Transaction[] {
+  return transactions.filter(t =>
+    (!category || t.category === category) && (!paymentType || (t.paymentType ?? 'debit') === paymentType)
+  );
+}
+
+/** Quantas vezes cada valor aparece, do mais frequente ao menos (empate: ordem alfabética). */
+export function countBy<T>(items: T[], key: (item: T) => string): { value: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(key(item), (counts.get(key(item)) ?? 0) + 1);
+  return [...counts].map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'pt-BR'));
+}

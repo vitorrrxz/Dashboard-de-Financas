@@ -1,7 +1,7 @@
 // FIN-093 — filtro mensal e totais da aba Transações.
 import { describe, it, expect } from 'vitest';
 import {
-  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions,
+  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions, countBy, filterByCategoryAndType,
 } from './transactions';
 import type { Transaction } from '../types';
 import { EXPENSE_CATEGORIES } from './categories';
@@ -137,5 +137,24 @@ describe('transferências entre contas e pagamento de fatura (FIN-103)', () => {
     expect(EXPENSE_CATEGORIES).toContain('Alimentação');
     expect(EXPENSE_CATEGORIES).not.toContain('Transferência entre contas');
     expect(EXPENSE_CATEGORIES).not.toContain('Pagamento de fatura');
+  });
+});
+
+describe('filterByCategoryAndType / countBy', () => {
+  const rows = [
+    tx({ id: '1', category: 'Supermercado', paymentType: 'credit' }),
+    tx({ id: '2', category: 'Supermercado', paymentType: undefined }),
+    tx({ id: '3', category: 'Lazer', paymentType: 'pix' }),
+  ];
+
+  it('filtra por categoria, por forma de pagamento (sem forma = débito) e pelos dois', () => {
+    expect(filterByCategoryAndType(rows, null, null)).toHaveLength(3);
+    expect(filterByCategoryAndType(rows, 'Supermercado', null).map(t => t.id)).toEqual(['1', '2']);
+    expect(filterByCategoryAndType(rows, null, 'debit').map(t => t.id)).toEqual(['2']);
+    expect(filterByCategoryAndType(rows, 'Lazer', 'credit')).toEqual([]);
+  });
+
+  it('conta por valor, do mais frequente ao menos', () => {
+    expect(countBy(rows, t => t.category)).toEqual([{ value: 'Supermercado', count: 2 }, { value: 'Lazer', count: 1 }]);
   });
 });

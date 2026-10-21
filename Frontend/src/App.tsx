@@ -41,7 +41,7 @@ import { formatDateBR, formatMonthLabel } from './utils/dates';
 import { downloadCSV, downloadPDFReport, exportDateSuffix, formatCurrencyCSV } from './utils/export';
 import { TRANSACTION_REPORT_HEADERS, transactionsPeriod, computeNetWorth, type NetWorth } from './utils/reports';
 import {
-  ALL_MONTHS, availableMonths, filterByKind, filterByMonthAndSearch, summarizeTransactions,
+  ALL_MONTHS, availableMonths, countBy, filterByCategoryAndType, filterByKind, filterByMonthAndSearch, summarizeTransactions,
 } from './utils/transactions';
 import { isInstallmentTransaction } from './utils/installments';
 import {
@@ -243,6 +243,9 @@ export default function App() {
   const [showImport, setShowImport]   = useState(false);
   const [search, setSearch]           = useState('');
   const [txFilter, setTxFilter]       = useState<'all' | 'income' | 'expense'>('all');
+  // Filtros por categoria e por forma de pagamento da aba Transações (null = todas).
+  const [txCategory, setTxCategory]   = useState<string | null>(null);
+  const [txPaymentType, setTxPaymentType] = useState<string | null>(null);
   // Mês de referência da aba Transações (FIN-093). Começa no mês corrente de propósito:
   // sem recorte, os totais somavam também as parcelas de meses futuros já lançadas no cartão.
   const [txMonth, setTxMonth]         = useState<string>(() => todayISO().slice(0, 7));
@@ -904,11 +907,18 @@ export default function App() {
   // sem lançamentos, para que o seletor abra num valor que existe na lista.
   const txMonths = useMemo(() => availableMonths(regularTransactions, currentMonth), [regularTransactions, currentMonth]);
 
-  // Recorte do mês de referência + busca. Os totais saem daqui, e não de `filtered`, para
-  // continuarem mostrando receitas E despesas quando a lista isola apenas um dos dois.
-  const monthScoped = useMemo(
+  // Recorte do mês de referência + busca; os botões de categoria e de forma de pagamento listam o
+  // que existe nele. Os totais saem do recorte já filtrado por categoria/forma, e não de
+  // `filtered`, para continuarem mostrando receitas E despesas quando a lista isola um dos dois.
+  const monthAndSearch = useMemo(
     () => filterByMonthAndSearch(regularTransactions, txMonth, search),
     [regularTransactions, txMonth, search]
+  );
+  const txCategoryCounts = useMemo(() => countBy(monthAndSearch, t => t.category), [monthAndSearch]);
+  const txPaymentTypeCounts = useMemo(() => countBy(monthAndSearch, t => t.paymentType ?? 'debit'), [monthAndSearch]);
+  const monthScoped = useMemo(
+    () => filterByCategoryAndType(monthAndSearch, txCategory, txPaymentType),
+    [monthAndSearch, txCategory, txPaymentType]
   );
   // FIN-076: os totais do mês em real — a lista continua mostrando cada transação na própria moeda.
   const regularTransactionsBase = useMemo(
@@ -917,8 +927,8 @@ export default function App() {
     [transactionsBase, listAccount]
   );
   const monthScopedBase = useMemo(
-    () => filterByMonthAndSearch(regularTransactionsBase, txMonth, search),
-    [regularTransactionsBase, txMonth, search]
+    () => filterByCategoryAndType(filterByMonthAndSearch(regularTransactionsBase, txMonth, search), txCategory, txPaymentType),
+    [regularTransactionsBase, txMonth, search, txCategory, txPaymentType]
   );
   const monthTotals = useMemo(() => summarizeTransactions(monthScopedBase), [monthScopedBase]);
   const filtered = useMemo(() => filterByKind(monthScoped, txFilter), [monthScoped, txFilter]);
@@ -1223,6 +1233,12 @@ export default function App() {
               onGoToDebts={() => setActiveTab('debts')}
               txFilter={txFilter}
               onChangeTxFilter={setTxFilter}
+              categoryCounts={txCategoryCounts}
+              txCategory={txCategory}
+              onChangeTxCategory={setTxCategory}
+              paymentTypeCounts={txPaymentTypeCounts}
+              txPaymentType={txPaymentType}
+              onChangeTxPaymentType={setTxPaymentType}
               accounts={accounts}
               accountId={listAccount}
               onChangeAccount={setListAccountId}

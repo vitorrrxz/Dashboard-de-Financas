@@ -9,6 +9,8 @@ import {
   type DueItem, type InstallmentPurchase,
 } from '../utils/installments';
 import { MonthNavigator, MonthTotal } from './MonthNavigator';
+import { ColumnFilter } from './ColumnFilter';
+import { countBy } from '../utils/transactions';
 
 interface InstallmentsPanelProps {
   transactions: Transaction[];
@@ -37,12 +39,20 @@ interface InstallmentsPanelProps {
 export function InstallmentsPanel({ transactions, debts, accounts, cardBill, view }: InstallmentsPanelProps) {
   const today = todayISO();
   const currentMonth = today.slice(0, 7);
-  const [month, setMonth] = useState(currentMonth);
+  const [month, setMonthState] = useState(currentMonth);
+  // Filtros da lista de vencimentos (null = todas). Trocar de mês recomeça sem filtro.
+  const [stage, setStage] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const setMonth = (next: string) => { setMonthState(next); setStage(null); setStatus(null); };
 
   const purchases = useMemo(() => groupInstallmentPurchases(transactions, today), [transactions, today]);
   const months = useMemo(() => dueMonths(purchases, debts, currentMonth), [purchases, debts, currentMonth]);
   const items = useMemo(() => dueItemsInMonth(purchases, debts, month), [purchases, debts, month]);
   const totals = useMemo(() => summarizeDueItems(items), [items]);
+  const stageCounts = countBy(items, installmentStage);
+  const statusCounts = countBy(items, item => dueStatus(item, today).label);
+  const shown = items.filter(item =>
+    (!stage || installmentStage(item) === stage) && (!status || dueStatus(item, today).label === status));
   const showBill = month === currentMonth && cardBill !== null;
   const card = showBill ? cardBill : totals.card;
 
@@ -87,23 +97,40 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill, vie
 
       {/* Vencimentos do mês */}
       <section className="panel rounded-2xl p-6">
-        <h3 className="text-base font-medium text-white mb-4">Vencimentos de {formatMonthLabel(month)}</h3>
+        <div className="flex items-baseline justify-between gap-3 flex-wrap mb-4">
+          <h3 className="text-base font-medium text-white">Vencimentos de {formatMonthLabel(month)}</h3>
+          {shown.length !== items.length && (
+            <p className="text-xs text-textMuted">{shown.length} de {items.length} parcelas</p>
+          )}
+        </div>
         {items.length === 0 ? (
           <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">Nenhuma parcela neste mês.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-[var(--line)] text-xs text-textMuted">
                   <th className="pb-2 font-normal">Data</th>
                   <th className="pb-2 font-normal">Descrição</th>
-                  <th className="pb-2 font-normal">Parcela</th>
-                  <th className="pb-2 font-normal">Situação</th>
+                  <th className="pb-2 font-normal">
+                    <ColumnFilter label="Parcela" value={stage} onChange={setStage}
+                      options={STAGES.flatMap(label => {
+                        const count = stageCounts.find(c => c.value === label)?.count;
+                        return count ? [{ value: label, label, count }] : [];
+                      })} />
+                  </th>
+                  <th className="pb-2 font-normal">
+                    <ColumnFilter label="Situação" value={status} onChange={setStatus}
+                      options={statusCounts.map(c => ({ value: c.value, label: c.value, count: c.count }))} />
+                  </th>
                   <th className="pb-2 font-normal text-right">Valor</th>
                 </tr>
               </thead>
               <tbody className="text-sm divide-y divide-white/5">
-                {items.map(item => <DueRow key={item.key} item={item} today={today}/>)}
+                {shown.length === 0 && (
+                  <tr><td colSpan={5} className="py-6 text-textMuted">Nenhuma parcela com esses filtros.</td></tr>
+                )}
+                {shown.map(item => <DueRow key={item.key} item={item} today={today}/>)}
               </tbody>
             </table>
           </div>
@@ -111,6 +138,13 @@ export function InstallmentsPanel({ transactions, debts, accounts, cardBill, vie
       </section>
     </div>
   );
+}
+
+/** Em que ponto do parcelamento está a parcela — os botões do filtro "Parcela", nesta ordem. */
+const STAGES = ['Primeira parcela', 'Em andamento', 'Última parcela'];
+function installmentStage(item: DueItem): string {
+  if (item.number === item.totalInstallments) return 'Última parcela';
+  return item.number === 1 ? 'Primeira parcela' : 'Em andamento';
 }
 
 /**

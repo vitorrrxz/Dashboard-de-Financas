@@ -2,6 +2,9 @@ import { Download, FileText, Upload } from 'lucide-react';
 import { MonthNavigator, MonthTotal } from '../components/MonthNavigator';
 import { AccountFilter } from '../components/AccountFilter';
 import { TxTable } from '../components/TxTable';
+import type { FilterOption } from '../components/ColumnFilter';
+import { categoryColor } from '../utils/categories';
+import { PAYMENT_TYPE_META } from '../utils/paymentTypes';
 import { ALL_MONTHS } from '../utils/transactions';
 import type { TransactionTotals } from '../utils/transactions';
 import type { CategoryRuleDraft } from '../utils/paymentTypes';
@@ -17,6 +20,13 @@ interface TransactionsPageProps {
   onGoToDebts: () => void;
   txFilter: 'all' | 'income' | 'expense';
   onChangeTxFilter: (filter: 'all' | 'income' | 'expense') => void;
+  /** Categorias e formas de pagamento do recorte de mês e busca, com quantas transações cada. */
+  categoryCounts: { value: string; count: number }[];
+  txCategory: string | null;
+  onChangeTxCategory: (category: string | null) => void;
+  paymentTypeCounts: { value: string; count: number }[];
+  txPaymentType: string | null;
+  onChangeTxPaymentType: (paymentType: string | null) => void;
   accounts: Account[];
   /** Conta do filtro (null = todas); `filtered` e os totais já chegam recortados por ela. */
   accountId: string | null;
@@ -43,9 +53,19 @@ const SECONDARY = 'h-9 px-3 flex items-center gap-2 rounded-md text-sm text-whit
 
 export function TransactionsPage({
   filtered, txMonth, onChangeTxMonth, txMonths, monthTotals, hiddenInstallments, onGoToDebts,
-  txFilter, onChangeTxFilter, accounts, accountId, onChangeAccount, onUpdateTransaction, onDeleteTransaction, onCreateRule,
+  txFilter, onChangeTxFilter, categoryCounts, txCategory, onChangeTxCategory,
+  paymentTypeCounts, txPaymentType, onChangeTxPaymentType, accounts, accountId, onChangeAccount, onUpdateTransaction, onDeleteTransaction, onCreateRule,
   txHasMore, txLoadingMore, onLoadMore, onExportCSV, onExportPDF, exportingPDF, onShowImport,
 }: TransactionsPageProps) {
+  // O valor escolhido continua na lista mesmo se o novo mês não tiver nenhuma — senão não
+  // haveria como desmarcá-lo.
+  const withSelected = (counts: { value: string; count: number }[], selected: string | null) =>
+    selected && !counts.some(c => c.value === selected) ? [...counts, { value: selected, count: 0 }] : counts;
+  const categoryOptions: FilterOption[] = withSelected(categoryCounts, txCategory)
+    .map(c => ({ value: c.value, label: c.value, count: c.count, dot: categoryColor(c.value) }));
+  const paymentTypeOptions: FilterOption[] = withSelected(paymentTypeCounts, txPaymentType)
+    .map(c => ({ value: c.value, label: PAYMENT_TYPE_META[c.value]?.label ?? c.value, count: c.count }));
+
   return (
     <>
       <div className="mb-6 flex flex-wrap justify-between items-end gap-3">
@@ -101,7 +121,7 @@ export function TransactionsPage({
         </p>
       )}
       <div className="panel rounded-2xl p-5 md:p-6">
-        <div role="group" aria-label="Tipo de transação" className="inline-flex p-0.5 rounded-md bg-white/[0.06] mb-4">
+        <div role="group" aria-label="Receitas ou despesas" className="inline-flex p-0.5 rounded-md bg-white/[0.06] mb-4">
           {TX_FILTERS.map(f => (
             <button key={f.key} type="button" aria-pressed={txFilter === f.key} onClick={() => onChangeTxFilter(f.key)}
               className={`h-7 px-3 text-sm rounded transition-colors ${txFilter === f.key ? 'bg-card text-white font-medium' : 'text-textMuted hover:text-white'}`}>
@@ -109,7 +129,8 @@ export function TransactionsPage({
             </button>
           ))}
         </div>
-        {filtered.length === 0 ? (
+        {/* Com filtro de coluna ativo a tabela fica, mesmo vazia, para o filtro poder ser desfeito no cabeçalho. */}
+        {filtered.length === 0 && !txCategory && !txPaymentType ? (
           <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">Nenhuma transação neste recorte.</p>
         ) : (
           <TxTable
@@ -118,6 +139,8 @@ export function TransactionsPage({
             onUpdate={onUpdateTransaction}
             onDelete={onDeleteTransaction}
             onCreateRule={onCreateRule}
+            categoryFilter={{ options: categoryOptions, value: txCategory, onChange: onChangeTxCategory }}
+            typeFilter={{ options: paymentTypeOptions, value: txPaymentType, onChange: onChangeTxPaymentType }}
           />
         )}
       </div>

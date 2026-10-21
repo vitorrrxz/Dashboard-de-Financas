@@ -5,6 +5,9 @@ import { formatDateBR } from '../utils/dates';
 import { CATEGORIES, categoryDot } from '../utils/categories';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from '../utils/paymentTypes';
 import type { Account, PaymentType, Transaction } from '../types';
+import { ColumnFilter, type ColumnFilterProps } from './ColumnFilter';
+
+type ColumnFilterConfig = Omit<ColumnFilterProps, 'label' | 'allLabel'>;
 
 /**
  * Valor de uma transação na lista (FIN-076): em real, como sempre ("-35,49"); em outra moeda,
@@ -24,8 +27,11 @@ const suggestRuleMatch = (name: string) => name.replace(/[\d\s*#./-]+$/, '').tri
 // FIN-022: edição/exclusão individual de transação. `rows` continua sendo o recorte já
 // filtrado/paginado calculado pelo componente pai — este componente só adiciona a UI de
 // ação por linha e o modal de edição. Exportado para o teste das ações (FIN-099).
-export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
+export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule, categoryFilter, typeFilter }: {
   rows: Transaction[];
+  /** Filtros nos cabeçalhos de Categoria e Tipo (opcionais). */
+  categoryFilter?: ColumnFilterConfig;
+  typeFilter?: ColumnFilterConfig;
   accounts: Account[];
   onUpdate: (id: string, tx: Partial<Transaction>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -66,18 +72,28 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
 
   return (
     <div className="relative overflow-x-auto">
+      {/* No celular as colunas Categoria e Tipo somem; os filtros delas ficam aqui em cima. */}
+      {(categoryFilter || typeFilter) && (
+        <div className="md:hidden flex flex-wrap gap-x-5 gap-y-2 text-sm text-textMuted mb-3">
+          {categoryFilter && <ColumnFilter label="Categoria" {...categoryFilter} />}
+          {typeFilter && <ColumnFilter label="Tipo" allLabel="Todos" {...typeFilter} />}
+        </div>
+      )}
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="border-b border-[var(--line)] text-xs text-textMuted">
             <th className="pb-2 font-normal w-24 hidden sm:table-cell">Data</th>
             <th className="pb-2 font-normal">Descrição</th>
-            <th className="pb-2 font-normal hidden sm:table-cell">Categoria</th>
-            <th className="pb-2 font-normal hidden md:table-cell">Tipo</th>
+            <th className="pb-2 font-normal hidden sm:table-cell">{categoryFilter ? <ColumnFilter label="Categoria" {...categoryFilter} /> : 'Categoria'}</th>
+            <th className="pb-2 font-normal hidden md:table-cell">{typeFilter ? <ColumnFilter label="Tipo" allLabel="Todos" {...typeFilter} /> : 'Tipo'}</th>
             <th className="pb-2 font-normal text-right">Valor</th>
             <th className="pb-2 font-normal w-20"><span className="sr-only">Ações</span></th>
           </tr>
         </thead>
         <tbody className="text-sm divide-y divide-white/5">
+          {rows.length === 0 && (
+            <tr><td colSpan={6} className="py-6 text-textMuted">Nenhuma transação com esses filtros.</td></tr>
+          )}
           {rows.map(t => {
             const pt = PAYMENT_TYPE_META[t.paymentType ?? 'debit'] ?? PAYMENT_TYPE_META['debit'];
             return (
@@ -86,7 +102,9 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule }: {
                 <td className="py-3 pr-3 text-white">
                   {t.name}
                   {/* No celular, data, categoria e tipo descem para uma segunda linha em vez de sumir. */}
-                  <span className="flex sm:hidden items-center gap-1.5 text-xs text-textMuted mt-0.5">{formatDateBR(t.date)} · <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={categoryDot(t.category)} aria-hidden="true"/>{t.category} · {pt.label}</span>
+                  <span className="block sm:hidden text-xs text-textMuted mt-0.5">
+                    {formatDateBR(t.date)} · <span className="whitespace-nowrap"><span className="inline-block w-1.5 h-1.5 mr-1 rounded-full align-middle" style={categoryDot(t.category)} aria-hidden="true"/>{t.category}</span> · {pt.label}
+                  </span>
                 </td>
                 <td className="py-3 pr-3 text-white hidden sm:table-cell">
                   <span className="inline-flex items-center gap-2"><span className="inline-block w-2 h-2 rounded-full shrink-0" style={categoryDot(t.category)} aria-hidden="true"/>{t.category}</span>
