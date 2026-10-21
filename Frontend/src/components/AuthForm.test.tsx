@@ -5,14 +5,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AuthForm } from './AuthForm';
 import { recoveryNotice } from '../utils/twoFactor';
-import { signIn, signUp, verifyTwoFactor } from '../services/auth';
+import { getSocialProviders, signIn, signInSocial, signUp, takeOAuthError, verifyTwoFactor } from '../services/auth';
 
-vi.mock('../services/auth', () => ({
+vi.mock('../services/auth', async importOriginal => ({
+  ...(await importOriginal<typeof import('../services/auth')>()),
   signIn: vi.fn(),
   signUp: vi.fn(),
   verifyTwoFactor: vi.fn(),
+  getSocialProviders: vi.fn(),
+  signInSocial: vi.fn(),
+  takeOAuthError: vi.fn(),
 }));
 
+const providersMock = vi.mocked(getSocialProviders);
+const socialMock = vi.mocked(signInSocial);
+const oauthErrorMock = vi.mocked(takeOAuthError);
 const signInMock = vi.mocked(signIn);
 const signUpMock = vi.mocked(signUp);
 const verifyMock = vi.mocked(verifyTwoFactor);
@@ -38,6 +45,9 @@ describe('AuthForm', () => {
     signInMock.mockReset();
     signUpMock.mockReset();
     verifyMock.mockReset();
+    socialMock.mockReset();
+    providersMock.mockReset().mockResolvedValue([]);
+    oauthErrorMock.mockReset().mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -144,5 +154,36 @@ describe('AuthForm', () => {
     expect(screen.getByText('Bem-vindo de volta!')).toBeInTheDocument();
     expect(screen.getByLabelText('E-mail')).toHaveValue(USER.email);
     expect(screen.getByLabelText('Senha')).toHaveValue('');
+  });
+
+  describe('login social (FIN-122)', () => {
+    it('mostra um botão para cada provedor configurado no servidor', async () => {
+      providersMock.mockResolvedValue(['google', 'microsoft']);
+      render(<AuthForm onLogin={() => {}} />);
+      expect(await screen.findByRole('button', { name: 'Continuar com Google' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Continuar com Microsoft' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Continuar com GitHub' })).not.toBeInTheDocument();
+    });
+
+    it('sem provedores configurados, fica só com e-mail e senha', async () => {
+      render(<AuthForm onLogin={() => {}} />);
+      await waitFor(() => expect(providersMock).toHaveBeenCalled());
+      expect(screen.queryByRole('button', { name: /Continuar com/ })).not.toBeInTheDocument();
+    });
+
+    it('clicar leva ao provedor escolhido', async () => {
+      providersMock.mockResolvedValue(['github']);
+      socialMock.mockReturnValue(new Promise(() => {})); // a página sairia para o GitHub
+      render(<AuthForm onLogin={() => {}} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Continuar com GitHub' }));
+      expect(socialMock).toHaveBeenCalledWith('github');
+      expect(await screen.findByRole('button', { name: 'Abrindo…' })).toBeDisabled();
+    });
+
+    it('erro na volta do provedor aparece na tela', async () => {
+      oauthErrorMock.mockReturnValue('Já existe uma conta com este e-mail.');
+      render(<AuthForm onLogin={() => {}} />);
+      expect(await screen.findByRole('alert')).toHaveTextContent('Já existe uma conta com este e-mail.');
+    });
   });
 });

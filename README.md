@@ -195,6 +195,23 @@ Para abrir o FinFlow de qualquer lugar, só com e-mail e senha. A Vercel não te
 
 ---
 
+## 🔑 Login com Google, GitHub e Microsoft (FIN-122)
+
+Opcional: cada provedor aparece na tela de login quando as duas variáveis dele estão no `.env` (ou na Vercel). Em cada um, crie um app OAuth e cadastre a **URL de retorno** — o endereço da API seguido de `/api/auth/callback/<provedor>`:
+
+| Ambiente | URL de retorno (ex.: Google) |
+| --- | --- |
+| Produção | `https://finflow-ashen-ten.vercel.app/api/auth/callback/google` |
+| Desenvolvimento | `http://localhost:3001/api/auth/callback/google` |
+
+* **Google** — [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → *Criar credenciais* → *ID do cliente OAuth* → tipo *Aplicativo da Web*. Em *URIs de redirecionamento autorizados*, as duas URLs acima. Configure antes a *Tela de consentimento OAuth* (tipo *Externo*; enquanto estiver *Em teste*, só os e-mails de *Usuários de teste* entram). Variáveis: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+* **GitHub** — [Settings → Developer settings → OAuth Apps](https://github.com/settings/developers) → *New OAuth App*. O GitHub aceita uma URL de retorno por app: crie um para produção (`…/api/auth/callback/github` no endereço da Vercel) e outro para o desenvolvimento. Variáveis: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`.
+* **Microsoft** — [Microsoft Entra → Registros de aplicativo](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) → *Novo registro*, com *Contas em qualquer diretório organizacional e contas pessoais da Microsoft*. Em *Autenticação*, plataforma *Web* com as duas URLs (`…/callback/microsoft`); em *Certificados e segredos*, um segredo do cliente. Variáveis: `MICROSOFT_CLIENT_ID` (o *ID do aplicativo*) e `MICROSOFT_CLIENT_SECRET` (o *Valor* do segredo, não o ID dele).
+
+**Quem já tem conta** entra com e-mail e senha e conecta os provedores em *Configurações → Contas conectadas*. Entrar direto pelo Google com o e-mail de uma conta existente é recusado de propósito: o FinFlow não verifica e-mails no cadastro, e juntar as duas sozinho deixaria quem cadastrasse o e-mail de outra pessoa ficar com a conta dela quando ela entrasse pelo Google. **Contas novas** podem ser criadas direto por qualquer provedor.
+
+---
+
 ## 🔒 Segurança de Repositório
 
 O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos sensíveis/locais não sejam rastreados pelo Git ou enviados ao repositório público no GitHub:

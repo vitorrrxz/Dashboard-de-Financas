@@ -19,7 +19,7 @@ export const TEST_AUTH_SECRET = 'test_auth_secret_' + 'x'.repeat(40); // >= 32 c
 // concordarem em onde ele está, sem um terceiro lugar para configurar o mesmo valor duas vezes.
 export const TEST_TEMPLATE_DB = './test_template.db';
 
-export async function createTestApp(dbName, { authRateLimit, frontendDir } = {}) {
+export async function createTestApp(dbName, { authRateLimit, frontendDir, socialProviders = {} } = {}) {
   const dbFile = `./test_${dbName}.db`;
   for (const suffix of ['', '-journal', '-wal', '-shm']) {
     if (existsSync(dbFile + suffix)) unlinkSync(dbFile + suffix);
@@ -38,6 +38,12 @@ export async function createTestApp(dbName, { authRateLimit, frontendDir } = {})
   // FIN-108: pasta do build do frontend servida pela API. Sem `frontendDir`, vazia — mesmo que o .env de
   // quem roda os testes defina FRONTEND_DIR, porque o dotenv não sobrescreve variável que já existe.
   process.env.FRONTEND_DIR = frontendDir ?? '';
+  // FIN-122: login social desligado, a não ser que o teste passe credenciais (ex.: { google: true }).
+  for (const provider of ['GOOGLE', 'GITHUB', 'MICROSOFT']) {
+    const on = socialProviders[provider.toLowerCase()];
+    process.env[`${provider}_CLIENT_ID`] = on ? `test-${provider.toLowerCase()}-client` : '';
+    process.env[`${provider}_CLIENT_SECRET`] = on ? `test-${provider.toLowerCase()}-secret` : '';
+  }
 
   // FIN-114 — copiar o banco-modelo (`-wal`/`-shm` inclusive, se sobrou algum do `db push` que o
   // criou) é ordens de magnitude mais rápido que rodar `npx prisma db push` de novo por arquivo de

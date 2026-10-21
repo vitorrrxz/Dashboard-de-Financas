@@ -29,6 +29,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_CODE: 'Código de verificação inválido.',
   INVALID_BACKUP_CODE: 'Código de recuperação inválido.',
   INVALID_TWO_FACTOR_COOKIE: 'A verificação expirou. Volte e entre de novo com e-mail e senha.',
+  FAILED_TO_UNLINK_LAST_ACCOUNT: 'Esta é a única forma de entrar na sua conta e não pode ser desconectada.',
+  SOCIAL_ACCOUNT_ALREADY_LINKED: 'Esta conta do provedor já está conectada.',
+  INVALID_CALLBACK_URL: 'Endereço de retorno não permitido.',
 };
 
 type ClientError = { code?: string; message?: string; status?: number } | null;
@@ -109,4 +112,82 @@ export async function confirmTwoFactorSetup(code: string): Promise<void> {
 export async function disableTwoFactor(password: string): Promise<void> {
   const { error } = await authClient.twoFactor.disable({ password });
   if (error) throw toError(error);
+}
+
+// FIN-122 — login com Google, GitHub e Microsoft.
+export const SOCIAL_PROVIDERS = ['google', 'github', 'microsoft'] as const;
+export type SocialProvider = typeof SOCIAL_PROVIDERS[number];
+
+export const SOCIAL_PROVIDER_LABELS: Record<SocialProvider, string> = {
+  google: 'Google',
+  github: 'GitHub',
+  microsoft: 'Microsoft',
+};
+
+const isSocialProvider = (value: unknown): value is SocialProvider =>
+  typeof value === 'string' && (SOCIAL_PROVIDERS as readonly string[]).includes(value);
+
+/** Os provedores configurados no servidor (com as credenciais do app OAuth), na ordem da tela. */
+export async function getSocialProviders(): Promise<SocialProvider[]> {
+  const { data, error } = await authClient.$fetch<{ providers?: unknown }>('/social-providers', { method: 'GET' });
+  if (error) throw toError(error);
+  const providers = Array.isArray(data?.providers) ? data.providers.filter(isSocialProvider) : [];
+  return SOCIAL_PROVIDERS.filter(p => providers.includes(p));
+}
+
+// Endereços de volta do provedor: a própria página do app (o servidor recusa outros sites).
+const appUrl = (hash = '') => `${window.location.origin}/${hash}`;
+
+/** Leva à tela do provedor; a volta é na própria página, já logado (ou com ?error=). */
+export async function signInSocial(provider: SocialProvider): Promise<void> {
+  const { error } = await authClient.signIn.social({ provider, callbackURL: appUrl(), errorCallbackURL: appUrl() });
+  if (error) throw toError(error);
+}
+
+/**
+ * Provedores conectados à conta de quem está logado. `id` é o da conexão no Better Auth — o que a
+ * desconexão pede —, não o id da conta no provedor (`accountId` na resposta dele).
+ */
+export async function listLinkedProviders(): Promise<{ provider: SocialProvider; id: string }[]> {
+  const { data, error } = await authClient.listAccounts();
+  if (error) throw toError(error);
+  return (data ?? []).flatMap(account => (isSocialProvider(account.providerId)
+    ? [{ provider: account.providerId, id: account.id }]
+    : []));
+}
+
+/** Conecta um provedor à conta logada: leva à tela dele e volta para Configurações. */
+export async function linkSocial(provider: SocialProvider): Promise<void> {
+  const { error } = await authClient.linkSocial({ provider, callbackURL: appUrl('#settings'), errorCallbackURL: appUrl('#settings') });
+  if (error) throw toError(error);
+}
+
+/** Desconecta pelo `id` da conexão (ver listLinkedProviders). */
+export async function unlinkSocial(connectionId: string): Promise<void> {
+  const { error } = await authClient.unlinkAccount({ accountId: connectionId });
+  if (error) throw toError(error);
+}
+
+// Erros que o Better Auth devolve na URL (?error=) ao voltar do provedor.
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  account_not_linked: 'Já existe uma conta com este e-mail. Entre com e-mail e senha e conecte o provedor em Configurações → Contas conectadas.',
+  access_denied: 'O login foi cancelado no provedor.',
+  email_not_found: 'O provedor não informou um e-mail para a conta.',
+  email_not_verified: 'O e-mail desta conta não está verificado no provedor.',
+  account_already_linked_to_different_user: 'Esta conta do provedor já está conectada a outro usuário do FinFlow.',
+  unable_to_link_account: 'Não foi possível conectar o provedor. Tente de novo.',
+};
+
+/**
+ * Lê o erro do retorno do provedor (`?error=`) e o tira da barra de endereço, para não reaparecer ao
+ * recarregar a página. `null` se não houver.
+ */
+export function takeOAuthError(): string | null {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('error');
+  if (!code) return null;
+  url.searchParams.delete('error');
+  url.searchParams.delete('error_description');
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  return OAUTH_ERROR_MESSAGES[code] ?? 'Não foi possível entrar com o provedor. Tente de novo.';
 }
