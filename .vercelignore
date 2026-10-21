@@ -1,0 +1,14 @@
+# FIN-120 — o que nunca sobe para a Vercel no `vercel deploy`: segredos, bancos e backups locais.
+.env
+.env*.local
+.vercel
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+dev.db*
+backups
+.taste-skill
+node_modules
+Frontend/dist
+coverage

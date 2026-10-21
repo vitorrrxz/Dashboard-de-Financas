@@ -39,3 +39,5 @@ dev.db*
 
 # Arquivos de trabalho do design-taste (capturas com dados reais)
 .taste-skill/
+.vercel
+.env*.local
