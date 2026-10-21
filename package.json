@@ -5,14 +5,16 @@
   "type": "module",
   "scripts": {
     "postinstall": "prisma generate",
-    "dev": "concurrently \"nodemon server.js\" \"vite\"",
-    "sandbox": "node sandbox-pluggy/server.js",
-    "build": "tsc -b && vite build",
+    "dev": "concurrently \"nodemon --watch Backend Backend/server.js\" \"vite Frontend\"",
+    "sandbox": "node Backend/sandbox-pluggy/server.js",
+    "build": "tsc -b && vite build Frontend",
+    "start": "prisma migrate deploy && node Backend/server.js",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "preview": "vite preview"
+    "preview": "vite preview Frontend",
+    "backup": "node --env-file-if-exists=.env Backend/scripts/backup-db.mjs"
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.10.0",
@@ -32,6 +34,7 @@
     "otpauth": "^9.5.2",
     "pg": "^8.21.0",
     "pluggy-sdk": "^0.85.3",
+    "prisma": "^7.10.0",
     "qrcode-generator": "^2.0.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -61,7 +64,6 @@
     "jsdom": "^29.1.1",
     "nodemon": "^3.1.14",
     "postcss": "^8.5.10",
-    "prisma": "^7.10.0",
     "supertest": "^7.2.2",
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.2",

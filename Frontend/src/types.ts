@@ -1,0 +1,156 @@
+// Shared types for the finance dashboard
+
+export type PaymentType = 'debit' | 'credit' | 'pix' | 'pix_installment';
+
+export interface Transaction {
+  id: string;
+  name: string;
+  category: string;
+  date: string;
+  amount: number;
+  accountId?: string;    // Link to an Account
+  paymentType?: PaymentType;
+  externalId?: string;   // FITID do OFX (identificador estável do banco) — ver computeImportHash em server.js
+  currency?: string;     // FIN-074 — ISO 4217; sempre a da conta vinculada (o servidor deriva). Ausente = BRL.
+}
+
+export type AccountType = 'checking' | 'savings' | 'credit' | 'investment' | 'cash';
+
+export interface Account {
+  id: string;
+  name: string;
+  bank: string;
+  type: AccountType;
+  balance: number;
+  limit?: number;        // for credit cards
+  dueDay?: number;       // billing due day (for credit cards)
+  closingDay?: number;   // bill closing day (for credit cards)
+  pendingBill?: number;  // manually entered pending invoice amount
+  currency?: string;     // FIN-074 — ISO 4217 de balance/limit/pendingBill. Ausente = BRL.
+  color: string;
+}
+
+export type DebtCategory = 'Empréstimo' | 'Financiamento' | 'Cartão de Crédito' | 'Pessoal' | 'Outros';
+
+export interface DebtItem {
+  id: string;
+  name: string;
+  amount: number;
+  date: string;
+}
+
+export interface Debt {
+  id: string;
+  name: string;
+  description?: string;
+  category: DebtCategory;
+  totalAmount: number;
+  paidAmount: number;
+  monthlyPayment: number;
+  totalInstallments: number;
+  paidInstallments: number;
+  nextDueDate: string;   // ISO date
+  interestRate?: number; // % per month
+  createdAt: string;
+  subItems?: DebtItem[]; // Items from CSV import
+  accountId?: string;    // Link to an Account
+}
+
+// FIN-042 — orçamento mensal por categoria (Fase 3). `category` é texto livre, casando
+// com `Transaction.category` (que também não é um enum fechado — ver CATEGORIES
+// em App.tsx e CATEGORY_RULES em parsers.ts).
+export interface Budget {
+  id: string;
+  category: string;
+  monthlyLimit: number;
+  createdAt: string;
+}
+
+// FIN-049 — meta financeira (Fase 4). `currentAmount` é o quanto já foi acumulado; o
+// progresso exibido na tela é derivado dele com `targetAmount` (ver GoalsManager.tsx).
+// FIN-113 — `accountId`/`investmentId` (nunca os dois) ligam a meta a uma conta ou a um
+// investimento: o App mantém `currentAmount` em dia sozinho enquanto ligada (ver
+// `linkedGoalAmount` em utils/goals.ts); sem nenhum dos dois, o valor continua manual.
+export interface Goal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  targetDate: string;   // ISO date
+  accountId?: string;
+  investmentId?: string;
+  createdAt: string;
+}
+
+// FIN-053 — transação recorrente (Fase 4). A frequência vem de `utils/dates.ts`, onde
+// mora a lógica de avanço de ocorrência, para não ter duas listas de frequências.
+export type { RecurrenceFrequency } from './utils/dates';
+
+export interface RecurringTransaction {
+  id: string;
+  name: string;
+  category: string;
+  amount: number;        // negativo = despesa, positivo = receita (igual a Transaction)
+  frequency: import('./utils/dates').RecurrenceFrequency;
+  nextOccurrence: string; // ISO date — ponteiro de até onde já foi lançado
+  active: boolean;
+  accountId?: string;
+  createdAt: string;
+}
+
+// FIN-065/FIN-066 — notificação da central do sino. `AppNotification`, e não `Notification`,
+// para não colidir com a API de notificações do navegador (`window.Notification`).
+export type NotificationType = 'debt_due' | 'debt_overdue' | 'bill_due' | 'unusual_spending';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: string; // ISO date-time
+}
+
+// FIN-070 — posição da carteira de investimentos (Fase 7). `currentValue` é atualizado à mão
+// pelo usuário; `updatedAt` diz há quanto tempo isso aconteceu (ver InvestmentsManager.tsx).
+export type InvestmentType = 'fixed_income' | 'stocks' | 'funds' | 'crypto' | 'other';
+
+export interface Investment {
+  id: string;
+  name: string;
+  type: InvestmentType;
+  amountInvested: number; // quanto foi aplicado
+  currentValue: number;   // quanto vale hoje
+  accountId?: string;     // conta onde a aplicação está (corretora, banco)
+  currency?: string;      // FIN-074 — ISO 4217 dos dois valores. Ausente = BRL.
+  createdAt: string;      // ISO date-time
+  updatedAt: string;      // ISO date-time
+}
+
+/** Dados de uma posição como saem do formulário da carteira — sem os campos gerados pelo banco. */
+export type InvestmentInput = Omit<Investment, 'id' | 'createdAt' | 'updatedAt'>;
+
+// FIN-112 — retrato mensal do patrimônio líquido (Fase 10), para o gráfico de evolução em
+// Relatórios. Somente leitura pela tela: quem grava é o próprio App, ao carregar (ver
+// `computeNetWorth` em utils/reports.ts).
+export interface NetWorthSnapshot {
+  month: string; // "YYYY-MM"
+  liquid: number;
+  investments: number;
+  liabilities: number;
+  total: number;
+}
+
+// Salário informado manualmente. `amount` é o valor de CADA pagamento, em reais;
+// quinzenal ("biweekly") = dois pagamentos por mês.
+export type SalaryFrequency = 'monthly' | 'biweekly';
+export interface Salary {
+  amount: number;
+  frequency: SalaryFrequency;
+  /** Quinzenal: dia do 1º pagamento (1 a 15); o 2º é 15 dias depois. */
+  payDay: number;
+  /** Bônus de um mês só (`bonusMonth`, YYYY-MM), somado à quinzena `bonusHalf`. Em reais. */
+  bonus: number;
+  bonusHalf: 1 | 2;
+  bonusMonth: string | null;
+}

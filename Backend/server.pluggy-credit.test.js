@@ -1,0 +1,169 @@
+// @vitest-environment node
+// FIN-092 — normalização do sinal das transações de cartão vindas da Pluggy.
+// FIN-095 — compras em moeda estrangeira: valor na moeda da conta.
+// FIN-074 — moeda da conta vinda da Pluggy.
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createTestApp } from './test/backend-test-utils.js';
+
+describe('pluggyAmountToCents / isCreditCardBillPayment (FIN-092)', () => {
+  let pluggyAmountToCents;
+  let isCreditCardBillPayment;
+  let pluggyCurrency;
+  let pluggyTransactionCategory;
+  let OWN_TRANSFER_CATEGORIES;
+  let pluggyPendingBillCents;
+  let cleanup;
+
+  beforeAll(async () => {
+    const app = await createTestApp('pluggy_credit');
+    cleanup = app.cleanup;
+    ({ pluggyAmountToCents, isCreditCardBillPayment, pluggyCurrency, pluggyTransactionCategory, OWN_TRANSFER_CATEGORIES, pluggyPendingBillCents } = await import('./server.js'));
+  });
+
+  afterAll(() => cleanup());
+
+  describe('conta de cartão (o referencial da Pluggy é a fatura, não o bolso)', () => {
+    it('compra vem positiva da Pluggy e é gravada como despesa', () => {
+      expect(pluggyAmountToCents({ amount: 147.89 }, 'credit')).toBe(-14789);
+    });
+
+    it('parcela futura também vira despesa — era ela que aparecia como receita', () => {
+      expect(pluggyAmountToCents({ amount: 13.6 }, 'credit')).toBe(-1360);
+    });
+
+    it('crédito na fatura (estorno) vem negativo e é gravado como entrada', () => {
+      expect(pluggyAmountToCents({ amount: -50 }, 'credit')).toBe(5000);
+    });
+  });
+
+  describe('conta bancária (a Pluggy já usa a convenção do app)', () => {
+    it('preserva o sinal negativo de uma saída', () => {
+      expect(pluggyAmountToCents({ amount: -35.49 }, 'checking')).toBe(-3549);
+    });
+
+    it('preserva o sinal positivo de uma entrada', () => {
+      expect(pluggyAmountToCents({ amount: 1200 }, 'savings')).toBe(120000);
+    });
+  });
+
+  it('arredonda para o centavo mais próximo, sem acumular erro de ponto flutuante', () => {
+    // 0.1 + 0.2 em float dá 0.30000000000000004; o valor gravado tem de ser 30 centavos.
+    expect(pluggyAmountToCents({ amount: 0.1 + 0.2 }, 'credit')).toBe(-30);
+  });
+
+  it('zero não ganha sinal negativo', () => {
+    expect(Object.is(pluggyAmountToCents({ amount: 0 }, 'credit'), -0)).toBe(false);
+  });
+
+  describe('compra em moeda estrangeira (FIN-095)', () => {
+    it('grava o valor da fatura (moeda da conta), e não o da compra em dólar', () => {
+      // US$ 10 que entraram na fatura como R$ 54,30: antes, o app gravava −R$ 10,00.
+      expect(pluggyAmountToCents({ amount: 10, amountInAccountCurrency: 54.3 }, 'credit')).toBe(-5430);
+    });
+
+    it('o sinal continua vindo de `amount`, mesmo que o outro campo venha com sinal trocado', () => {
+      expect(pluggyAmountToCents({ amount: -10, amountInAccountCurrency: 54.3 }, 'credit')).toBe(5430);
+      expect(pluggyAmountToCents({ amount: -10, amountInAccountCurrency: -54.3 }, 'credit')).toBe(5430);
+      expect(pluggyAmountToCents({ amount: 10, amountInAccountCurrency: -54.3 }, 'credit')).toBe(-5430);
+    });
+
+    it('sem valor na moeda da conta (compra em real), usa `amount` como sempre', () => {
+      expect(pluggyAmountToCents({ amount: 25, amountInAccountCurrency: null }, 'credit')).toBe(-2500);
+      expect(pluggyAmountToCents({ amount: -25 }, 'checking')).toBe(-2500);
+    });
+
+    it('um valor que não é número finito é ignorado', () => {
+      expect(pluggyAmountToCents({ amount: 25, amountInAccountCurrency: '54.30' }, 'credit')).toBe(-2500);
+      expect(pluggyAmountToCents({ amount: 25, amountInAccountCurrency: Number.NaN }, 'credit')).toBe(-2500);
+    });
+  });
+
+  describe('pluggyCurrency (FIN-074)', () => {
+    it('usa o código ISO que a Pluggy informa', () => {
+      expect(pluggyCurrency('BRL')).toBe('BRL');
+      expect(pluggyCurrency('USD')).toBe('USD');
+    });
+
+    it('um código válido fora da lista do app é gravado como veio', () => {
+      expect(pluggyCurrency('ARS')).toBe('ARS');
+    });
+
+    it('código ausente ou fora do padrão cai em real', () => {
+      expect(pluggyCurrency(undefined)).toBe('BRL');
+      expect(pluggyCurrency(null)).toBe('BRL');
+      expect(pluggyCurrency('usd')).toBe('BRL');
+      expect(pluggyCurrency('US')).toBe('BRL');
+      expect(pluggyCurrency(986)).toBe('BRL');
+    });
+  });
+
+  describe('pluggyTransactionCategory (FIN-104)', () => {
+    it('pagamento de fatura na conta corrente vira "Pagamento de fatura", mesmo vindo como "Transfers"', () => {
+      const category = pluggyTransactionCategory({ amount: -735.2, category: 'Transfers', description: 'Pagamento de fatura' });
+      expect(category).toBe('Pagamento de fatura');
+      expect(OWN_TRANSFER_CATEGORIES).toContain(category); // fora de receitas e despesas (FIN-103)
+    });
+
+    it('entrada "pagamento recebido" e compras comuns mantêm a categoria da Pluggy, traduzida', () => {
+      expect(pluggyTransactionCategory({ amount: 1200, category: 'Transfers', description: 'Pagamento recebido' })).toBe('Transferências');
+      expect(pluggyTransactionCategory({ amount: -35.49, category: 'Groceries', description: 'Mercado' })).toBe('Supermercado');
+      expect(pluggyTransactionCategory({ amount: -10, category: 'Categoria nova', description: 'X' })).toBe('Categoria nova');
+      expect(pluggyTransactionCategory({ amount: -10, description: 'Sem categoria' })).toBe('Outros');
+      expect(OWN_TRANSFER_CATEGORIES).toContain(pluggyTransactionCategory({ amount: 500, category: 'Same person transfer', description: 'Pix' }));
+    });
+
+    it('a regra do usuário vem antes da categoria da Pluggy e da detecção de fatura (FIN-105)', () => {
+      const rules = [{ match: 'uber', category: 'Transporte' }, { match: 'fatura', category: 'Compras' }];
+      expect(pluggyTransactionCategory({ amount: -20, category: 'Taxi and ride-hailing', description: 'UBER *TRIP' }, rules)).toBe('Transporte');
+      expect(pluggyTransactionCategory({ amount: -735.2, category: 'Transfers', description: 'Pagamento de fatura' }, rules)).toBe('Compras');
+      expect(pluggyTransactionCategory({ amount: -10, category: 'Groceries', description: 'Mercado' }, rules)).toBe('Supermercado');
+    });
+  });
+
+  describe('isCreditCardBillPayment', () => {
+    it('reconhece o pagamento pela categoria normalizada da Pluggy', () => {
+      expect(isCreditCardBillPayment({ category: 'Credit card payment', description: 'Pagamento recebido' })).toBe(true);
+    });
+
+    it('reconhece pela descrição quando a categoria vem vazia', () => {
+      expect(isCreditCardBillPayment({ category: null, description: 'Pagamento de fatura' })).toBe(true);
+    });
+
+    it('não confunde uma compra com pagamento de fatura', () => {
+      expect(isCreditCardBillPayment({ category: 'Groceries', description: 'Mercado*Mercadolivre 3/10' })).toBe(false);
+    });
+
+    it('parcela de fatura parcelada é cobrança, mesmo na categoria de pagamento', () => {
+      expect(isCreditCardBillPayment({ amount: 218.32, category: 'Credit card payment', description: 'Parcelamento de Fatura' })).toBe(false);
+      expect(isCreditCardBillPayment({ amount: -300, category: 'Credit card payment', description: 'Pagamento recebido' })).toBe(true);
+    });
+
+    it('não quebra quando categoria e descrição estão ausentes', () => {
+      expect(isCreditCardBillPayment({})).toBe(false);
+    });
+  });
+
+  // Fatura a pagar: a fechada até o vencimento; depois, a aberta, somada das transações.
+  describe('pluggyPendingBillCents', () => {
+    const lastBill = { dueDate: '2026-09-21T00:00:00.000Z', billClosingDate: '2026-09-14T00:00:00.000Z', totalAmount: 819.7614 };
+    const tx = (amount, date, meta = {}, extra = {}) => ({ amount, date: new Date(`${date}T03:00:00Z`), creditCardMetadata: meta, ...extra });
+    const txs = [
+      tx(150, '2026-09-14', { billForecastDate: '2026-10' }),                // compra de antes do fechamento que caiu na aberta
+      tx(218.32, '2026-09-15', { billForecastDate: '2026-10' }, { category: 'Credit card payment', description: 'Parcelamento de Fatura' }),
+      tx(-300, '2026-09-15', { billForecastDate: '2026-10' }, { category: 'Credit card payment', description: 'Pagamento recebido' }),
+      tx(-83.99, '2026-09-16', { billForecastDate: '2026-10' }),             // estorno
+      tx(105.99, '2026-09-30'),                                              // sem previsão, dentro do ciclo
+      tx(13.6, '2026-10-15'),                                                // sem previsão, já no ciclo seguinte
+      tx(147.89, '2026-11-09', { billForecastDate: '2026-11' }),             // parcela futura
+      tx(500, '2026-09-10', { billId: 'b-set' }),                            // já na fatura fechada
+    ];
+
+    it('até o vencimento, vale a última fatura fechada', () => {
+      expect(pluggyPendingBillCents(lastBill, txs, '2026-09-21')).toBe(81976);
+    });
+
+    it('depois do vencimento, soma a fatura aberta sem o pagamento da anterior', () => {
+      expect(pluggyPendingBillCents(lastBill, txs, '2026-10-13')).toBe(15000 + 21832 - 8399 + 10599);
+    });
+  });
+});

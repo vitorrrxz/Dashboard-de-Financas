@@ -1,0 +1,317 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  // Salário informado manualmente: valor de CADA pagamento, em centavos. "biweekly" (quinzenal)
+  // = dois pagamentos no mês; "monthly" = um.
+  salaryCents     Int        @default(0)
+  salaryFrequency String     @default("monthly")
+  // Quinzenal: dia do 1º pagamento (1 a 15); o 2º cai 15 dias depois (5 e 20, 15 e 30).
+  salaryPayDay    Int        @default(15)
+  // Bônus de um mês só (bonusMonth = "YYYY-MM"), em centavos, somado à quinzena bonusHalf (1 ou 2).
+  bonusCents      Int        @default(0)
+  bonusHalf       Int        @default(1)
+  bonusMonth      String?
+
+  accounts     Account[]
+  transactions Transaction[]
+  debts        Debt[]
+  budgets      Budget[]
+  goals        Goal[]
+  recurring    RecurringTransaction[]
+  notifications Notification[]
+  investments  Investment[]
+  twoFactor    UserTwoFactor?
+  categoryRules CategoryRule[]
+  pluggyItems  PluggyItem[]
+  netWorthSnapshots NetWorthSnapshot[]
+}
+
+// FIN-078 — verificação em duas etapas (TOTP). Tabela própria, 1:1 com User, em vez de colunas
+// novas em User: o login continua lendo a mesma linha de antes, e o segredo fica fora dela.
+// O registro nasce na configuração (`enabledAt` nulo) e só vale no login depois de confirmado
+// com um código do aplicativo. Desativar apaga o registro.
+model UserTwoFactor {
+  userId        String    @id
+  // Segredo TOTP cifrado com AES-256-GCM (chave de TWO_FACTOR_ENCRYPTION_KEY — ver server.js).
+  // Nunca em texto puro: quem copiasse o banco poderia gerar os códigos.
+  secret        String
+  enabledAt     DateTime? // null = configuração iniciada e ainda não confirmada
+  // Último intervalo de 30 s aceito. Um código só vale uma vez: sem isto, quem visse um código
+  // poderia reusá-lo enquanto ele ainda está na janela de validade.
+  lastUsedStep  Int?
+  // JSON com os hashes bcrypt dos códigos de recuperação ainda não usados.
+  recoveryCodes String    @default("[]")
+  createdAt     DateTime  @default(now())
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id          String   @id @default(uuid())
+  userId      String
+  pluggyId    String?
+  name        String
+  bank        String
+  type        String
+  balance     Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
+  limit       Int?     // centavos
+  dueDay      Int?
+  closingDay  Int?
+  pendingBill Int?     // centavos
+  // FIN-074 — moeda de balance/limit/pendingBill (ISO 4217). O padrão BRL mantém todas as
+  // contas existentes como estavam.
+  currency    String   @default("BRL")
+  color       String
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+  transactions Transaction[]
+  debts       Debt[]
+  recurring   RecurringTransaction[]
+  investments Investment[]
+  goals       Goal[] // FIN-113
+
+  // Toda listagem filtra por userId; o sync Pluggy busca por (userId, pluggyId) — ver FIN-019.
+  @@index([userId])
+  // Reforça a idempotência do sync Pluggy a nível de banco, não só de aplicação — evita
+  // condição de corrida se duas sincronizações rodarem em paralelo (ver FIN-021).
+  // SQLite/Prisma permitem múltiplos NULL num índice único, então contas sem pluggyId
+  // (a maioria, criadas manualmente) não são afetadas.
+  @@unique([userId, pluggyId])
+}
+
+model Transaction {
+  id          String   @id @default(uuid())
+  userId      String
+  accountId   String?
+  pluggyId    String?
+  importHash  String?  // chave de deduplicação de importações manuais (CSV/OFX) — ver FIN-003
+  name        String
+  category    String
+  date        String
+  amount      Int      // centavos — ver FIN-015
+  // FIN-074 — sempre a moeda da conta vinculada (real, sem conta): o servidor deriva, o
+  // cliente não escolhe. Assim uma transação nunca fica numa moeda diferente da própria conta.
+  currency    String   @default("BRL")
+  paymentType String   @default("debit")
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+  account     Account? @relation(fields: [accountId], references: [id])
+
+  // ver FIN-019 em docs/BACKLOG_DETAIL.md
+  @@index([userId, date])
+  // Reforça a deduplicação de importação manual (CSV/OFX) a nível de banco, não só de
+  // aplicação — evita duplicatas se o usuário disparar duas importações do mesmo arquivo
+  // em paralelo (ex. duplo clique). SQLite/Prisma permitem múltiplos NULL num índice
+  // único, então transações não-importadas (criadas manualmente ou via Pluggy, sem
+  // importHash) não são afetadas. Ver nota de implementação em FIN-003.
+  @@unique([userId, importHash])
+  // Idempotência do sync Pluggy a nível de banco — ver FIN-021.
+  @@unique([userId, pluggyId])
+}
+
+model Debt {
+  id                String     @id @default(uuid())
+  userId            String
+  accountId         String?
+  name              String
+  description       String?
+  category          String
+  totalAmount       Int      // centavos — ver FIN-015
+  paidAmount        Int      // centavos
+  monthlyPayment    Int      // centavos
+  totalInstallments Int
+  paidInstallments  Int
+  nextDueDate       String
+  interestRate      Float?   // % ao mês — NÃO é valor monetário, permanece Float
+  createdAt         DateTime   @default(now())
+
+  user              User       @relation(fields: [userId], references: [id])
+  account           Account?   @relation(fields: [accountId], references: [id])
+  subItems          DebtItem[]
+
+  @@index([userId]) // ver FIN-019
+}
+
+// FIN-042 — orçamento mensal por categoria (Fase 3). Um limite por (usuário, categoria) —
+// a constraint única evita dois orçamentos concorrentes para a mesma categoria, o que
+// tornaria ambíguo qual limite vale no cálculo de progresso (ver FIN-044).
+model Budget {
+  id           String   @id @default(uuid())
+  userId       String
+  category     String
+  monthlyLimit Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@index([userId]) // ver FIN-019
+  @@unique([userId, category])
+}
+
+// FIN-105 — regra de categoria do usuário: a transação nova (importação em lote ou Pluggy) cuja
+// descrição contém `match` — sem acento e sem diferenciar maiúsculas — entra com `category`.
+model CategoryRule {
+  id        String   @id @default(uuid())
+  userId    String
+  match     String
+  category  String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, match]) // também serve de índice por userId
+}
+
+// FIN-107 — conexão com um banco pela Pluggy (o "item"): o estado do login, que tira a conexão
+// expirada da sincronização automática, e a hora da última sincronização, mostrada na tela.
+model PluggyItem {
+  id           String    @id @default(uuid())
+  userId       String
+  pluggyId     String    // id do item na Pluggy
+  providerName String
+  status       String    // status do item na Pluggy (UPDATED, LOGIN_ERROR, OUTDATED...)
+  lastSyncAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  user         User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, pluggyId]) // também serve de índice por userId
+}
+
+// FIN-049 — meta financeira (Fase 4): quanto o usuário quer juntar até uma data.
+// `currentAmount` é atualizado manualmente pelo usuário (aportes) por padrão; com FIN-113,
+// ligada a uma conta ou a um investimento (nunca os dois — checado na rota, não aqui: o Prisma
+// não faz "exatamente um dos dois" em nível de schema), o cliente mantém `currentAmount` em dia
+// sozinho, e a checagem de posse fica na rota (FIN-096). Excluir a conta/investimento apaga só o
+// vínculo (`SET NULL`, o padrão do Prisma para relação opcional): a meta volta ao modo manual,
+// com o último valor sincronizado — nunca é apagada.
+model Goal {
+  id            String   @id @default(uuid())
+  userId        String
+  accountId     String?
+  investmentId  String?
+  name          String
+  targetAmount  Int      // centavos — ver FIN-015 em docs/BACKLOG_DETAIL.md
+  currentAmount Int      @default(0) // centavos já acumulados
+  targetDate    String   // ISO YYYY-MM-DD, mesma convenção de Debt.nextDueDate
+  createdAt     DateTime @default(now())
+
+  user          User        @relation(fields: [userId], references: [id])
+  account       Account?    @relation(fields: [accountId], references: [id])
+  investment    Investment? @relation(fields: [investmentId], references: [id])
+
+  @@index([userId]) // ver FIN-019
+}
+
+// FIN-053 — transação recorrente (Fase 4): modela a recorrência em si, não as transações
+// geradas. `nextOccurrence` é o ponteiro de até onde já foi lançado; o endpoint de
+// processamento (FIN-054) cria as `Transaction` reais cujas ocorrências já passaram e
+// avança esse ponteiro.
+model RecurringTransaction {
+  id             String   @id @default(uuid())
+  userId         String
+  accountId      String?
+  name           String
+  category       String
+  amount         Int      // centavos; negativo = despesa, positivo = receita (igual a Transaction)
+  frequency      String   // 'weekly' | 'monthly' | 'yearly' — validado por Zod em server.js
+  nextOccurrence String   // ISO YYYY-MM-DD
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  user           User     @relation(fields: [userId], references: [id])
+  account        Account? @relation(fields: [accountId], references: [id])
+
+  @@index([userId]) // ver FIN-019
+}
+
+// FIN-112 — retrato mensal do patrimônio líquido (FIN-064/FIN-073), para o gráfico de evolução em
+// Relatórios: os saldos de contas/dívidas/investimentos são calculados na hora e nunca ficam
+// guardados, então sem isto não haveria como ver a evolução. Um registro por (usuário, mês) —
+// a rota sempre grava no mês corrente do relógio do servidor (nunca um mês que o cliente informe),
+// e por isso os meses anteriores nunca são reescritos por ela.
+model NetWorthSnapshot {
+  id          String   @id @default(uuid())
+  userId      String
+  month       String   // "YYYY-MM"
+  liquid      Int      // centavos — saldo em contas (FIN-018), pode ser negativo
+  investments Int      // centavos — investimentos (FIN-073)
+  liabilities Int      // centavos — faturas em aberto + saldo devedor das dívidas
+  total       Int      // centavos — patrimônio líquido (ativos − passivos), pode ser negativo
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, month])
+}
+
+model DebtItem {
+  id          String   @id @default(uuid())
+  debtId      String
+  name        String
+  amount      Int      // centavos — ver FIN-015
+  date        String
+
+  debt        Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+}
+
+// FIN-065 — notificação da central do sino (Fase 6). `dedupeKey` identifica a ocorrência que
+// gerou o aviso (ex.: a parcela de uma dívida com vencimento em tal data): a constraint única
+// garante, no banco, que rodar a geração várias vezes — a cada carregamento do app — não
+// duplique o aviso da mesma ocorrência. Mesmo padrão de `Transaction.importHash` (FIN-003).
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // 'debt_due' | 'debt_overdue' | 'bill_due' | 'unusual_spending'
+  title     String
+  message   String
+  dedupeKey String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  // A central lista por usuário, com as não lidas primeiro, e conta as não lidas.
+  @@index([userId, read])
+  @@unique([userId, dedupeKey])
+}
+
+// FIN-070 — posição da carteira de investimentos (Fase 7). Valores em centavos, como o resto
+// do schema. `currentValue` é informado pelo usuário — não há cotação automática nesta fase —,
+// por isso `updatedAt`: a carteira mostra há quanto tempo cada valor não é atualizado.
+// `accountId` aponta a conta onde a aplicação está (corretora, banco); ao excluir a conta, o
+// vínculo vira NULL e a posição continua na carteira (ver FIN-073 para o efeito no patrimônio).
+model Investment {
+  id             String   @id @default(uuid())
+  userId         String
+  accountId      String?
+  name           String
+  type           String   // 'fixed_income' | 'stocks' | 'funds' | 'crypto' | 'other' — validado por Zod em server.js
+  amountInvested Int      // centavos — quanto foi aplicado
+  currentValue   Int      // centavos — quanto a posição vale hoje
+  // FIN-074 — moeda dos dois valores (ISO 4217). Independente da conta vinculada: uma
+  // corretora em real pode custodiar um ativo cotado em dólar.
+  currency       String   @default("BRL")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id])
+  account        Account? @relation(fields: [accountId], references: [id])
+  goals          Goal[] // FIN-113
+
+  @@index([userId]) // ver FIN-019
+}

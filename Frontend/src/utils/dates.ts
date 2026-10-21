@@ -1,0 +1,207 @@
+/**
+ * Aritmética de datas em strings ISO (YYYY-MM-DD), sem passar por `new Date(string)`.
+ *
+ * Todo o app trata datas como strings ISO e as compara lexicograficamente (ver
+ * `isDebtOverdue` em `debts.ts`) — `new Date('YYYY-MM-DD')` é interpretado como UTC 00:00
+ * e, comparado com a hora local, pode divergir em um dia em fusos negativos como o do
+ * Brasil (UTC-3). Estas funções fazem a aritmética sobre os componentes numéricos da
+ * própria string, então são imunes a fuso horário.
+ *
+ * Extraído de `debts.ts` (onde `advanceMonth` nasceu, em FIN-005/FIN-034) ao implementar
+ * as transações recorrentes (FIN-053), que precisam da mesma lógica de ano bissexto e de
+ * "clamp" de dia — duplicá-la seria a terceira cópia da mesma regra.
+ */
+
+/** Ano bissexto pela regra gregoriana completa (divisível por 4, exceto séculos não divisíveis por 400). */
+export function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+/** Quantidade de dias do mês (`month` de 1 a 12), já considerando fevereiro em ano bissexto. */
+export function daysInMonth(year: number, month: number): number {
+  const days = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return days[month - 1];
+}
+
+/** Quebra uma data ISO em componentes numéricos; `null` se o formato não for YYYY-MM-DD. */
+function parseISO(dateString: string): { year: number; month: number; day: number } | null {
+  const parts = dateString.split('-');
+  if (parts.length !== 3) return null;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month < 1 || month > 12 || day < 1) return null;
+  return { year, month, day };
+}
+
+/** Formata componentes numéricos de volta para ISO (YYYY-MM-DD), com zero à esquerda. */
+function formatISO(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Avança uma data ISO em exatamente um mês, ajustando o ano quando cruza dezembro→janeiro.
+ * O dia é "clampado" para o último dia válido do mês de destino quando necessário
+ * (ex.: 31/jan → 28 ou 29/fev, nunca "31/fev", que não é uma data válida) — sem isso, uma
+ * dívida ou recorrência com vencimento no dia 31 quebraria ao avançar para um mês mais curto.
+ */
+export function advanceMonth(dateString: string): string {
+  const parsed = parseISO(dateString);
+  if (!parsed) return dateString;
+  let { year, month } = parsed;
+
+  month += 1;
+  if (month > 12) {
+    month = 1;
+    year += 1;
+  }
+
+  return formatISO(year, month, Math.min(parsed.day, daysInMonth(year, month)));
+}
+
+/** Avança uma data ISO em `days` dias, usando `Date` com componentes numéricos (hora local, sem parse de string UTC). */
+export function advanceDays(dateString: string, days: number): string {
+  const parsed = parseISO(dateString);
+  if (!parsed) return dateString;
+  // `new Date(y, mIndex, d)` usa componentes locais — diferente de `new Date('YYYY-MM-DD')`,
+  // que seria interpretado como UTC. O construtor normaliza o excesso de dias sozinho
+  // (ex.: 30/jan + 7 → 6/fev), inclusive virando mês e ano.
+  const d = new Date(parsed.year, parsed.month - 1, parsed.day + days);
+  return formatISO(d.getFullYear(), d.getMonth() + 1, d.getDate());
+}
+
+/**
+ * Avança uma data ISO em exatamente um ano. O dia é clampado quando a data de origem é
+ * 29/fev e o ano de destino não é bissexto (29/fev/2024 → 28/fev/2025) — sem o clamp, o
+ * resultado seria "2025-02-29", uma data que não existe.
+ */
+export function advanceYear(dateString: string): string {
+  const parsed = parseISO(dateString);
+  if (!parsed) return dateString;
+  const year = parsed.year + 1;
+  return formatISO(year, parsed.month, Math.min(parsed.day, daysInMonth(year, parsed.month)));
+}
+
+/**
+ * Diferença em dias entre duas datas ISO (`b - a`; negativa se `b` vem antes). `Date.UTC` dos dois
+ * lados, nunca `getDate()`/`getMonth()` locais — não há conversão de fuso a acertar, então é seguro
+ * (ver FIN-111, que usa isto para medir o intervalo entre ocorrências de uma possível assinatura).
+ */
+export function daysBetween(a: string, b: string): number {
+  const pa = parseISO(a);
+  const pb = parseISO(b);
+  if (!pa || !pb) return 0;
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.round((Date.UTC(pb.year, pb.month - 1, pb.day) - Date.UTC(pa.year, pa.month - 1, pa.day)) / msPerDay);
+}
+
+/** Frequências suportadas por uma transação recorrente (ver FIN-053). */
+export type RecurrenceFrequency = 'weekly' | 'monthly' | 'yearly';
+
+/**
+ * Calcula a próxima ocorrência de uma recorrência a partir de `dateString`, conforme a
+ * frequência. Sempre retorna uma data estritamente posterior à de entrada, o que garante
+ * o avanço do laço de "lançar pendentes" (FIN-054) mesmo em datas de borda como 29/fev.
+ */
+export function advanceOccurrence(dateString: string, frequency: RecurrenceFrequency): string {
+  if (frequency === 'weekly') return advanceDays(dateString, 7);
+  if (frequency === 'yearly') return advanceYear(dateString);
+  return advanceMonth(dateString);
+}
+
+/**
+ * Formata uma data ISO (YYYY-MM-DD) no padrão brasileiro para exibição.
+ *
+ * O `T12:00:00` (meio-dia) é essencial: `new Date('YYYY-MM-DD')` é interpretado como UTC
+ * 00:00 e, num fuso negativo como o do Brasil (UTC-3), vira 21h do dia ANTERIOR — a data
+ * exibida ficaria um dia atrás da real. Ancorar no meio-dia dá margem suficiente para
+ * qualquer fuso do mundo cair no dia certo.
+ */
+export function formatDateBR(dateISO: string, options?: Intl.DateTimeFormatOptions): string {
+  return new Date(dateISO + 'T12:00:00').toLocaleDateString('pt-BR', options);
+}
+
+/** Quebra uma chave de mês (YYYY-MM) em componentes numéricos; `null` se o formato for inválido. */
+function parseMonthKey(month: string): { year: number; month: number } | null {
+  const parts = month.split('-');
+  if (parts.length !== 2) return null;
+  const year = Number(parts[0]);
+  const monthNumber = Number(parts[1]);
+  if (!Number.isInteger(year) || year < 1) return null;
+  if (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12) return null;
+  return { year, month: monthNumber };
+}
+
+/**
+ * Desloca uma chave de mês (YYYY-MM) em `delta` meses, para a frente ou para trás.
+ *
+ * Opera sobre os componentes numéricos, sem `Date`, pelo mesmo motivo do resto deste
+ * módulo. Devolve a entrada intacta quando ela não é um mês válido ou `delta` não é inteiro.
+ */
+export function shiftMonth(month: string, delta: number): string {
+  const parsed = parseMonthKey(month);
+  if (!parsed || !Number.isInteger(delta)) return month;
+  const absolute = parsed.year * 12 + (parsed.month - 1) + delta;
+  const year = Math.floor(absolute / 12);
+  return `${year}-${String(absolute - year * 12 + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Data ISO de um dia dentro de um mês (YYYY-MM), com o dia "clampado" ao intervalo válido
+ * do mês — o dia 31 num mês de 30 dias vira 30, e nunca sai uma data inexistente como 31/fev.
+ */
+export function dateInMonth(month: string, day: number): string {
+  const parsed = parseMonthKey(month);
+  if (!parsed) return month;
+  const safeDay = Math.min(Math.max(1, Math.trunc(day) || 1), daysInMonth(parsed.year, parsed.month));
+  return formatISO(parsed.year, parsed.month, safeDay);
+}
+
+/**
+ * Meses (YYYY-MM) em que caem as datas informadas, do mais recente para o mais antigo, sem
+ * repetição. `alwaysInclude` força a presença de um mês mesmo sem nenhuma data nele — o mês
+ * corrente, para que um seletor nunca abra num valor que não está na própria lista.
+ */
+export function monthsDescending(dates: string[], alwaysInclude?: string): string[] {
+  const months = new Set(dates.map(d => d.slice(0, 7)));
+  if (alwaysInclude) months.add(alwaysInclude);
+  // Comparação lexicográfica: para YYYY-MM ela equivale à cronológica, sem construir Date.
+  return Array.from(months).sort().reverse();
+}
+
+/**
+ * Rótulo do mês para exibição ("Setembro/2026").
+ *
+ * Monta a data com componentes numéricos (`new Date(ano, mêsIndex, 1)`) de propósito:
+ * `new Date('2026-01')` seria lido como UTC e, em UTC-3, cairia em dezembro do ano anterior.
+ */
+export function formatMonthLabel(month: string): string {
+  const parsed = parseMonthKey(month);
+  if (!parsed) return month;
+  const name = new Date(parsed.year, parsed.month - 1, 1).toLocaleDateString('pt-BR', { month: 'long' });
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)}/${parsed.year}`;
+}
+
+/**
+ * Tempo decorrido desde um instante, para exibição: "agora", "há 5 min", "há 3 h", "ontem"
+ * (entre 24 e 48 h), "há 4 dias"; a partir de uma semana, a data (dd/mm/aaaa).
+ *
+ * Recebe um timestamp completo (ISO com hora e fuso, como o `createdAt` vindo da API) — é
+ * seguro passá-lo por `new Date`, ao contrário de uma data pura YYYY-MM-DD. Um instante no
+ * futuro (relógio do servidor adiantado) vira "agora", nunca um tempo negativo. `now` existe
+ * para os testes.
+ */
+export function formatRelativeTime(timestamp: string, now: Date = new Date()): string {
+  const then = new Date(timestamp);
+  if (Number.isNaN(then.getTime())) return '';
+  const minutes = Math.floor((now.getTime() - then.getTime()) / 60_000);
+  if (minutes < 1) return 'agora';
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'ontem';
+  if (days < 7) return `há ${days} dias`;
+  return then.toLocaleDateString('pt-BR');
+}

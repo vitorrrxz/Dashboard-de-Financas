@@ -136,7 +136,7 @@ Gere as classes de cliente do Prisma e aplique as migrations no banco SQLite loc
 npx prisma generate
 npx prisma migrate dev
 ```
-> O projeto usa histórico de migrations versionado em `prisma/migrations` (não apenas `db push`) — isso torna mudanças de schema explícitas, reproduzíveis em qualquer ambiente e revisáveis antes de aplicar, reduzindo (mas não eliminando) o risco de mudanças destrutivas silenciosas.
+> O projeto usa histórico de migrations versionado em `Backend/prisma/migrations` (não apenas `db push`) — isso torna mudanças de schema explícitas, reproduzíveis em qualquer ambiente e revisáveis antes de aplicar, reduzindo (mas não eliminando) o risco de mudanças destrutivas silenciosas.
 
 ### Passo 4: Executar o Projeto
 O projeto está configurado para iniciar o servidor backend (API Express na porta `3001`) e o servidor frontend (Vite na porta padrão) de forma simultânea e concorrente usando apenas um comando:
@@ -144,6 +144,36 @@ O projeto está configurado para iniciar o servidor backend (API Express na port
 npm run dev
 ```
 Após executar, abra o endereço exibido no terminal (geralmente `http://localhost:5173`) no seu navegador.
+
+---
+
+## 🐳 Rodando com Docker
+
+Para deixar o FinFlow rodando num computador ou servidor seu, sempre do mesmo jeito: frontend e API no mesmo contêiner, na mesma origem, e o banco num volume.
+
+1. Instale o [Docker](https://docs.docker.com/get-docker/), com o Compose.
+2. Crie o `.env` a partir do `.env.example`. O contêiner lê as mesmas variáveis (`JWT_SECRET`, Pluggy, `TWO_FACTOR_ENCRYPTION_KEY`…) a cada subida; o `.env` nunca entra na imagem.
+3. Rode `docker compose up -d --build` e abra `http://localhost:3001`.
+
+* **Banco:** fica no volume `finflow-data`. Reiniciar ou recriar o contêiner mantém os dados; só `docker compose down -v` apaga o volume. As migrações pendentes rodam sozinhas a cada subida (`prisma migrate deploy`).
+* **Backups:** o backup diário (seção abaixo) vai para a pasta `BACKUP_DIR` do `.env` ou, se ela estiver vazia, para `./backups`. No Linux, crie a pasta antes (`mkdir -p backups`): o contêiner roda como o usuário de id 1000.
+* **Levar o banco atual para o contêiner, ou restaurar um backup:** com o app parado (`docker compose stop`), rode
+  `docker compose run --rm finflow sh -c 'cp /backups/finflow-AAAA-MM-DDTHH-MM-SS.db /data/finflow.db && rm -f /data/finflow.db-wal /data/finflow.db-shm'`
+  e depois `docker compose up -d`. Para trazer o banco do desenvolvimento, grave antes uma cópia dele com `npm run backup`.
+* **Atualizar:** `git pull` e `docker compose up -d --build`.
+* **Acesso:** a porta só abre para este computador (`127.0.0.1:3001`). Para usar pelo celular sem expor os dados na internet, ver FIN-109 (Tailscale).
+
+---
+
+## 🚀 Rodando sem Docker (nativo)
+
+Sem Docker disponível (ex: máquina sem permissão de administrador para instalar o Docker/WSL), o mesmo resultado — build e API na mesma origem, migrações automáticas — roda direto com Node, sem contêiner:
+
+1. Crie o `.env` a partir do `.env.example`. Deixe `VITE_API_URL=""` e defina `FRONTEND_DIR=Frontend/dist`.
+2. `npm ci && npm run build` — gera `Frontend/dist/` com o frontend já apontando para a própria origem.
+3. `npm start` — aplica as migrações pendentes (`prisma migrate deploy`) e sobe a API em `http://localhost:3001`, servindo o frontend.
+
+O banco (`DATABASE_URL` do `.env`, um arquivo SQLite) e os backups ficam onde estiverem configurados — não há volume nem imagem, é o mesmo processo Node que já roda em desenvolvimento. Para manter rodando entre reinícios do computador, use o Agendador de Tarefas do Windows ou um gerenciador de processos como o [PM2](https://pm2.keymetrics.io/).
 
 ---
 
@@ -156,6 +186,18 @@ O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos se
 
 ---
 
-## 📁 `sandbox-pluggy/`
+## 💾 Backup do banco
 
-A pasta `sandbox-pluggy/` **não é parte do aplicativo principal** — é um protótipo isolado, sem autenticação real, usado para testar a integração com a Pluggy separadamente. Não confundir com o backend (`server.js` na raiz). Detalhes em [`sandbox-pluggy/README.md`](sandbox-pluggy/README.md).
+Todos os dados ficam num único arquivo SQLite (`dev.db`), que não vai para o git. Para ter cópias:
+* **Automático:** defina `BACKUP_DIR` no `.env` — de preferência outro disco ou uma pasta sincronizada com a nuvem. O servidor grava uma cópia ao subir e outra a cada 24 horas, e mantém as `BACKUP_KEEP` mais recentes (padrão 30).
+* **Manual:** `npm run backup`.
+
+A cópia é feita com `VACUUM INTO`, segura com o servidor rodando, e conferida com `integrity_check` antes de as antigas serem apagadas.
+
+**Restaurar:** pare o servidor, guarde o `dev.db` atual com outro nome, copie o backup escolhido (`finflow-AAAA-MM-DDTHH-MM-SS.db`) para `dev.db`, apague `dev.db-wal` e `dev.db-shm` se existirem e suba o servidor de novo.
+
+---
+
+## 📁 `Backend/sandbox-pluggy/`
+
+A pasta `Backend/sandbox-pluggy/` **não é parte do aplicativo principal** — é um protótipo isolado, sem autenticação real, usado para testar a integração com a Pluggy separadamente. Não confundir com o backend (`Backend/server.js`). Detalhes em [`Backend/sandbox-pluggy/README.md`](Backend/sandbox-pluggy/README.md).

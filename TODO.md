@@ -200,28 +200,29 @@
 > Sugestoes discutidas em 12/09/2026, na ordem de prioridade combinada. Antes, a FIN-101 (acao do dono do repositorio, Fase 1). Nada multiusuario: o FinFlow e um dashboard pessoal (FIN-077).
 
 ### Protecao dos dados
-- [ ] Backup automatico diario do banco SQLite, fora do repositorio e com rotacao (FIN-102, depende de FIN-097)
+- [x] Backup automatico diario do banco SQLite, fora do repositorio e com rotacao (FIN-102, depende de FIN-097)
 
 ### Numeros certos
-- [ ] Tratar transferencia entre contas proprias e pagamento de fatura fora dos totais de receita e despesa (FIN-103)
-- [ ] Detectar transferencias e pagamento de fatura automaticamente, para confirmacao (FIN-104, depende de FIN-103)
-- [ ] Regras de categorizacao do usuario, aplicadas na importacao e no sync (FIN-105)
-- [ ] Criar regra ao corrigir a categoria de uma transacao + tela de regras (FIN-106, depende de FIN-105)
+- [x] Tratar transferencia entre contas proprias e pagamento de fatura fora dos totais de receita e despesa (FIN-103)
+- [x] Detectar pagamento de fatura automaticamente, pelo texto, na sincronizacao e na importacao (FIN-104, depende de FIN-103 — pares ficaram de fora: nenhum nos dados reais)
+- [x] Regras fixas do importador casam pedacos de palavra — "pagamento" vira Lazer por causa de "game" (FIN-119, achado ao implementar FIN-104)
+- [x] Regras de categorizacao do usuario, aplicadas na importacao e no sync (FIN-105)
+- [x] Criar regra ao corrigir a categoria de uma transacao + tela de regras (FIN-106, depende de FIN-105)
 
 ### Uso no dia a dia
-- [ ] Sincronizacao automatica com a Pluggy ao abrir o app (FIN-107)
+- [x] Sincronizacao automatica com a Pluggy ao abrir o app (FIN-107)
 - [ ] Empacotar o app em Docker — frontend + API + banco em volume (FIN-108)
 - [ ] Acesso privado pelo celular via Tailscale com HTTPS — PWA instalado (FIN-109, depende de FIN-108)
 - [ ] Token de sessao em cookie httpOnly em vez do localStorage (FIN-110, depende de FIN-108)
-- [ ] Detectar assinaturas nas transacoes e sugerir recorrencias (FIN-111)
-- [ ] Historico mensal do patrimonio liquido, com grafico de evolucao (FIN-112, depende de FIN-064, FIN-073)
-- [ ] Metas ligadas a uma conta ou investimento, com progresso automatico (FIN-113, depende de FIN-050, FIN-096)
+- [x] Detectar assinaturas nas transacoes e sugerir recorrencias (FIN-111)
+- [x] Historico mensal do patrimonio liquido, com grafico de evolucao (FIN-112, depende de FIN-064, FIN-073)
+- [x] Metas ligadas a uma conta ou investimento, com progresso automatico (FIN-113, depende de FIN-050, FIN-096)
 
 ### Engenharia
-- [ ] Acelerar a suite de testes — schema criado uma vez e copiado por arquivo (FIN-114)
-- [ ] Dividir `server.js` em rotas por dominio, sem mudar comportamento (FIN-115)
-- [ ] Dividir `App.tsx` em paginas e componentes, sem mudar comportamento (FIN-116)
-- [ ] Carregar abas pesadas sob demanda — pacote inicial abaixo de 500 kB (FIN-117, depende de FIN-116)
+- [x] Acelerar a suite de testes — schema criado uma vez e copiado por arquivo (FIN-114)
+- [x] Dividir `server.js` em rotas por dominio, sem mudar comportamento (FIN-115)
+- [x] Dividir `App.tsx` em paginas e componentes, sem mudar comportamento (FIN-116)
+- [x] Carregar abas pesadas sob demanda — pacote inicial abaixo de 500 kB (FIN-117, depende de FIN-116)
 - [ ] Dependabot e `npm audit` semanal no CI (FIN-118, depende de FIN-036, FIN-100)
 
 ---

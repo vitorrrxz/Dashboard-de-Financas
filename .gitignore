@@ -36,3 +36,6 @@ dist-ssr
 dev.db*
 *.db.bak*
 *.db.backup*
+
+# Arquivos de trabalho do design-taste (capturas com dados reais)
+.taste-skill/

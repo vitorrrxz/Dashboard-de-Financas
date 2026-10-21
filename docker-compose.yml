@@ -1,0 +1,22 @@
+# FIN-108 — o FinFlow em contêiner: `docker compose up -d --build` e o app abre em http://localhost:3001.
+services:
+  finflow:
+    build: .
+    init: true # repassa ao node o sinal de parada
+    restart: unless-stopped
+    ports:
+      # Só este computador. Para usar pelo celular sem expor os dados na rede, ver FIN-109 (Tailscale).
+      - "127.0.0.1:3001:3001"
+    # Segredos e ajustes do .env (JWT_SECRET, Pluggy, 2FA...), lidos a cada subida, fora da imagem.
+    env_file: .env
+    environment:
+      # Valem mais que os do .env, que apontam para caminhos do desenvolvimento.
+      DATABASE_URL: file:/data/finflow.db
+      BACKUP_DIR: /backups
+    volumes:
+      - finflow-data:/data
+      # Backups (FIN-102) numa pasta deste computador: a BACKUP_DIR do .env ou, se vazia, ./backups.
+      - ${BACKUP_DIR:-./backups}:/backups
+
+volumes:
+  finflow-data:

@@ -2308,7 +2308,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 > Sugestões discutidas em 12/09/2026, depois da verificação da Fase 9, na ordem de prioridade combinada: proteção dos dados, números certos, uso no dia a dia e engenharia. Nada aqui é multiusuário — o FinFlow é um dashboard pessoal (FIN-077). Antes de começar, a FIN-101 (ação do dono do repositório, seção 1).
 
-- [ ] **P1 — FIN-102 — Backup automático diário do banco SQLite**
+- [x] **P1 — FIN-102 — Backup automático diário do banco SQLite** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Ter cópias recentes e restauráveis do banco sem depender de lembrar de exportar.
@@ -2335,12 +2335,16 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Teste com banco temporário: o backup gera um SQLite íntegro, com as mesmas contagens por tabela; a rotação mantém só os N mais recentes; destino inexistente ou sem permissão não derruba o servidor.
 
   **Critérios de aceite**
-  - [ ] Backup diário automático fora do repositório, com rotação.
-  - [ ] Restauração documentada e testada.
+  - [x] Backup diário automático fora do repositório, com rotação.
+  - [x] Restauração documentada e testada.
+
+  **Nota de implementação (14/09/2026):** `scripts/backup-db.mjs` copia o banco com `VACUUM INTO` numa conexão somente leitura — consistente com o servidor rodando, sem copiar o arquivo aberto — para `BACKUP_DIR`, com o nome `finflow-AAAA-MM-DDTHH-MM-SS.db` (ordem alfabética = cronológica). A cópia é conferida (`integrity_check` e as mesmas tabelas) antes da rotação, que mantém as `BACKUP_KEEP` mais recentes (padrão 30) e só apaga arquivos com esse nome; cópia reprovada é descartada, e uma do mesmo segundo nunca é sobrescrita. O servidor faz uma cópia ao subir e outra a cada 24 h quando `BACKUP_DIR` está definido — sem a variável, fica desligado, e nunca roda nos testes —, e uma falha só vai para o log. `npm run backup` roda à mão, lendo o `.env` pelo `--env-file-if-exists` do próprio Node, sem dependência nova, e sai com código 1 na falha. A restauração está no README. Ficaram de fora, por decisão: aviso de pasta dentro do projeto e conferência da contagem de linhas, que daria alarme falso quando o servidor grava durante a cópia.
+
+  **Validação executada:** `test/backup-db.test.js` — 5 testes: cópia íntegra que, restaurada, tem os mesmos dados; rotação mantém as N mais recentes sem tocar em outros arquivos da pasta; `BACKUP_KEEP` inválido nunca apaga a cópia recém-gravada; não sobrescreve cópia do mesmo segundo; configuração inválida recusada, e no servidor a falha só vai para o log. `npm run backup` de ponta a ponta no banco real, numa pasta temporária apagada em seguida: 240 kB e código 0; sem `BACKUP_DIR`, código 1; `dev.db` com o mesmo sha256 antes e depois. `npm run lint`, `npm run typecheck`, `npx vitest run` (45 arquivos, 625 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P1 — FIN-103 — Transferência entre contas próprias fora dos totais de receita e despesa**
+- [x] **P1 — FIN-103 — Transferência entre contas próprias fora dos totais de receita e despesa** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Não contar como receita nem como despesa o dinheiro que só muda de uma conta sua para outra.
@@ -2368,12 +2372,17 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes das regras financeiras: uma transferência não altera receita, despesa nem orçamento; pagar a fatura não duplica a despesa das compras.
 
   **Critérios de aceite**
-  - [ ] Transferências e pagamento de fatura fora dos totais de receita e despesa.
-  - [ ] Totais conferidos contra os dados reais antes e depois.
+  - [x] Transferências e pagamento de fatura fora dos totais de receita e despesa.
+  - [x] Totais conferidos contra os dados reais antes e depois.
+
+  **Nota de implementação (14/09/2026):** a medição nos dados reais (148 transações, todas da Pluggy; 2 contas correntes e 2 cartões) mudou o desenho previsto: nenhuma transferência tinha os dois lados no app — a outra ponta fica quase sempre num banco não conectado —, então um `transferGroupId` ligando os lados não teria o que ligar. A marcação ficou na **categoria**, sem migração: as novas "Transferência entre contas" e "Pagamento de fatura" (no seletor do modal de edição) e as três com que a Pluggy já identifica esses lançamentos — "Credit card payment", "Same person transfer" e "Transfer - Internal" — ficam fora de receitas e despesas no dashboard (totais, despesas do mês, gastos por categoria e gráficos de evolução), nos totais e nos filtros Receitas/Despesas da aba Transações (aparecem em "Todas"), nos comparativos dos Relatórios e nos alertas de gasto incomum (FIN-069); também saem do seletor de categoria do Orçamento. PIX para outras pessoas continua contando: é dinheiro que sai de fato. A lista existe no frontend (`categories.ts`) e no `server.js`, e um teste confere que as duas batem. Backup e restauração não mudam — a categoria já faz parte deles.
+  Nos dados reais: receitas de R$ 6.594,90 para R$ 5.076,72 (−R$ 1.518,18) e despesas de R$ 11.575,58 para R$ 9.891,70 (−R$ 1.683,88). Fica para a FIN-104 o que a Pluggy não classifica: um pagamento de fatura de R$ 735,20, em 11/09, veio com a categoria genérica "Transfers" — até lá, basta trocar a categoria dele no modal.
+
+  **Validação executada:** testes novos — `useFinancialStats.test.ts` (transferências fora de receitas, despesas, despesas do mês, categorias e evolução, com receita e despesa comuns ainda contando), `transactions.test.ts` (3: totais, filtros Receitas/Despesas e seletor do Orçamento), `reports.test.ts` (comparativos mensal e anual) e `server.notifications.test.js` (sem alerta para as categorias de transferência, com o alerta comum ainda saindo, e as listas do frontend e do servidor iguais). O teste de tema já cobre o contraste das duas cores novas. Medição antes e depois no banco real, só leitura. `npm run lint`, `npm run typecheck`, `npx vitest run` (45 arquivos, 631 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P2 — FIN-104 — Detectar transferências e pagamento de fatura automaticamente**
+- [x] **P2 — FIN-104 — Detectar transferências e pagamento de fatura automaticamente** ✅ Concluída (14/09/2026), com escopo reduzido — ver a decisão
 
   **Objetivo**
   Não depender de marcar cada transferência à mão.
@@ -2398,11 +2407,48 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes da detecção: par exato casa; valores iguais em datas distantes não; três candidatos para um lado casam só um; descarte lembrado.
 
   **Critérios de aceite**
-  - [ ] Pares sugeridos para confirmação, sem falso positivo nos casos testados.
+  - [x] Pagamento de fatura reconhecido pelo texto na sincronização e na importação, sem falso positivo nos casos testados (critério ajustado pela decisão abaixo).
+
+  **Decisão (14/09/2026):** a medição da FIN-103 não achou nenhuma transferência com os dois lados no app, então a busca por pares, a confirmação e o "descarte lembrado" ficaram de fora — seriam código sem nada para mostrar. Vale reabrir se outro banco for conectado e os dois lados passarem a aparecer.
+
+  **Nota de implementação (14/09/2026):** o que os dados mostraram foi pagamento de fatura com categoria genérica ("Transfers"). Na sincronização Pluggy, `pluggyTransactionCategory` grava como "Pagamento de fatura" o débito cujo texto é de pagamento de fatura, reaproveitando `isCreditCardBillPayment` (FIN-092). Vale só na criação: numa sincronização seguinte, a categoria escolhida pelo usuário fica — o refresh normal já não mexia nela, e o caminho raro de corrida (o `upsert` quando duas sincronizações colidem) deixou de regravá-la. No importador manual, a regra de fatura passou a ser a primeira: antes, "Pagamento de fatura" virava Lazer, porque "pagamento" contém "game". A categoria é aplicada direto, sem confirmação: o texto é explícito, e trocar a categoria no modal desfaz. O lançamento de R$ 735,20 de 11/09 já está no banco como "Transfers" e não muda sozinho — a detecção vale para os novos; esse, basta trocar no modal.
+  Achado no caminho: as regras fixas do importador casam pedaços de palavra — registrado como FIN-119.
+
+  **Validação executada:** `server.pluggy-credit.test.js` — 2 testes novos: pagamento de fatura na conta corrente vira "Pagamento de fatura" mesmo vindo como "Transfers", e a categoria está na lista de FIN-103; entrada "pagamento recebido", compra comum e categoria ausente mantêm o comportamento. `parsers.test.ts` — 1 teste novo: fatura reconhecida antes das outras regras, inclusive com "claro" no texto, e salário continua Receita. `npm run lint`, `npm run typecheck`, `npx vitest run` (45 arquivos, 634 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P2 — FIN-105 — Regras de categorização do usuário**
+- [x] **P3 — FIN-119 — Regras fixas do importador casam pedaços de palavra** (achado ao implementar FIN-104, 14/09/2026) ✅ Concluída (14/09/2026)
+
+  **Objetivo**
+  A categoria automática da importação manual casar palavras inteiras, e não pedaços delas.
+
+  **Problema**
+  `autoCategory` (`parsers.ts`) procura cada palavra-chave com `includes`, sem limite de palavra: "pagamento" contém "game" e vira Lazer, e "oi", "tim", "net", "gas" e "luz" aparecem dentro de outras palavras e puxam para Moradia. Hoje não pesa nos dados reais — todas as transações vêm da Pluggy —, mas todo extrato CSV/OFX importado herda o erro.
+
+  **Arquivos envolvidos**
+  - `src/utils/parsers.ts`, `src/utils/parsers.test.ts`
+
+  **Alterações necessárias**
+  - Casar por palavra inteira (com limite de palavra e sem acento), mantendo as expressões de mais de uma palavra.
+  - Pode ir junto com FIN-105, que mexe na mesma função.
+
+  **Dependências**
+  Nenhuma.
+
+  **Validação**
+  Testes de `autoCategory` com as colisões conhecidas.
+
+  **Critérios de aceite**
+  - [x] "PAGAMENTO BOLETO" não vira Lazer, e "OI FIBRA" continua em Moradia.
+
+  **Nota de implementação (14/09/2026):** `autoCategory` passou a comparar palavras inteiras: descrição e palavra-chave vão para minúsculas, sem acento e com a pontuação virando espaço, e a palavra-chave precisa aparecer inteira, aceitando o plural com "s" ("drogarias"), que antes casava por acaso. "PAGAMENTO BOLETO" deixou de ir para Lazer, "PIX JOSE NETO" e "LUZIA COSMETICOS" deixaram de ir para Moradia, e palavras acentuadas no extrato ("FARMÁCIA", "PEDÁGIO") passaram a casar. A palavra-chave "pagamento" de Receita virou "pagamento recebido": nunca tinha valido (o "game" de Lazer vinha antes), e ligá-la agora classificaria boleto e conta pagos como receita. Limite conhecido: nome colado ("UBERTRIP") não casa mais — a regra do usuário (FIN-105), que casa por trecho, cobre esses casos.
+
+  **Validação executada:** `parsers.test.ts` — 2 testes novos: pedaço de palavra não casa ("PAGAMENTO BOLETO", "PIX JOSE NETO" e "LUZIA COSMETICOS" ficam em Outros); palavra inteira, plural, acento e pontuação casam ("OI FIBRA", "DROGARIAS PACHECO", "FARMÁCIA POPULAR", "PAG*PEDÁGIO SEM PARAR", "C&A MODAS", "PAGAMENTO RECEBIDO"). Os testes anteriores de `autoCategory`, `parseOFX` e `parseCSV` passam sem mudança. `npm run lint`, `npm run typecheck`, `npx vitest run` (47 arquivos, 650 testes) e `npm run build` limpos.
+
+---
+
+- [x] **P2 — FIN-105 — Regras de categorização do usuário** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Cada transação chegar já com a categoria que você usa.
@@ -2427,11 +2473,15 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes das rotas (CRUD, validação, isolamento) e da aplicação: importação e sync usam a regra; sem regra, vale a lista fixa.
 
   **Critérios de aceite**
-  - [ ] Regras do usuário aplicadas na importação e no sync.
+  - [x] Regras do usuário aplicadas na importação e no sync.
+
+  **Nota de implementação (14/09/2026):** tabela `CategoryRule` (texto a procurar, categoria e `userId`, única por usuário e texto). A migração, só aditiva, foi aplicada ao `dev.db` depois de um backup (`backups/finflow-2026-09-14T16-36-49.db`) e da conferência, por hash de cada tabela, de que nada do que já existia mudou. Rotas `GET`, `POST` e `DELETE /api/category-rules`: o `POST` cria e também edita — mandar o mesmo texto troca a categoria —, com validação (texto de 2 a 100 caracteres, porque uma letra só casaria com quase toda descrição) e isolamento por usuário. As regras valem no servidor, na gravação: na importação em lote, sobre o palpite do importador (`autoCategory`), e na criação das transações da Pluggy, antes da detecção de fatura (FIN-104) e da categoria da própria Pluggy. Casam sem acento e sem diferenciar maiúsculas; em conflito, vence a de texto mais longo. Não valem na transação criada à mão, nem mudam transações já gravadas — recategorizar as existentes é da FIN-106. As regras entram no backup em JSON, e arquivos de antes delas, sem a seção, continuam restaurando. O resumo do backup na tela ainda não conta as regras: isso fica para quando a FIN-106 trouxer a tela delas.
+
+  **Validação executada:** `server.category-rules.test.js` — 5 testes: criar, editar pelo mesmo texto, listar e excluir; validação; isolamento; importação em lote com a regra casando sem acento e sem diferenciar maiúsculas, e a mais longa vencendo; transação criada à mão fica com a categoria escolhida. `server.pluggy-credit.test.js` — 1 teste novo: a regra vem antes da categoria da Pluggy e da detecção de fatura. `server.backup.test.js` — o backup leva e restaura as regras (ida e volta idêntica), e 1 teste novo: arquivo sem a seção continua restaurando. Migração: `migrate diff` vazio antes da mudança; depois do `migrate deploy`, as tabelas existentes com o mesmo hash e `migrate status` em dia. `npm run lint`, `npm run typecheck`, `npx vitest run` (46 arquivos, 641 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P2 — FIN-106 — Criar regra ao corrigir a categoria de uma transação**
+- [x] **P2 — FIN-106 — Criar regra ao corrigir a categoria de uma transação** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Ensinar o app no momento da correção, sem ir a outra tela.
@@ -2455,11 +2505,16 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes de componente: a oferta aparece só quando a categoria muda e mostra quantas transações casam; a recategorização em lote não toca transações de outro usuário.
 
   **Critérios de aceite**
-  - [ ] Regra criada a partir da correção e gerenciável em Configurações.
+  - [x] Regra criada a partir da correção e gerenciável em Configurações.
+
+  **Nota de implementação (14/09/2026):** no modal de edição, quando a categoria muda, aparece "Criar regra: as próximas transações com o texto abaixo entram como …", com o texto sugerido a partir da descrição sem o código do fim ("UBER *TRIP 12345" vira "UBER *TRIP") e editável, e a opção "Aplicar também às transações já gravadas". Ao salvar, a transação é gravada e a regra criada — ou atualizada, se o texto já existia. Com a opção marcada, o servidor recategoriza só as transações em que esta regra vence — uma regra mais longa de outra categoria, como "uber eats", continua valendo nas dela — e só as do próprio usuário, respondendo quantas mudaram; o app então recarrega as transações (`reloadTransactions`, agora o mesmo caminho da importação). Em Configurações, a seção "Regras de categoria" lista as regras, troca a categoria de cada uma, exclui e cria novas, com os rótulos associados aos campos e o erro do servidor em `role="alert"`. O resumo do backup na tela passou a contar as regras, e um backup antigo, sem a seção, conta zero.
+  Ficou de fora a prévia de quantas transações casam antes de salvar: o modal só recebe as linhas visíveis da tabela, e o resultado aparece na própria lista, recarregada.
+
+  **Validação executada:** `server.category-rules.test.js` — 2 testes novos: aplicar às já gravadas recategoriza só onde a regra vence (a mais longa, "uber eats", mantém a dela), não toca transações de outro usuário e informa quantas mudaram; sem a opção, nada já gravado muda. `CategoryRulesSettings.test.tsx` — 4 testes: listar e trocar a categoria pela mesma rota; criar pelo formulário e limpar o campo; exclusão que falha mostra o erro e mantém a regra; resposta fora do formato vira mensagem de erro. `App.test.tsx` — 1 teste novo: trocar a categoria oferece a regra com o texto sugerido e a aplica ao salvar, e sem trocar não oferece. Testes de backup atualizados com a seção nova. `npm run lint`, `npm run typecheck`, `npx vitest run` (47 arquivos, 648 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P2 — FIN-107 — Sincronização automática com a Pluggy**
+- [x] **P2 — FIN-107 — Sincronização automática com a Pluggy** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Abrir o app e ver os dados do banco já atualizados.
@@ -2484,7 +2539,14 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes: conexão recente não sincroniza; conexão antiga sincroniza uma vez só, mesmo com duas abas abertas; erro de conexão não quebra a carga do dashboard.
 
   **Critérios de aceite**
-  - [ ] Sincronização automática ao abrir o app, com a hora da última sincronização visível.
+  - [x] Sincronização automática ao abrir o app, com a hora da última sincronização visível.
+
+  **Nota de implementação (14/09/2026):** a conexão com o banco não ficava gravada. O `connect-item` criava uma conta de saldo zero com o id do item, que a sincronização nunca atualizava, e o botão "Sincronizar" só existia até recarregar a página: para sincronizar, era preciso conectar o banco de novo. Agora a tabela `PluggyItem` guarda cada conexão do usuário, com o estado do login e a hora da última sincronização, e o `connect-item` a registra no lugar da conta de saldo zero — recusando a conexão cujo `clientUserId` é de outro usuário. O corpo da rota de sync virou `syncPluggyItem`, sem mudar o que faz; passou só a gravar o estado do item no começo e a hora no fim. A rota do botão aceita apenas a conexão registrada para o próprio usuário.
+  `POST /api/pluggy/auto-sync`, chamada quando a barra lateral monta — depois da carga inicial, então não disputa com ela —, sincroniza as conexões paradas há mais de 6 h, menos as de login expirado, e devolve a lista; se entrou algo, o App recarrega contas e transações. Uma sincronização por vez por usuário: uma fila em memória faz a segunda aba esperar a primeira e reler a conexão, já sincronizada. A falha de uma conexão vai para o log e não impede as outras nem a resposta. A conexão feita antes da tabela é achada pelas contas que já sincronizou (`fetchAccount` devolve o `itemId`), uma vez, enquanto o usuário não tem nenhuma conexão registrada: a que já existe no banco real passa a sincronizar sem conectar de novo. Pelo mesmo caminho a conexão volta depois de restaurar um backup, que por isso não a inclui.
+  Na barra lateral, cada conexão aparece com "Última sincronização: há 3 h" (`formatRelativeTime`, já existente) ou com o aviso de login expirado, e com um botão para sincronizar só ela; "Conectar Banco" fica sempre disponível, e fechar o widget sem conectar volta a liberar o botão. Migração `20260914210615_add_pluggy_items`, que só cria a tabela, aplicada ao `dev.db` depois de um backup, com as tabelas existentes conferidas por hash antes e depois.
+  Ficou de fora: reconectar a mesma conexão depois do login expirado (`updateItem` no widget) — hoje "Conectar Banco" cria uma conexão nova, e a antiga continua listada com o aviso — e remover uma conexão da lista. A fila vale para um processo só da API (comentário `ponytail:` no código).
+
+  **Validação executada:** `server.pluggy-sync.test.js` — 8 testes, com um cliente da Pluggy de mentira: conectar registra a conexão sem criar conta de saldo zero, e a automática a sincroniza; conexão sincronizada há 1 h não sincroniza, e há 7 h sincroniza; duas abas ao mesmo tempo sincronizam uma vez só (uma chamada à Pluggy, uma transação) — conferido que o teste falha sem a fila; login expirado fica de fora mesmo parado; erro da Pluggy responde 200, com a conexão listada e sem hora nova; pelo botão, a conexão de outro usuário dá 404, e o login expirado dá 409 e fica gravado; a conexão antiga é achada pela conta, sem duplicá-la; conexão com `clientUserId` de outro usuário não é registrada. `PluggyConnectButton.test.tsx` — 5 testes: ao abrir, pede a automática, mostra a hora e o login expirado e recarrega o App se algo entrou; sem nada novo, não recarrega; falha na automática não quebra o painel; o botão da conexão chama a rota dela e mostra "agora", e o 409 mostra o aviso; conectar registra e já sincroniza. `npm run lint`, `npm run typecheck`, `npx vitest run` (49 arquivos, 663 testes) e `npm run build` limpos.
 
 ---
 
@@ -2514,7 +2576,15 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   `docker compose up` sobe o app; login, importação e 2FA funcionam; reiniciar o contêiner mantém os dados.
 
   **Critérios de aceite**
-  - [ ] App completo rodando em contêiner, com banco persistente e migrações automáticas.
+  - [ ] App completo rodando em contêiner, com banco persistente e migrações automáticas — falta a validação abaixo, sem Docker disponível nesta máquina.
+
+  **Nota de implementação (14/09/2026):** imagem em duas etapas — a primeira instala tudo, gera o Prisma Client e roda `npm run build` com `VITE_API_URL=""` (o frontend passa a chamar a própria origem, ver `src/services/api.ts`); a segunda copia só `dist/`, `node_modules` sem dependências de desenvolvimento (`npm prune --omit=dev`), `server.js` e o `prisma/` (schema + migrations, para o `prisma migrate deploy` do `CMD`), roda como usuário `node` e sobe `server.js`. `server.js` ganhou `FRONTEND_DIR`: se definida (o `Dockerfile` aponta para `/app/dist`), serve os arquivos do build como estáticos e devolve o `index.html` para qualquer caminho fora de `/api`, deixando a SPA decidir a tela — sem a variável (desenvolvimento e os testes), a API não serve nada nessas rotas e quem serve o frontend continua sendo o Vite. A CSP do helmet (FIN-010), com o padrão dela, bloquearia a própria página: liberado o script de tema (por hash sha256, calculado a partir do arquivo que `server.js` de fato serve — mudar o script não deixa a CSP para trás) e o widget da Pluggy (script do CDN dela e o iframe de login em `connect.pluggy.ai`), e a `Cross-Origin-Opener-Policy` passou a permitir popup (o widget pode abrir o login do banco numa janela nova). O `docker-compose.yml` publica só em `127.0.0.1:3001`, guarda o banco num volume nomeado e os backups (FIN-102) numa pasta do host (`BACKUP_DIR` do `.env`, ou `./backups`); o `.env` é lido a cada subida via `env_file`, nunca copiado para a imagem (o `.dockerignore` também exclui banco, backups e dados reais do contexto de build). README com o passo a passo (subir, restaurar/levar um banco existente, atualizar).
+  Ficou de fora: publicar a porta além do `localhost` (é a FIN-109, com Tailscale) e um healthcheck no compose.
+
+  **Validação executada:** `server.frontend.test.js` (novo) — a raiz e caminhos de SPA (`/transacoes`, `/qualquer/tela`) devolvem o `index.html`; arquivo do build existente sai do disco, e um inexistente dá 404 (não a página); `/api/...` continua sendo a API, inclusive `/api` sem sufixo e com caixa diferente; a CSP libera o script de tema pelo hash certo e o CDN/iframe da Pluggy, sem o `upgrade-insecure-requests` padrão do helmet (quebraria o acesso em HTTP puro pelo IP da rede, antes da FIN-109); `Cross-Origin-Opener-Policy: same-origin-allow-popups`. `server.test.js` — sem `FRONTEND_DIR` (o caso do desenvolvimento e dos demais testes), a raiz dá 404. `npx prisma migrate deploy` de ponta a ponta contra um SQLite novo aplica as 11 migrations sem erro. `npm run lint`, `npm run typecheck`, `npx vitest run` (50 arquivos, 668 testes) e `npm run build` limpos.
+  **Falta:** Docker não está instalado nesta máquina (nem WSL, sem permissão de administrador para habilitar) — não foi possível rodar `docker compose up` de verdade. Antes de marcar o critério de aceite, rodar num computador com Docker: subir, criar conta e logar, importar um extrato, ativar 2FA, e reiniciar o contêiner (`docker compose restart`) conferindo que os dados continuam lá.
+
+  **Alternativa nativa (17/09/2026):** adicionado `npm start` (`prisma migrate deploy && node server.js`) e uma seção no README ("Rodando sem Docker") para quem não tem Docker/WSL disponível — mesma imagem mental do `CMD` do Dockerfile, sem contêiner. Validado nesta máquina, direto com Node: `npm run build` com `VITE_API_URL=""` gera o frontend same-origin (confirmado sem `localhost:3001` no bundle); `prisma migrate deploy` contra um SQLite novo aplica as 13 migrations; o servidor sobe, serve o `index.html` na raiz e em rota de SPA (`/transacoes`); registro e login funcionam; matando e subindo o processo de novo (mesmo `DATABASE_URL`), o login com o mesmo usuário continua funcionando — a persistência não depende de volume, é só o arquivo SQLite no disco. Isso cobre o comportamento que a FIN-108 quer garantir, mas não substitui a validação do Dockerfile/compose em si, que segue pendente.
 
 ---
 
@@ -2575,7 +2645,7 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
 ---
 
-- [ ] **P3 — FIN-111 — Detectar assinaturas e sugerir recorrências**
+- [x] **P3 — FIN-111 — Detectar assinaturas e sugerir recorrências** ✅ Concluída (14/09/2026)
 
   **Objetivo**
   Mostrar as cobranças que se repetem e que você talvez nem lembre mais.
@@ -2598,11 +2668,17 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes da detecção: mensal com reajuste pequeno é detectada; compras frequentes em datas irregulares não; menos de 3 ocorrências não.
 
   **Critérios de aceite**
-  - [ ] Assinaturas sugeridas, cada uma a um clique de virar recorrência.
+  - [x] Assinaturas sugeridas, cada uma a um clique de virar recorrência.
+
+  **Nota de implementação (14/09/2026):** `detectSubscriptions` (função pura) agrupa despesas — receita, transferência entre contas e pagamento de fatura (FIN-103) ficam de fora — pelo nome normalizado (minúsculas, sem acento, espaços colapsados; mesma dobra de `autoCategory`), e reconhece assinatura no grupo com 3+ ocorrências cujos intervalos caibam todos numa mesma janela (semanal 5–9 dias, mensal 24–35, anual 355–376 — a folga cobre o dia de cobrança escorregar por fim de semana) e cujos valores fiquem a 15% da mediana do grupo (cobre um reajuste normal sem juntar duas despesas diferentes que só coincidem no nome). Ganhou `daysBetween` em `utils/dates.ts` (`Date.UTC` dos dois lados, sem hora local) para medir os intervalos. Ficam de fora o grupo que já vira uma recorrência cadastrada — comparando o nome normalizado, ativa ou pausada — e o que o usuário descartou, guardado só neste navegador (`localStorage`, mesmo padrão de `utils/theme.ts`; o FinFlow é pessoal, sem sincronização entre aparelhos, FIN-077).
+  Na aba Recorrências, acima da lista, "Assinaturas encontradas" com o total mensal (semanal e anual convertidos, para comparar com o mensal) e, por sugestão, nome, frequência, quantas vezes apareceu, categoria, valor, botão "Criar recorrência" (o `onAdd` já existente, com os dados da sugestão) e um X para descartar; a sugestão criada some da lista assim que `recurring` é atualizado pelo pai, sem lógica extra de esconder.
+  Ficou de fora: sugerir a conta a vincular (a detecção não sabe de qual conta veio a despesa) e "desfazer" um descarte pela tela (dá para limpar removendo a chave `finflow_dismissed_subscriptions` do navegador).
+
+  **Validação executada:** `subscriptions.test.ts` (novo) — 26 testes: mensal com reajuste pequeno detectado (e a próxima ocorrência prevista certa); datas irregulares e menos de 3 ocorrências não detectadas; reajuste maior que a tolerância não detectado; semanal e anual reconhecidos; receita, transferência e pagamento de fatura fora; grupo com recorrência (mesmo pausada) e chave descartada ficam de fora; ordenação por quantidade de ocorrências; `normalizeSubscriptionName` e `monthlySubscriptionCost`; descarte persistido e lido do `localStorage`, com conteúdo corrompido e armazenamento indisponível sem lançar; e os casos de borda — 24 dias (aceito) contra 23 (nenhuma frequência bate), e valor a exatos 15% da mediana (estável) contra 15% + 1 centavo (não). `dates.test.ts` — 5 testes novos de `daysBetween`, incluindo o 29/fev. `npm run lint`, `npm run typecheck`, `npx vitest run` (51 arquivos, 691 testes) e `npm run build` limpos.
 
 ---
 
-- [ ] **P3 — FIN-112 — Histórico mensal do patrimônio líquido**
+- [x] **P3 — FIN-112 — Histórico mensal do patrimônio líquido** ✅ Concluída (15/09/2026)
 
   **Objetivo**
   Ver o patrimônio mês a mês, e não só o valor de hoje.
@@ -2627,11 +2703,17 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes: o mês corrente é atualizado e os passados não; um registro por mês por usuário; isolamento entre usuários.
 
   **Critérios de aceite**
-  - [ ] Gráfico da evolução do patrimônio a partir do primeiro mês registrado.
+  - [x] Gráfico da evolução do patrimônio a partir do primeiro mês registrado.
+
+  **Nota de implementação (15/09/2026):** `NetWorthSnapshot` (migração `add_net_worth_snapshot`) guarda, por `(usuário, mês)`, os quatro números do patrimônio líquido em centavos — contas, investimentos, passivos (faturas em aberto + saldo devedor das dívidas) e o total. `POST /api/net-worth/snapshot` grava sempre no mês corrente do relógio do SERVIDOR (nunca um mês que o cliente informe) — é assim, e não com uma checagem extra, que os meses anteriores nunca são reescritos por ela; um `refine` do Zod recusa um `total` que não bata com `liquid + investments − liabilities`. Quem calcula continua sendo o cliente: `computeNetWorth` já existente (FIN-064/FIN-073), convertido para centavos na borda — a rota só valida e faz `upsert`, sem duplicar a lógica de câmbio/patrimônio no servidor. `GET /api/net-worth/history` devolve a lista em ordem crescente de mês.
+  No `App.tsx`, um efeito roda a cada mudança de contas, dívidas, investimentos ou cotação (mesmo padrão do efeito de notificações): calcula o patrimônio, grava o retrato do mês corrente e recarrega o histórico — como o servidor faz `upsert`, rodar de novo não duplica nada, e o retrato corrige sozinho depois que a cotação de câmbio chega (o efeito depende dela). Sem nenhuma conta nem dívida ainda, não grava nada — uma conta recém-criada não ganha um retrato zerado. Em Relatórios, "Evolução do Patrimônio" (só aparece a partir do primeiro retrato): a mesma área com gradiente das outras telas (Fluxo Financeiro, Projeção de Saldo), com uma tabela embaixo detalhando contas/investimentos/passivos/patrimônio de cada mês — mesmo par gráfico+tabela do comparativo de receitas/despesas logo abaixo, na mesma tela.
+  Ficou de fora: apagar um retrato indevido (não há como registrar um valor errado por esta rota — o cliente sempre manda o que `computeNetWorth` calculou) e um retrato retroativo a partir de dados históricos (o histórico só começa a existir a partir de quando o app tem esta versão rodando).
+
+  **Validação executada:** `server.networth.test.js` (novo) — 12 testes: cria o retrato do mês corrente; chamado de novo no mesmo mês atualiza em vez de duplicar; um mês passado, semeado direto no banco, continua intacto depois de um POST no mês corrente (e o histórico devolve os dois, em ordem crescente); rejeita `total` inconsistente, valores negativos onde não cabe e valor fracionário (reais em vez de centavos); isolamento entre usuários (histórico de B começa vazio mesmo com A tendo registros, e o retrato de um não aparece no do outro). `npm run lint`, `npm run typecheck`, `npx vitest run` (52 arquivos, 707 testes) e `npm run build` limpos. Migração aplicada ao `dev.db` depois de um backup, com as tabelas existentes conferidas (`integrity_check` e a lista de tabelas) antes e depois.
 
 ---
 
-- [ ] **P3 — FIN-113 — Metas ligadas a uma conta ou investimento**
+- [x] **P3 — FIN-113 — Metas ligadas a uma conta ou investimento** ✅ Concluída (15/09/2026)
 
   **Objetivo**
   O progresso da meta andar sozinho quando o dinheiro está numa conta ou aplicação.
@@ -2655,11 +2737,19 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Testes: o progresso acompanha o saldo; vínculo com conta de outro usuário recusado; excluir a conta não apaga a meta.
 
   **Critérios de aceite**
-  - [ ] Meta ligada mostra o progresso sem digitação.
+  - [x] Meta ligada mostra o progresso sem digitação.
+
+  **Nota de implementação (15/09/2026):** `Goal` ganhou `accountId`/`investmentId` (nunca os dois — checado na rota, não no schema Zod: um `.refine()` ali quebraria o `.extend()` do backup e o `.partial()` do update, nenhum dos dois existe em cima de um `ZodEffects`). A posse do vínculo é conferida na rota — `nonCreditAccountError`, extraído de `investmentAccountError` (FIN-071) e reaproveitado pelas duas features, e um novo `goalInvestmentError` para o investimento — e ligar a um desliga o outro (um PUT que só manda `accountId` já limpa `investmentId` sozinho). Excluir a conta ou o investimento não apaga a meta: a chave estrangeira é opcional com `ON DELETE SET NULL` (o padrão do Prisma para relação opcional, o mesmo que já vale para `Investment.accountId`), então o vínculo é desfeito sozinho, sem código de rota para isso.
+  Quem calcula o valor acumulado de uma meta ligada continua sendo o cliente (`linkedGoalAmount`, em `utils/goals.ts` — o saldo da conta ou o valor da posição, já convertidos para real): um efeito no `App.tsx`, a cada carga em que contas/investimentos/metas ou a cotação mudam, grava via `PUT /api/goals/:id` só as metas cujo valor calculado mudou (num único `setGoals` no fim, não um por meta — `goals` é dependência do próprio efeito). Sem vínculo, ou com o vínculo apontando para algo que já sumiu, `linkedGoalAmount` devolve `null` e a meta não é tocada — é assim, e não com um "congelamento" especial, que o último valor sincronizado sobra intacto depois de excluir a conta/investimento.
+  Em `GoalsManager`, um seletor "Acompanhar Progresso Por" (manual / conta / investimento) troca "Já Acumulado" por um valor somente leitura (a prévia do vínculo escolhido, antes mesmo de salvar) e mostra, no card, a quem a meta está ligada.
+  No backup (FIN-079/080): os dois vínculos entram no arquivo e são checados (conta/investimento no arquivo, sem cartão de crédito, nunca os dois) antes de restaurar; a restauração precisou de dois ajustes que não existiam para nenhum vínculo anterior — investimentos passaram a ser criados ANTES de metas (uma meta pode depender de um investimento que ainda não existiria no banco) e o id novo de um investimento restaurado passou a vir do mesmo mapa usado para remapear `investmentId` (chamar `newId()` de novo geraria um segundo uuid, diferente do que ficou gravado no vínculo).
+  Ficou de fora: mostrar a meta ligada como somente leitura fora do modal (a lista já mostra "Ligada a X", mas o card não impede excluir a meta) e uma central de "desfazer vínculo" fora da edição.
+
+  **Validação executada:** `server.goals.test.js` — 12 testes novos: cria ligada a conta/investimento; rejeita os dois ao mesmo tempo (sem criar nada), cartão de crédito, conta de outro usuário e investimento inexistente; troca de vínculo desliga o anterior; `accountId` vazio volta ao manual; excluir a conta ou o investimento ligado desfaz o vínculo e MANTÉM o último valor acumulado. `server.backup.test.js` — round-trip com os dois vínculos, remapeados para o id novo ao restaurar na conta de outra pessoa (e intactos ao restaurar na própria); 3 casos novos de arquivo inválido (cartão de crédito, investimento fantasma, vínculo duplo). `goals.test.ts` — 6 testes de `linkedGoalAmount` (conta, investimento, sem vínculo, vínculo apontando para algo excluído, e os dois presentes ao mesmo tempo — não deveria acontecer, mas a conta ganha). `npm run lint`, `npm run typecheck`, `npx vitest run` (52 arquivos, 724 testes) e `npm run build` limpos. Migração aplicada ao `dev.db` depois de um backup, com `integrity_check` antes e depois.
 
 ---
 
-- [ ] **P2 — FIN-114 — Acelerar a suíte de testes**
+- [x] **P2 — FIN-114 — Acelerar a suíte de testes** ✅ Concluída (15/09/2026)
 
   **Objetivo**
   Rodar a suíte completa em bem menos tempo — ela roda a cada tarefa.
@@ -2682,11 +2772,17 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   A mesma contagem de testes antes e depois, todos passando; tempo total registrado; nenhum `test_*.db` sobrando.
 
   **Critérios de aceite**
-  - [ ] Suíte completa mais rápida, sem perder nenhum teste.
+  - [x] Suíte completa mais rápida, sem perder nenhum teste.
+
+  **Nota de implementação (15/09/2026):** `test/global-setup.js` (novo, registrado em `test.globalSetup`) roda `prisma db push` UMA vez, contra um banco-modelo (`test_template.db`) só com o schema, sem nenhuma linha — antes, cada um dos ~20 arquivos de teste de backend rodava o próprio `db push`, subindo o CLI e o schema engine do Prisma de novo a cada vez. `createTestApp` (`test/backend-test-utils.js`) agora copia esse arquivo (com os `-wal`/`-shm`, se sobrou algum) em vez de rodar `db push`, o que é uma cópia de arquivo, não um processo novo. `vitest.config.ts` trocou o ambiente padrão de `jsdom` para `node`: a maioria dos testes (regras de negócio puras e os de backend, que já usavam `node` via `// @vitest-environment node`) não toca em DOM nenhum, e criar um `jsdom` para cada um era quase um terço do tempo da suíte à toa. Os 14 arquivos que de fato renderizam componentes ou usam `window`/`document` (9 componentes, `App.test.tsx`, 2 hooks, `pwa.test.ts` e `utils/theme.test.ts` — achados com um grep por `render(`/`document.`/`window.`, não só pelo nome do arquivo) ganharam `// @vitest-environment jsdom` no topo, o oposto do que valia antes.
+  Ficou de fora, deliberadamente: `isolate: false` (a própria Vitest sugere, e economizaria mais alguns segundos) quebraria a premissa de `backend-test-utils.js` de que cada arquivo de teste recebe sua PRÓPRIA instância de `server.js`/Prisma — com workers reaproveitados entre arquivos, o `import('../server.js')` de um teste poderia devolver o módulo já carregado (e conectado a outro banco) por um teste anterior no mesmo worker.
+  **Antes/depois** (mesma máquina, `npm test`, 52 arquivos e 724 testes nos dois): de 228s (medido nesta sessão, antes da mudança) para 43–117s depois (variação entre execuções, provavelmente cache de disco do SO) — pelo menos ~2x mais rápido, chegando a ~5x na melhor execução. Nenhum `test_*.db` sobra depois (conferido com `ls` após duas execuções seguidas).
+
+  **Validação executada:** duas execuções completas de `npx vitest run` — 52 arquivos, 724 testes, todos passando nas duas (mesma contagem de antes). `npm run lint`, `npm run typecheck` e `npm run build` limpos.
 
 ---
 
-- [ ] **P3 — FIN-115 — Dividir `server.js` em rotas por domínio**
+- [x] **P3 — FIN-115 — Dividir `server.js` em rotas por domínio**
 
   **Objetivo**
   Mudanças menores e mais fáceis de revisar no backend.
@@ -2709,11 +2805,49 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Suíte completa, lint e build limpos a cada passo, sem alterar nenhum teste.
 
   **Critérios de aceite**
-  - [ ] `server.js` reduzido à montagem do app, sem mudança de comportamento.
+  - [x] `server.js` reduzido à montagem do app, sem mudança de comportamento.
+
+  **Nota de implementação**
+  `server.js` caiu de ~2.840 para 150 linhas: só a criação do `app`, os middlewares globais
+  (helmet/CORS/parser JSON com o desvio de `isBackupImportPath` para a restauração de backup), a
+  montagem de um router por domínio, o assentamento do build do frontend (FIN-108), o tratador de
+  erro final e o bloco de `listen`. Cada domínio (autenticação e 2FA, contas, transações, dívidas,
+  orçamento, metas, investimentos, câmbio, patrimônio líquido, regras de categoria, recorrências,
+  notificações, backup, Pluggy) foi para `server/routes/<domínio>.js`, um `express.Router()`
+  exportado e montado em `server.js` com `app.use('/api/<prefixo>', router)` — mesmos caminhos e
+  mesma ordem de registro de antes (ex.: `/bulk` antes de `/:id` em transações, `/process` antes de
+  `/:id` em recorrências), então nenhuma rota mudou de comportamento por causa da ordem de
+  correspondência do Express.
+
+  Os utilitários usados por mais de um domínio foram para `server/lib/*.js`: `prisma.js` (cliente
+  Prisma), `auth.js` (JWT + `authenticateToken` + `authLimiter`), `http.js`
+  (`sendInternalError`/`validateBody`), `dates.js` e `money.js` (aritmética de data ISO e
+  centavos/moeda, espelhando `src/utils/`), `categorization.js` (`foldText`/`ruleCategory`, usadas
+  por transações, regras de categoria e Pluggy), `accountAccess.js` (posse/moeda de conta,
+  compartilhada por transações, dívidas, recorrências, metas e investimentos),
+  `pluggyHelpers.js`, `exchangeRates.js`, `notificationsCore.js` e `schemas.js` (todos os schemas
+  Zod). Um efeito colateral sutil teve que ser resolvido: `server.js` chamava `dotenv.config()`
+  antes de ler `process.env` para montar o cliente Prisma — mas em módulos ES os `import`s de UM
+  arquivo são avaliados antes do corpo desse arquivo rodar, então um `lib/prisma.js` importado por
+  `server.js` executaria antes do `dotenv.config()` de `server.js`. Resolvido com `server/lib/env.js`
+  (só o `dotenv.config()`, sem exports) importado no topo de todo módulo que lê `process.env` no
+  carregamento (`prisma.js`, `auth.js`, `pluggyHelpers.js`, `exchangeRates.js`,
+  `notificationsCore.js`) — como cada um importa `env.js` como sua PRÓPRIA primeira dependência, a
+  ordem de avaliação garante que o `.env` já foi lido, não importa em que ordem `server.js` os
+  importe.
+
+  `server.js` continua exportando exatamente os mesmos nomes de antes (`app`, `prisma`,
+  `pluggyReauthMessage`, `encryptTwoFactorSecret` etc.) — os testes que importam funções puras
+  direto de `server.js` (`server.pluggy-credit.test.js`, `server.two-factor.test.js`,
+  `server.currency.test.js`, `server.notifications.test.js` etc.) não precisaram mudar uma linha.
+
+  **Validação executada:** suíte completa (`npx vitest run`) — 52 arquivos, 724 testes, todos
+  passando, mesma contagem de antes da divisão. `npm run lint`, `npx tsc -b --noEmit` e `npm run
+  build` limpos (o aviso de chunk > 500 kB é preexistente, ver FIN-117). Nenhum `test_*.db` sobrando.
 
 ---
 
-- [ ] **P3 — FIN-116 — Dividir `App.tsx` em páginas e componentes**
+- [x] **P3 — FIN-116 — Dividir `App.tsx` em páginas e componentes**
 
   **Objetivo**
   Um componente por tela, fácil de testar e de carregar sob demanda.
@@ -2736,11 +2870,39 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Suíte, lint, typecheck e build limpos; app conferido no navegador.
 
   **Critérios de aceite**
-  - [ ] `App.tsx` reduzido à orquestração, sem mudança de comportamento.
+  - [x] `App.tsx` reduzido à orquestração, sem mudança de comportamento.
+
+  **Nota de implementação**
+  `App.tsx` caiu de 1.898 para 1.278 linhas — continua com a sessão (login/token), a carga e
+  mutação de dados (efeitos, handlers de CRUD, mapeadores de/para a API) e a navegação (barra
+  lateral, cabeçalho, troca de aba), exatamente como o backlog pedia. O conteúdo de cada aba virou
+  um componente de página em `src/pages/` (`DashboardPage`, `TransactionsPage`, `AccountsPage`,
+  `DebtsPage`, `BudgetsPage`, `GoalsPage`, `InvestmentsPage`, `RecurringPage`, `ReportsPage`,
+  `SettingsPage`), recebendo como props os dados já calculados e os handlers que já existiam — o
+  mesmo padrão que `AccountsManager`/`DebtManager`/etc. já usavam, só que agora para a aba inteira,
+  não só o formulário. `TxTable` foi para `src/components/TxTable.tsx` e `NavItem` para
+  `src/components/NavItem.tsx`, como o card já previa.
+
+  Um detalhe pego pelo ESLint (`react-refresh/only-export-components`): um arquivo de componente só
+  pode exportar componentes, então `PAYMENT_TYPE_META` (rótulo/cor de cada forma de pagamento, usado
+  tanto pelo badge do `TxTable` quanto pelo relatório CSV/PDF em `App.tsx`) e o tipo
+  `CategoryRuleDraft` foram para um módulo novo, `src/utils/paymentTypes.ts` — mesmo padrão que
+  `CATEGORY_COLORS`/`OWN_TRANSFER_CATEGORIES` já usam em `src/utils/categories.ts`.
+
+  `App.test.tsx` só teve o import do `TxTable` atualizado (`./App` → `./components/TxTable`); os
+  testes em si não mudaram uma linha, porque só exercitam o `TxTable` diretamente, não o `App`
+  inteiro.
+
+  **Validação executada:** suíte completa — 52 arquivos, 724 testes, todos passando (mesma
+  contagem de antes). `npm run lint`, `npx tsc -b --noEmit` e `npm run build` limpos (o aviso de
+  chunk > 500 kB é preexistente, ver FIN-117). `vite preview` do build servindo a página sem erro;
+  não foi possível clicar em cada aba no navegador nesta sessão (sem ferramenta de automação de
+  navegador disponível) — a garantia de comportamento idêntico vem de a mudança ter sido só mover
+  JSX/handlers para as páginas novas, sem tocar em lógica, mais o typecheck e os 724 testes verdes.
 
 ---
 
-- [ ] **P3 — FIN-117 — Carregar abas pesadas sob demanda**
+- [x] **P3 — FIN-117 — Carregar abas pesadas sob demanda**
 
   **Objetivo**
   Abrir o app mais rápido, principalmente no celular.
@@ -2762,7 +2924,44 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
   Build sem o aviso de 500 kB; tamanho do pacote inicial medido antes e depois; navegação por todas as abas no navegador.
 
   **Critérios de aceite**
-  - [ ] Pacote inicial abaixo de 500 kB.
+  - [x] Pacote inicial abaixo de 500 kB.
+
+  **Nota de implementação**
+  `React.lazy`/`Suspense` nas três abas indicadas (`ReportsPage`, `InvestmentsPage`,
+  `SettingsPage`, cada uma com `.then(m => ({ default: m.XPage }))` porque exportam com nome, não
+  `default`) e no `PluggyConnectButton`, em `App.tsx`. Dois estados de carregamento acessíveis
+  (`role="status"` com ícone `Loader2` girando e texto "Carregando..."): `PageLoadingFallback`
+  (abas, ocupa a área da página) e `PluggyButtonLoadingFallback` (tamanho de botão, para o slot do
+  widget na barra lateral).
+
+  Isso sozinho tirou os quatro pedaços do carregamento inicial (~53 kB brutos / ~16 kB
+  comprimidos), mas não bastou para o aviso de 500 kB: o Dashboard (carregado de cara, fora do
+  escopo do card) usa Recharts diretamente, e a biblioteca inteira continuava dentro do pedaço
+  principal. Resolvido em `vite.config.ts` com `build.rollupOptions.output.manualChunks`, isolando
+  Recharts (e o `d3-*`/`victory-vendor` de que depende) num pedaço `charts` à parte — o Vite já
+  marca esse pedaço com `<link rel="modulepreload">` no HTML, então ele baixa em paralelo com o
+  principal (nenhum atraso a mais para quem abre o Dashboard), só não conta mais para o tamanho do
+  pedaço principal isolado.
+
+  **Antes/depois** (build de produção, `npm run build`): pedaço principal de 786,14 kB (224,01 kB
+  comprimido) para 354,71 kB (101,63 kB comprimido) + `charts` 380,53 kB (110,59 kB comprimido,
+  pré-carregado em paralelo) — nenhum pedaço passa mais de 500 kB, e o aviso do build sumiu. As
+  quatro abas/widget adiados (Relatórios 9,47 kB, Investimentos 14,50 kB, Configurações 23,52 kB,
+  widget da Pluggy 5,39 kB) só são baixados quando o usuário realmente abre cada um.
+
+  Conferido no código (sem precisar mudar nada): o service worker (`public/sw.js`, FIN-082) já
+  guarda QUALQUER caminho sob `/assets/` em cache-primeiro (`url.pathname.startsWith('/assets/')`,
+  sem lista fixa de nomes) — os pedaços novos, com hash, entram nesse cache na primeira vez que são
+  buscados (a instalação já pré-carrega os pedaços citados no HTML; os sob demanda entram quando a
+  aba é aberta pela primeira vez online), exatamente o que o card pedia.
+
+  **Validação executada:** suíte completa — 52 arquivos, 724 testes, todos passando (mesma
+  contagem de antes). `npm run lint` e `npx tsc -b --noEmit` limpos. `npm run build` sem o aviso de
+  500 kB, com os tamanhos antes/depois acima. Não foi possível navegar por todas as abas num
+  navegador nesta sessão (sem ferramenta de automação de navegador disponível, mesma limitação do
+  FIN-116) — a garantia de comportamento idêntico vem do `Suspense`/estado de carregamento cobrir o
+  período de download, do typecheck e dos 724 testes verdes, e da conferência direta do código do
+  service worker citada acima.
 
 ---
 
@@ -2790,6 +2989,31 @@ Cobertas pelas tarefas: FIN-001, FIN-002, FIN-021, FIN-037, FIN-038. Tarefa adic
 
   **Critérios de aceite**
   - [ ] Auditoria semanal e PRs de atualização automáticos.
+
+  **Nota de implementação**
+  `.github/dependabot.yml`: `npm` e `github-actions`, semanal, cada um com um grupo
+  `*-minor-patch` (`update-types: minor, patch`) — essas atualizações entram num PR só; major fica
+  de fora do grupo, um PR por vez, porque costuma exigir revisão (é o caso dos `overrides` do
+  Prisma em `package.json`, da FIN-100, que precisam ser revistos quando o Prisma atualizar as
+  dependências dele).
+
+  `.github/workflows/audit.yml`: `schedule` semanal (segunda, 06:00 UTC) + `workflow_dispatch`,
+  `permissions: contents: read` e `persist-credentials: false` no checkout — mesmo padrão de
+  `ci.yml` (FIN-036). Roda `npm audit --audit-level=high` num job separado do CI de push, para uma
+  vulnerabilidade nova (que ninguém introduziu agora) não travar o trabalho do dia com uma falha
+  vermelha num push sem relação com ela.
+
+  **Validação executada:** as duas configurações passam por um parser YAML (`js-yaml`, já presente
+  no projeto) sem erro, com a estrutura esperada conferida campo a campo. `npm audit
+  --audit-level=high` rodado localmente (mesmo comando do workflow) devolve "found 0
+  vulnerabilities" — o estado atual do lockfile passaria no workflow.
+
+  **Falta:** confirmar a execução real no GitHub Actions (`workflow_dispatch`) e o primeiro PR do
+  Dependabot — os arquivos precisam estar no branch padrão do repositório remoto para o Dependabot
+  ler a configuração e para o workflow aparecer na aba Actions, e isso exige um `git push` que não
+  foi pedido nesta tarefa. Antes de marcar o critério de aceite: dar push/merge nestes arquivos,
+  disparar `audit.yml` à mão pela aba Actions e conferir que roda verde, e esperar (ou provocar,
+  atualizando uma dependência de propósito) o primeiro PR do Dependabot.
 
 ---
 

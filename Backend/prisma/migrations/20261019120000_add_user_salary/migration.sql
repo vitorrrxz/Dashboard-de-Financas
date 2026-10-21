@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "salaryCents" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "User" ADD COLUMN "salaryFrequency" TEXT NOT NULL DEFAULT 'monthly';
