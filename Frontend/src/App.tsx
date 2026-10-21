@@ -883,10 +883,11 @@ export default function App() {
   // EXPENSE_CATEGORIES — a importação manual aceita categoria livre, então o
   // BudgetManager precisa poder oferecer essas categorias no formulário (achado do
   // CodeRabbit: sem isto, seria impossível orçar uma categoria "customizada").
-  const transactionCategories = useMemo(
-    () => Array.from(new Set(transactions.map(t => t.category))).filter(c => c !== 'Receita'),
+  const usedCategories = useMemo(
+    () => Array.from(new Set(transactions.map(t => t.category))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
     [transactions]
   );
+  const transactionCategories = useMemo(() => usedCategories.filter(c => c !== 'Receita'), [usedCategories]);
 
   // FIN-094: lançamentos parcelados (parcelas de compra no cartão, PIX parcelado) saem da
   // aba Transações e passam a ser exibidos na aba Dívidas — ver `isInstallmentTransaction`.
@@ -1234,6 +1235,7 @@ export default function App() {
               txFilter={txFilter}
               onChangeTxFilter={setTxFilter}
               categoryCounts={txCategoryCounts}
+              categories={usedCategories}
               txCategory={txCategory}
               onChangeTxCategory={setTxCategory}
               paymentTypeCounts={txPaymentTypeCounts}

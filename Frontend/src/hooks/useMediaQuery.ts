@@ -16,3 +16,15 @@ export function useMediaQuery(query: string): boolean {
   const getSnapshot = () => hasMatchMedia() && window.matchMedia(query).matches;
   return useSyncExternalStore(subscribe, getSnapshot, () => false);
 }
+
+/**
+ * Props de animação dos gráficos do Recharts: barras crescem, a pizza gira e a linha se desenha
+ * ao montar e ao trocar os dados. Quem pede menos movimento no sistema vê o gráfico pronto.
+ * Os objetos são fixos para que um gráfico memoizado não re-renderize à toa.
+ */
+const CHART_ANIMATED = { isAnimationActive: true, animationBegin: 0, animationDuration: 1100, animationEasing: 'ease-in-out' } as const;
+const CHART_STILL = { ...CHART_ANIMATED, isAnimationActive: false } as const;
+
+export function useChartAnimation() {
+  return useMediaQuery('(prefers-reduced-motion: reduce)') ? CHART_STILL : CHART_ANIMATED;
+}

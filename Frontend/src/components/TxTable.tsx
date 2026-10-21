@@ -27,8 +27,10 @@ const suggestRuleMatch = (name: string) => name.replace(/[\d\s*#./-]+$/, '').tri
 // FIN-022: edição/exclusão individual de transação. `rows` continua sendo o recorte já
 // filtrado/paginado calculado pelo componente pai — este componente só adiciona a UI de
 // ação por linha e o modal de edição. Exportado para o teste das ações (FIN-099).
-export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule, categoryFilter, typeFilter }: {
+export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule, categoryFilter, typeFilter, categories = CATEGORIES }: {
   rows: Transaction[];
+  /** Opções do campo Categoria na edição (padrão: as categorias curadas). */
+  categories?: string[];
   /** Filtros nos cabeçalhos de Categoria e Tipo (opcionais). */
   categoryFilter?: ColumnFilterConfig;
   typeFilter?: ColumnFilterConfig;
@@ -164,7 +166,7 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule, cate
                 <div>
                   <label htmlFor={`${fieldId}-category`} className="block text-xs font-medium text-textMuted mb-1.5">Categoria</label>
                   <select id={`${fieldId}-category`} value={form.category ?? ''} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} className="input-field">
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {[...new Set([form.category ?? '', ...categories])].filter(Boolean).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { Pencil, Upload } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -18,6 +18,7 @@ import { advanceDays, daysInMonth, formatMonthLabel } from '../utils/dates';
 import { balanceTone, formatBRL } from '../utils/money';
 import { categoryColor, categoryDot } from '../utils/categories';
 import { niceTicks } from '../utils/chart';
+import { useChartAnimation } from '../hooks/useMediaQuery';
 
 /** "R$ 1.234,56" com espaço que não quebra: o valor nunca se separa do símbolo numa linha estreita. */
 const fmt = (v: number) => formatBRL(v).replace(' ', ' ');
@@ -25,6 +26,42 @@ const fmt = (v: number) => formatBRL(v).replace(' ', ' ');
 const signed = (v: number) => `${v < 0 ? '−' : ''}${fmt(v)}`;
 /** Eixo em milhares: "2 mil", "−1,5 mil". */
 const axisMoney = (v: number) => (v === 0 ? '0' : `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`);
+
+/** Atualização de estado que escolhe `name`, ou desfaz a escolha se ele já estava escolhido. */
+const togglingTo = (name: string) => (current: string | null) => (current === name ? null : name);
+
+type CategorySlice = FinancialStats['expenseByCategory'][number];
+
+/**
+ * Anel do "Gastos por categoria". Fica isolado e memoizado de propósito: o Recharts recria as
+ * fatias a cada render do <Pie> (a chave da animação muda junto com as props), o que mataria a
+ * transição do destaque e perderia o mouseleave da fatia. O destaque vem de fora, só por CSS
+ * (as classes `cat-slice-N`), então passar o mouse não re-renderiza o gráfico.
+ */
+const CategoryDonut = memo(function CategoryDonut({ data, animation, onHover, onPick }: {
+  data: CategorySlice[];
+  animation: ReturnType<typeof useChartAnimation>;
+  onHover: (name: string | null) => void;
+  onPick: Dispatch<SetStateAction<string | null>>;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height="100%" className="[&_*]:outline-none">
+      <PieChart>
+        {/* O anel não vai até a borda (92%): sobra espaço para a fatia destacada crescer. */}
+        <Pie data={data} dataKey="amount" nameKey="name"
+          innerRadius="74%" outerRadius="92%" paddingAngle={1.5} stroke="none" {...animation} startAngle={90} endAngle={-270}
+          onMouseEnter={(_, i) => onHover(data[i]?.name ?? null)}
+          onMouseLeave={() => onHover(null)}
+          onClick={(_, i) => { const name = data[i]?.name; if (name) onPick(togglingTo(name)); }}>
+          {data.map((e, i) => (
+            <Cell key={e.name} fill={categoryColor(e.name)}
+              className={`cat-slice cat-slice-${i} cursor-pointer [transform-box:view-box] origin-center transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none`}/>
+          ))}
+        </Pie>
+      </PieChart>
+    </ResponsiveContainer>
+  );
+});
 
 const tooltipStyle = {
   contentStyle: { backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 6, fontSize: 12, padding: '6px 10px' },
@@ -217,6 +254,11 @@ export function DashboardPage({
   investmentHoldings, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
   projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary,
 }: DashboardPageProps) {
+  const chartAnimation = useChartAnimation();
+  // Donut de categorias: passar o mouse destaca a fatia; clicar fixa o destaque (clicar de novo solta).
+  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
+  const [pickedCategory, setPickedCategory] = useState<string | null>(null);
+  const togglePicked = (name: string) => setPickedCategory(togglingTo(name));
   const today = todayISO();
   const month = today.slice(0, 7);
   const monthName = formatMonthLabel(month).split('/')[0].toLowerCase();
@@ -256,6 +298,10 @@ export function DashboardPage({
   const projectionTicks = niceTicks(projection.map(p => p.balance));
 
   const categoryTotal = stats.expenseByCategory.reduce((s, c) => s + c.amount, 0);
+  const categoryShare = (amount: number) =>
+    categoryTotal > 0 ? `${((amount / categoryTotal) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%` : '—';
+  const activeIndex = stats.expenseByCategory.findIndex(c => c.name === (hoveredCategory ?? pickedCategory));
+  const activeCategory = stats.expenseByCategory[activeIndex];
   const hasProjection = projection.some(p => p.salaryDelta > 0 || p.debtDelta > 0);
   const finding = monthlySalary === 0
     ? 'Informe o salário para ver quanto sobra depois das dívidas do mês.'
@@ -422,7 +468,7 @@ export function DashboardPage({
                     <YAxis axisLine={false} tickLine={false} tickFormatter={axisMoney} width={60} ticks={flowTicks} domain={[flowTicks[0], flowTicks[flowTicks.length - 1]]} interval={0}/>
                     <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6}/>
                     <RechartsTooltip {...tooltipStyle} formatter={(v) => [signed(Number(v)), 'Entradas − saídas']}/>
-                    <Bar dataKey="balance" maxBarSize={chartPeriod === '30d' ? 14 : 36} isAnimationActive={false}>
+                    <Bar dataKey="balance" maxBarSize={chartPeriod === '30d' ? 14 : 36} {...chartAnimation}>
                       {flowData.map(d => <Cell key={d.name} fill={d.balance < 0 ? 'var(--color-red-500)' : 'var(--color-teal-500)'}/>)}
                     </Bar>
                   </BarChart>
@@ -438,34 +484,34 @@ export function DashboardPage({
               ) : (
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-5 items-center sm:items-start lg:items-center">
                   <div className="relative w-32 h-32 shrink-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie data={stats.expenseByCategory} dataKey="amount" nameKey="name"
-                          innerRadius="80%" outerRadius="100%" paddingAngle={1.5} stroke="none" isAnimationActive={false} startAngle={90} endAngle={-270}>
-                          {stats.expenseByCategory.map(e => (
-                            <Cell key={e.name} fill={categoryColor(e.name)}/>
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="text-xs text-textMuted">Total</span>
-                      <span className="text-sm font-bold text-white">{fmt(categoryTotal)}</span>
+                    <style>{activeIndex < 0 ? '' :
+                      `.cat-slice:not(.cat-slice-${activeIndex}){opacity:.35}.cat-slice-${activeIndex}{transform:scale(1.08)}`}</style>
+                    <CategoryDonut data={stats.expenseByCategory} animation={chartAnimation}
+                      onHover={setHoveredCategory} onPick={setPickedCategory}/>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                      <span className="text-xs text-textMuted truncate max-w-[84px]">{activeCategory ? activeCategory.name : 'Total'}</span>
+                      <span className="text-sm font-bold text-white">{fmt(activeCategory ? activeCategory.amount : categoryTotal)}</span>
+                      {activeCategory && <span className="text-xs text-textMuted">{categoryShare(activeCategory.amount)}</span>}
                     </div>
                   </div>
                   <table className="w-full text-[13px]">
                     <caption className="sr-only">Gastos por categoria</caption>
                     <tbody>
                       {stats.expenseByCategory.map(c => (
-                        <tr key={c.name}>
+                        <tr key={c.name} onMouseEnter={() => setHoveredCategory(c.name)} onMouseLeave={() => setHoveredCategory(null)}
+                          className={`transition-opacity ${activeCategory && c.name !== activeCategory.name ? 'opacity-40' : ''}`}>
                           <td className="py-1 pr-2 w-3">
                             <span className="block w-2 h-2 rounded-full" style={categoryDot(c.name)}/>
                           </td>
-                          <td className="py-1 pr-2 text-white truncate max-w-0 w-full">{c.name}</td>
-                          <td className="py-1 pr-2 text-right text-white whitespace-nowrap">{fmt(c.amount)}</td>
-                          <td className="py-1 text-right text-textMuted whitespace-nowrap">
-                            {categoryTotal > 0 ? `${((c.amount / categoryTotal) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%` : '—'}
+                          <td className="py-1 pr-2 text-white truncate max-w-0 w-full">
+                            <button type="button" aria-pressed={pickedCategory === c.name} onClick={() => togglePicked(c.name)}
+                              onFocus={() => setHoveredCategory(c.name)} onBlur={() => setHoveredCategory(null)}
+                              className="w-full text-left truncate rounded-sm">
+                              {c.name}
+                            </button>
                           </td>
+                          <td className="py-1 pr-2 text-right text-white whitespace-nowrap">{fmt(c.amount)}</td>
+                          <td className="py-1 text-right text-textMuted whitespace-nowrap">{categoryShare(c.amount)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -492,7 +538,7 @@ export function DashboardPage({
                         <YAxis axisLine={false} tickLine={false} tickFormatter={axisMoney} width={60} ticks={projectionTicks} domain={[projectionTicks[0], projectionTicks[projectionTicks.length - 1]]} interval={0}/>
                         <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6}/>
                         <RechartsTooltip {...tooltipStyle} formatter={(v) => [signed(Number(v)), 'Saldo ao fim do mês']}/>
-                        <Bar dataKey="balance" maxBarSize={36} isAnimationActive={false}>
+                        <Bar dataKey="balance" maxBarSize={36} {...chartAnimation}>
                           {projection.map(p => <Cell key={p.month} fill={p.balance < 0 ? 'var(--color-red-500)' : 'var(--color-teal-500)'}/>)}
                         </Bar>
                       </BarChart>

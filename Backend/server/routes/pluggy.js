@@ -95,6 +95,31 @@ router.post('/connect-item', authenticateToken, async (req, res) => {
   }
 });
 
+// Reconectar um banco cria outro item na Pluggy, com as mesmas contas — e o banco aparecia duas vezes
+// na barra lateral, as duas sincronizando a mesma coisa. Das conexões do mesmo banco que compartilham
+// conta, fica só a mais nova. Só remove o registro local: o item na Pluggy não é apagado, porque as
+// contas dele são as mesmas da conexão nova. Duas contas do mesmo banco sem conta em comum ficam as duas.
+async function dropReplacedItems(userId, itemId, institutionName, accounts) {
+  const sameBank = await prisma.pluggyItem.findMany({
+    where: { userId, providerName: institutionName },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (sameBank.length < 2) return;
+  const accountIds = new Set(accounts.map(a => a.id));
+  const twins = [];
+  for (const item of sameBank) {
+    if (item.pluggyId === itemId) { twins.push(item); continue; }
+    try {
+      const { results } = await getPluggyClient().fetchAccounts(item.pluggyId);
+      if (results?.some(a => accountIds.has(a.id))) twins.push(item);
+    } catch (error) {
+      console.error(`Contas da conexão não encontradas na Pluggy (itemId=${item.pluggyId}):`, error);
+    }
+  }
+  const [, ...older] = twins; // `sameBank` vem da mais nova para a mais antiga
+  if (older.length) await prisma.pluggyItem.deleteMany({ where: { userId, id: { in: older.map(i => i.id) } } });
+}
+
 // Sincroniza contas e transações de uma conexão (item) da Pluggy e devolve o status HTTP e o corpo da
 // resposta — a rota do botão e a sincronização automática (FIN-107) passam por aqui.
 async function syncPluggyItem(userId, itemId) {
@@ -118,6 +143,7 @@ async function syncPluggyItem(userId, itemId) {
   // Nome do banco, e não "MeuPluggy": só dá para saber com as contas em mãos.
   const institutionName = pluggyInstitutionName(pluggyItem, accountsRes.results);
   await prisma.pluggyItem.updateMany({ where: { userId, pluggyId: itemId }, data: { providerName: institutionName } });
+  await dropReplacedItems(userId, itemId, institutionName, accountsRes.results);
 
   let totalTxs = 0;
   // FIN-105: regras de categoria do usuário, lidas uma vez para a sincronização inteira.

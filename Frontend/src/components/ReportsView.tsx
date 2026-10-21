@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { balanceTone, formatBRL as fmt } from '../utils/money';
 import { niceTicks } from '../utils/chart';
+import { useChartAnimation } from '../hooks/useMediaQuery';
 import type { Account, Debt, Investment, NetWorthSnapshot, Transaction } from '../types';
 import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth, monthLabel, type NetWorth } from '../utils/reports';
 
@@ -62,6 +63,7 @@ function CompositionCell({ title, amount, negative, balance, detail }: {
  * carregados (`src/utils/reports.ts`), sem endpoint dedicado.
  */
 export function ReportsView({ transactions, accounts, debts, investments, netWorthHistory }: ReportsViewProps) {
+  const chartAnimation = useChartAnimation();
   const [granularity, setGranularity] = useState<'monthly' | 'yearly'>('monthly');
 
   const netWorth = useMemo(() => computeNetWorth(accounts, debts, investments), [accounts, debts, investments]);
@@ -116,7 +118,7 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
                 <RechartsTooltip {...tooltipStyle} cursor={{ stroke: 'var(--chart-grid)' }}
                   formatter={v => [`${Number(v) < 0 ? '−' : ''}${fmt(Number(v))}`, 'Patrimônio']} />
                 <Line type="linear" dataKey="total" stroke="var(--color-accent)" strokeWidth={2}
-                  dot={netWorthChart.length === 1} activeDot={{ r: 4 }} isAnimationActive={false} />
+                  dot={netWorthChart.length === 1} activeDot={{ r: 4 }} {...chartAnimation} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -187,8 +189,8 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
                   <YAxis axisLine={false} tickLine={false} width={60} tickFormatter={axisMoney}
                     ticks={comparisonTicks} domain={[0, comparisonTicks[comparisonTicks.length - 1]]} interval={0} />
                   <RechartsTooltip {...tooltipStyle} formatter={(v, name) => [fmt(Number(v)), name]} />
-                  <Bar dataKey="income" name="Receitas" fill="var(--chart-ink)" maxBarSize={24} isAnimationActive={false} />
-                  <Bar dataKey="expense" name="Despesas" fill="var(--color-red-500)" maxBarSize={24} isAnimationActive={false} />
+                  <Bar dataKey="income" name="Receitas" fill="var(--chart-ink)" maxBarSize={24} {...chartAnimation} />
+                  <Bar dataKey="expense" name="Despesas" fill="var(--color-red-500)" maxBarSize={24} {...chartAnimation} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

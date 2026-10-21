@@ -175,6 +175,22 @@ describe('sincronização automática com a Pluggy (FIN-107)', () => {
     expect((await request(app).get('/api/accounts').set(auth(tokenA))).body).toEqual([expect.objectContaining({ bank: 'Itaú' })]);
   });
 
+  it('reconectar o mesmo banco deixa só a conexão nova; outra conexão do banco, sem conta em comum, fica', async () => {
+    await addItem(new Date(Date.now() - HOUR), { createdAt: new Date(Date.now() - 2 * HOUR) });
+    await prisma.pluggyItem.create({
+      data: { userId: userA, pluggyId: 'item-outro', providerName: 'Itaú', status: 'UPDATED', createdAt: new Date(Date.now() - 3 * HOUR) },
+    });
+    pluggy.fetchItem.mockResolvedValue({ ...ITEM, id: 'item-2' });
+    pluggy.fetchAccounts.mockImplementation(async itemId =>
+      ({ results: [itemId === 'item-outro' ? { ...ACCOUNT, id: 'acc-outro' } : ACCOUNT] }));
+
+    const connected = await request(app).post('/api/pluggy/connect-item').set(auth(tokenA)).send({ itemId: 'item-2' });
+    expect(connected.status).toBe(200);
+    const res = await autoSync(tokenA);
+    expect(res.body.items.map(i => i.pluggyId)).toEqual(['item-outro', 'item-2']);
+    expect((await prisma.account.findMany()).map(a => a.pluggyId).sort()).toEqual(['acc-1', 'acc-outro']);
+  });
+
   it('conta e cartão da mesma conexão ficam com o mesmo banco; nome digitado pelo usuário fica', async () => {
     await addItem(null, { providerName: 'MeuPluggy' });
     pluggy.fetchItem.mockResolvedValue({ ...ITEM, connector: { name: 'MeuPluggy' } });

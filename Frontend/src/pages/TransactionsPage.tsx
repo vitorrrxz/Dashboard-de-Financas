@@ -27,6 +27,8 @@ interface TransactionsPageProps {
   paymentTypeCounts: { value: string; count: number }[];
   txPaymentType: string | null;
   onChangeTxPaymentType: (paymentType: string | null) => void;
+  /** Categorias com alguma transação — as opções do campo Categoria na edição. */
+  categories: string[];
   accounts: Account[];
   /** Conta do filtro (null = todas); `filtered` e os totais já chegam recortados por ela. */
   accountId: string | null;
@@ -54,7 +56,7 @@ const SECONDARY = 'h-9 px-3 flex items-center gap-2 rounded-md text-sm text-whit
 export function TransactionsPage({
   filtered, txMonth, onChangeTxMonth, txMonths, monthTotals, hiddenInstallments, onGoToDebts,
   txFilter, onChangeTxFilter, categoryCounts, txCategory, onChangeTxCategory,
-  paymentTypeCounts, txPaymentType, onChangeTxPaymentType, accounts, accountId, onChangeAccount, onUpdateTransaction, onDeleteTransaction, onCreateRule,
+  paymentTypeCounts, txPaymentType, onChangeTxPaymentType, categories, accounts, accountId, onChangeAccount, onUpdateTransaction, onDeleteTransaction, onCreateRule,
   txHasMore, txLoadingMore, onLoadMore, onExportCSV, onExportPDF, exportingPDF, onShowImport,
 }: TransactionsPageProps) {
   // O valor escolhido continua na lista mesmo se o novo mês não tiver nenhuma — senão não
@@ -136,6 +138,7 @@ export function TransactionsPage({
           <TxTable
             rows={filtered.slice(0, 200)}
             accounts={accounts}
+            categories={categories}
             onUpdate={onUpdateTransaction}
             onDelete={onDeleteTransaction}
             onCreateRule={onCreateRule}
