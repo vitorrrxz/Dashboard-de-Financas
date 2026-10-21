@@ -1,12 +1,12 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
 import { accountSchema, accountUpdateSchema } from '../lib/schemas.js';
 
 export const router = express.Router();
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
     const accounts = await prisma.account.findMany({ where: { userId: req.user.userId } });
     res.json(accounts);
@@ -15,7 +15,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const validation = validateBody(accountSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
@@ -27,7 +27,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const validation = validateBody(accountUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
@@ -52,7 +52,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     // As transações vão junto: o vínculo opcional faria o banco só desligá-las (SET NULL), e
     // transação sem conta continuava somando no Dashboard sem ter mais de onde ser filtrada.

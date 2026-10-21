@@ -25,7 +25,7 @@ describe('notificações (FIN-065 a FIN-069)', () => {
   /** Cria um usuário novo por teste — nenhum teste depende do estado deixado por outro. */
   async function newUser() {
     userSeq += 1;
-    const res = await request(app).post('/api/auth/register')
+    const res = await request(app).post('/api/auth/sign-up/email')
       .send({ name: `Usuario ${userSeq}`, email: `user${userSeq}@notifications.test`, password: 'senha123' });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();

@@ -10,8 +10,6 @@ export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 export interface ApiFetchOptions {
   method?: string;
   body?: unknown;
-  // Ausente/`null` para rotas públicas (login, registro) — presente para as demais.
-  token?: string | null;
 }
 
 // Carrega o status HTTP e o corpo cru da resposta de erro — permite ao chamador
@@ -29,13 +27,15 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T = unknown>(endpoint: string, options: ApiFetchOptions = {}): Promise<T> {
-  const { method = 'GET', body, token } = options;
+  const { method = 'GET', body } = options;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
 
+  // FIN-121 — a sessão vai no cookie httpOnly do Better Auth (ver services/auth.ts). `include`, e não
+  // o padrão `same-origin`: no desenvolvimento a API (:3001) está em outra origem que o Vite (:5173).
   const res = await fetch(`${API_URL}${endpoint}`, {
     method,
     headers,
+    credentials: 'include',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 

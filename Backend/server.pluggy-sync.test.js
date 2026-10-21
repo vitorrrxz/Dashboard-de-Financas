@@ -34,7 +34,7 @@ describe('sincronização automática com a Pluggy (FIN-107)', () => {
   const autoSync = token => request(app).post('/api/pluggy/auto-sync').set(auth(token));
 
   async function register(email) {
-    const res = await request(app).post('/api/auth/register').send({ name: email, email, password: 'senha123' });
+    const res = await request(app).post('/api/auth/sign-up/email').send({ name: email, email, password: 'senha123' });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();
     return res.body.token;
@@ -53,9 +53,9 @@ describe('sincronização automática com a Pluggy (FIN-107)', () => {
     process.env.PLUGGY_CLIENT_SECRET = 'test-secret';
     tokenA = await register('a@pluggy.test');
     tokenB = await register('b@pluggy.test');
-    const me = await request(app).get('/api/auth/me').set(auth(tokenA));
+    const me = await request(app).get('/api/auth/get-session').set(auth(tokenA));
     expect(me.status).toBe(200);
-    userA = me.body.user.userId;
+    userA = me.body.user.id;
     expect(userA).toEqual(expect.any(String));
   });
 

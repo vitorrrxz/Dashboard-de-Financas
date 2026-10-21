@@ -17,8 +17,10 @@ import { nextBillDueDate, buildDueNotifications, detectUnusualSpending } from '.
 import { formatCents, SUPPORTED_CURRENCIES } from './server/lib/money.js';
 import { parseProviderRates, createExchangeRateCache } from './server/lib/exchangeRates.js';
 import { sendInternalError } from './server/lib/http.js';
+import { toNodeHandler } from 'better-auth/node';
+import { auth } from './server/lib/betterAuth.js';
 
-import { router as authRouter, encryptTwoFactorSecret, decryptTwoFactorSecret } from './server/routes/auth.js';
+import { router as profileRouter } from './server/routes/profile.js';
 import { router as accountsRouter } from './server/routes/accounts.js';
 import { router as transactionsRouter } from './server/routes/transactions.js';
 import { router as debtsRouter } from './server/routes/debts.js';
@@ -61,8 +63,12 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
 }));
 // CORS restrito à origem conhecida do frontend — evita que qualquer site de terceiros
-// consiga ler respostas desta API (ver FIN-009 em docs/BACKLOG_DETAIL.md).
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
+// consiga ler respostas desta API (ver FIN-009 em docs/BACKLOG_DETAIL.md). `credentials`: no
+// desenvolvimento o frontend (Vite, :5173) chama a API (:3001) com o cookie de sessão (FIN-121).
+app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }));
+// FIN-121 — cadastro, login, sessão e 2FA: rotas do Better Auth. Antes do parser de JSON, porque ele
+// lê o corpo da requisição por conta própria.
+app.all('/api/auth/*splat', toNodeHandler(auth));
 // Corpo JSON de até 100 kB (padrão do Express) em todas as rotas, menos a restauração de backup
 // (FIN-080): ela recebe o arquivo inteiro e usa um parser próprio, com limite maior, que só roda
 // depois da autenticação — ver a rota, em server/routes/backup.js.
@@ -76,7 +82,7 @@ app.use((req, res, next) => (isBackupImportPath(req) ? next() : jsonBody(req, re
 
 const PORT = 3001;
 
-app.use('/api/auth', authRouter);
+app.use('/api/profile', profileRouter);
 app.use('/api/accounts', accountsRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/debts', debtsRouter);
@@ -149,5 +155,5 @@ export {
   app, prisma, pluggyReauthMessage, pluggyAmountToCents, isCreditCardBillPayment, pluggyTransactionCategory,
   nextBillDueDate, pluggyBillDueDay, pluggyPendingBillCents, buildDueNotifications, detectUnusualSpending,
   pluggyCurrency, formatCents, SUPPORTED_CURRENCIES, parseProviderRates, createExchangeRateCache,
-  encryptTwoFactorSecret, decryptTwoFactorSecret, OWN_TRANSFER_CATEGORIES,
+  OWN_TRANSFER_CATEGORIES,
 };

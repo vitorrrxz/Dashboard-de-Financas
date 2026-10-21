@@ -51,17 +51,17 @@ describe('BackupSettings', () => {
 
   it('baixa o backup completo e diz o que foi salvo', async () => {
     apiFetchMock.mockResolvedValueOnce(BACKUP);
-    render(<BackupSettings token="tok" onRestored={vi.fn()} />);
+    render(<BackupSettings onRestored={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Baixar backup/ }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('Backup baixado: 2 contas, 1 transação, 1 meta.');
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/account/export', { token: 'tok' });
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/account/export');
     expect(downloadMock).toHaveBeenCalledWith(expect.stringMatching(/^finflow-backup-\d{4}-\d{2}-\d{2}\.json$/), BACKUP);
   });
 
   it('resposta inesperada na exportação: mostra erro e não baixa nada', async () => {
     apiFetchMock.mockResolvedValueOnce({ erro: 'formato estranho' });
-    render(<BackupSettings token="tok" onRestored={vi.fn()} />);
+    render(<BackupSettings onRestored={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /Baixar backup/ }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Resposta inesperada do servidor.');
@@ -71,7 +71,7 @@ describe('BackupSettings', () => {
   it('restaura: mostra o resumo do arquivo e só libera o envio com senha e confirmação', async () => {
     apiFetchMock.mockResolvedValueOnce({ success: true, restored: RESTORED });
     const onRestored = vi.fn();
-    render(<BackupSettings token="tok" onRestored={onRestored} />);
+    render(<BackupSettings onRestored={onRestored} />);
 
     const submit = screen.getByRole('button', { name: /Restaurar backup/ });
     expect(submit).toBeDisabled();
@@ -86,14 +86,14 @@ describe('BackupSettings', () => {
     fireEvent.click(submit);
     await waitFor(() => expect(onRestored).toHaveBeenCalledWith('Backup restaurado: 2 contas, 1 transação, 1 meta.'));
     expect(apiFetchMock).toHaveBeenCalledWith('/api/account/import', {
-      method: 'POST', token: 'tok', body: { password: 'senha123', backup: BACKUP },
+      method: 'POST', body: { password: 'senha123', backup: BACKUP },
     });
     expect(screen.getByLabelText('Arquivo de backup')).toHaveValue('');
     expect(screen.queryByLabelText('Sua senha')).not.toBeInTheDocument();
   });
 
   it('arquivo que não é JSON, ou não é backup do FinFlow, é recusado antes de qualquer envio', async () => {
-    render(<BackupSettings token="tok" onRestored={vi.fn()} />);
+    render(<BackupSettings onRestored={vi.fn()} />);
 
     chooseFile('isto não é json');
     expect(await screen.findByRole('alert')).toHaveTextContent('O arquivo não é um JSON válido.');
@@ -107,7 +107,7 @@ describe('BackupSettings', () => {
   });
 
   it('trocar um arquivo válido por um inválido desfaz a confirmação e bloqueia o envio', async () => {
-    render(<BackupSettings token="tok" onRestored={vi.fn()} />);
+    render(<BackupSettings onRestored={vi.fn()} />);
     await fillRestoreForm();
     expect(screen.getByRole('button', { name: /Restaurar backup/ })).toBeEnabled();
 
@@ -119,7 +119,7 @@ describe('BackupSettings', () => {
   it('erro do servidor na restauração: mostra a mensagem e não avisa o App', async () => {
     apiFetchMock.mockRejectedValueOnce(new ApiError('Senha incorreta.', 400, {}));
     const onRestored = vi.fn();
-    render(<BackupSettings token="tok" onRestored={onRestored} />);
+    render(<BackupSettings onRestored={onRestored} />);
     await fillRestoreForm();
     fireEvent.click(screen.getByRole('button', { name: /Restaurar backup/ }));
 

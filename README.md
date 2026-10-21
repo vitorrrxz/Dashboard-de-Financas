@@ -17,7 +17,7 @@ O **FinFlow** é um sistema completo e moderno para controle e gestão de finan�
 * **Banco de Dados**: [SQLite](https://www.sqlite.org/) (leve, embarcado e rápido, ideal para dados locais)
 * **ORM**: [Prisma ORM](https://www.prisma.io/) com adaptador otimizado `better-sqlite3`
 * **Segurança e Autenticação**:
-  * [JSON Web Tokens (JWT)](https://jwt.io/) para autenticação segura baseada em sessão
+  * [Better Auth](https://www.better-auth.com/) para cadastro, login, sessão e verificação em duas etapas
   * [bcrypt](https://github.com/kelektiv/node.bcrypt.js) para criptografia de senhas (hashing) no banco de dados
 
 ---
@@ -31,7 +31,8 @@ Checklist completo do que um dashboard de finanças pessoais deve oferecer. Iten
 1. **Autenticação e Segurança**
    - ✅ Cadastro e login de usuário.
    - ✅ Senhas com hashing seguro (bcrypt) — nunca armazenadas em texto puro.
-   - ✅ Sessão via JWT (token com validade de 7 dias), guardado no `localStorage`.
+   - ✅ Sessão pelo Better Auth (FIN-121): cookie `httpOnly`, válido por 7 dias e renovado com o uso, encerrada no servidor ao sair.
+   - ✅ Verificação em duas etapas (TOTP) com códigos de recuperação, e limite de tentativas no login.
    - ✅ Todas as rotas de dados protegidas por middleware de autenticação, isolando os dados por usuário.
 
 2. **Dashboard / Visão Geral**
@@ -122,8 +123,8 @@ Para manter a segurança das credenciais e do banco de dados, o arquivo `.env` n
 # URL de conexão do banco de dados (SQLite local)
 DATABASE_URL="file:./dev.db"
 
-# Chave secreta para assinatura dos tokens JWT do usuário
-JWT_SECRET="chave_secreta_finance_app"
+# Segredo do Better Auth: assina os cookies de sessão (mínimo 32 caracteres)
+BETTER_AUTH_SECRET="gere_com_crypto_randomBytes_48"
 
 # Credenciais da Pluggy (Open Finance) — necessárias apenas para conectar bancos reais
 PLUGGY_CLIENT_ID=""
@@ -152,7 +153,7 @@ Após executar, abra o endereço exibido no terminal (geralmente `http://localho
 Para deixar o FinFlow rodando num computador ou servidor seu, sempre do mesmo jeito: frontend e API no mesmo contêiner, na mesma origem, e o banco num volume.
 
 1. Instale o [Docker](https://docs.docker.com/get-docker/), com o Compose.
-2. Crie o `.env` a partir do `.env.example`. O contêiner lê as mesmas variáveis (`JWT_SECRET`, Pluggy, `TWO_FACTOR_ENCRYPTION_KEY`…) a cada subida; o `.env` nunca entra na imagem.
+2. Crie o `.env` a partir do `.env.example`. O contêiner lê as mesmas variáveis (`BETTER_AUTH_SECRET`, Pluggy…) a cada subida; o `.env` nunca entra na imagem.
 3. Rode `docker compose up -d --build` e abra `http://localhost:3001`.
 
 * **Banco:** fica no volume `finflow-data`. Reiniciar ou recriar o contêiner mantém os dados; só `docker compose down -v` apaga o volume. As migrações pendentes rodam sozinhas a cada subida (`prisma migrate deploy`).
@@ -185,7 +186,7 @@ Para abrir o FinFlow de qualquer lugar, só com e-mail e senha. A Vercel não te
    `sqlite3 dev.db 'PRAGMA journal_mode=WAL;'` e `turso db import dev.db --name finflow`
    (ou `turso db create finflow` para começar vazio). Anote a URL (`turso db show finflow --url`) e gere um token (`turso db tokens create finflow`).
 2. **Projeto na Vercel** — `npx vercel link` e cadastre as variáveis de produção (`npx vercel env add NOME production`):
-   `DATABASE_URL` (a URL `libsql://` do Turso), `TURSO_AUTH_TOKEN`, `JWT_SECRET`, `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `TWO_FACTOR_ENCRYPTION_KEY` e `FRONTEND_URL` (o endereço do site na Vercel). Não defina `VITE_API_URL`: o build já aponta o frontend para a própria origem.
+   `DATABASE_URL` (a URL `libsql://` do Turso), `TURSO_AUTH_TOKEN`, `BETTER_AUTH_SECRET`, `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `FRONTEND_URL` e `BETTER_AUTH_URL` (as duas últimas com o endereço do site na Vercel). Não defina `VITE_API_URL`: o build já aponta o frontend para a própria origem.
 3. **Publicar** — `npx vercel deploy --prod`. O build aplica as migrations pendentes no Turso (`Backend/scripts/migrate-turso.mjs`, o `prisma migrate deploy` de lá) e gera o frontend; a API roda como função serverless (`api/index.js`).
 
 * **Segurança:** o site fica aberto na internet e o que protege os dados é o login do app — use uma senha forte e ative a verificação em duas etapas. A senha do banco nunca passa pelo app (fica com a Pluggy), mas as transações e contas sincronizadas ficam no Turso.
@@ -197,7 +198,7 @@ Para abrir o FinFlow de qualquer lugar, só com e-mail e senha. A Vercel não te
 ## 🔒 Segurança de Repositório
 
 O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos sensíveis/locais não sejam rastreados pelo Git ou enviados ao repositório público no GitHub:
-* `.env` (contém a assinatura JWT e conexões confidenciais)
+* `.env` (contém o segredo das sessões e conexões confidenciais)
 * `dev.db` e `dev.db-journal` (banco de dados SQLite local contendo suas transações e dados reais)
 * Arquivos temporários de banco de dados (`*.db`, `*.db-journal`)
 

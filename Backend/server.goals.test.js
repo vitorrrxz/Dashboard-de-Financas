@@ -28,12 +28,12 @@ describe('/api/goals', () => {
   beforeAll(async () => {
     ({ app, cleanup } = await createTestApp('goals'));
 
-    const regA = await request(app).post('/api/auth/register')
+    const regA = await request(app).post('/api/auth/sign-up/email')
       .send({ name: 'Usuario A', email: 'usera@goals.test', password: 'senha123' });
     expect(regA.status).toBe(200);
     tokenA = regA.body.token;
 
-    const regB = await request(app).post('/api/auth/register')
+    const regB = await request(app).post('/api/auth/sign-up/email')
       .send({ name: 'Usuario B', email: 'userb@goals.test', password: 'senha123' });
     expect(regB.status).toBe(200);
     tokenB = regB.body.token;

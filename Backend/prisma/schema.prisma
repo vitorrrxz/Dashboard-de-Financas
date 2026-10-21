@@ -10,8 +10,12 @@ model User {
   id           String        @id @default(uuid())
   name         String
   email        String        @unique
-  passwordHash String
   createdAt    DateTime      @default(now())
+  // FIN-121 — campos do Better Auth. A senha saiu daqui: fica em AuthAccount.password.
+  emailVerified    Boolean   @default(false)
+  image            String?
+  updatedAt        DateTime  @default(now()) @updatedAt
+  twoFactorEnabled Boolean?  @default(false)
   // Salário informado manualmente: valor de CADA pagamento, em centavos. "biweekly" (quinzenal)
   // = dois pagamentos no mês; "monthly" = um.
   salaryCents     Int        @default(0)
@@ -31,30 +35,12 @@ model User {
   recurring    RecurringTransaction[]
   notifications Notification[]
   investments  Investment[]
-  twoFactor    UserTwoFactor?
   categoryRules CategoryRule[]
   pluggyItems  PluggyItem[]
   netWorthSnapshots NetWorthSnapshot[]
-}
-
-// FIN-078 — verificação em duas etapas (TOTP). Tabela própria, 1:1 com User, em vez de colunas
-// novas em User: o login continua lendo a mesma linha de antes, e o segredo fica fora dela.
-// O registro nasce na configuração (`enabledAt` nulo) e só vale no login depois de confirmado
-// com um código do aplicativo. Desativar apaga o registro.
-model UserTwoFactor {
-  userId        String    @id
-  // Segredo TOTP cifrado com AES-256-GCM (chave de TWO_FACTOR_ENCRYPTION_KEY — ver server.js).
-  // Nunca em texto puro: quem copiasse o banco poderia gerar os códigos.
-  secret        String
-  enabledAt     DateTime? // null = configuração iniciada e ainda não confirmada
-  // Último intervalo de 30 s aceito. Um código só vale uma vez: sem isto, quem visse um código
-  // poderia reusá-lo enquanto ele ainda está na janela de validade.
-  lastUsedStep  Int?
-  // JSON com os hashes bcrypt dos códigos de recuperação ainda não usados.
-  recoveryCodes String    @default("[]")
-  createdAt     DateTime  @default(now())
-
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions     Session[]
+  authAccounts AuthAccount[]
+  twoFactors   TwoFactor[]
 }
 
 model Account {
@@ -314,4 +300,79 @@ model Investment {
   goals          Goal[] // FIN-113
 
   @@index([userId]) // ver FIN-019
+}
+
+// FIN-121 — tabelas do Better Auth (geradas com `npx auth generate` e conferidas à mão). Os nomes
+// seguem o padrão dele, menos AuthAccount: `Account` já é a conta bancária (account.modelName).
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Login por e-mail e senha = providerId "credential", com accountId igual ao id do usuário.
+model AuthAccount {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?   // hash bcrypt (ver server/lib/betterAuth.js)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+// Verificação em duas etapas (plugin twoFactor): segredo TOTP e códigos de recuperação, cifrados
+// pelo Better Auth com o BETTER_AUTH_SECRET.
+model TwoFactor {
+  id                      String    @id
+  secret                  String
+  backupCodes             String
+  userId                  String
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime?
+
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([secret])
+  @@index([userId])
+}
+
+// Contagem do limite de tentativas, no banco para valer entre instâncias da função na Vercel.
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt
 }

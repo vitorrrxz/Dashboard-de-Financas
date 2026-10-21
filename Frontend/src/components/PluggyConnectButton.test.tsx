@@ -14,7 +14,7 @@ vi.mock('../services/api', async importOriginal => ({
 const apiFetchMock = vi.mocked(apiFetch);
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 60 * 60 * 1000 - 60_000).toISOString();
 const ITAU = { pluggyId: 'item-1', providerName: 'Itaú', status: 'UPDATED', lastSyncAt: hoursAgo(3) };
-const call = (endpoint: string, body?: unknown) => [endpoint, { method: 'POST', body, token: 'tk' }];
+const call = (endpoint: string, body?: unknown) => [endpoint, { method: 'POST', body }];
 
 beforeEach(() => apiFetchMock.mockReset());
 afterEach(() => {
@@ -26,7 +26,7 @@ describe('PluggyConnectButton (FIN-107)', () => {
   it('ao abrir, pede a sincronização automática, mostra cada conexão com a hora e recarrega o App se algo entrou', async () => {
     apiFetchMock.mockResolvedValueOnce({ synced: 1, items: [ITAU, { ...ITAU, pluggyId: 'item-2', providerName: 'Nubank', status: 'LOGIN_ERROR' }] });
     const onSyncComplete = vi.fn();
-    render(<PluggyConnectButton token="tk" onSyncComplete={onSyncComplete} />);
+    render(<PluggyConnectButton onSyncComplete={onSyncComplete} />);
 
     expect(screen.getByRole('status')).toHaveTextContent('Atualizando os dados do banco');
     expect(await screen.findByText('Última sincronização: há 3 h')).toBeInTheDocument();
@@ -39,7 +39,7 @@ describe('PluggyConnectButton (FIN-107)', () => {
   it('sem nada novo, não recarrega o App', async () => {
     apiFetchMock.mockResolvedValueOnce({ synced: 0, items: [ITAU] });
     const onSyncComplete = vi.fn();
-    render(<PluggyConnectButton token="tk" onSyncComplete={onSyncComplete} />);
+    render(<PluggyConnectButton onSyncComplete={onSyncComplete} />);
 
     expect(await screen.findByText('Itaú')).toBeInTheDocument();
     expect(onSyncComplete).not.toHaveBeenCalled();
@@ -49,7 +49,7 @@ describe('PluggyConnectButton (FIN-107)', () => {
     apiFetchMock.mockRejectedValueOnce(new Error('sem conexão'));
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const onSyncComplete = vi.fn();
-    render(<PluggyConnectButton token="tk" onSyncComplete={onSyncComplete} />);
+    render(<PluggyConnectButton onSyncComplete={onSyncComplete} />);
 
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
     expect(consoleError).toHaveBeenCalled();
@@ -63,7 +63,7 @@ describe('PluggyConnectButton (FIN-107)', () => {
       .mockResolvedValueOnce({ success: true })
       .mockRejectedValueOnce(new ApiError('A conexão com este banco expirou.', 409, {}));
     const onSyncComplete = vi.fn();
-    render(<PluggyConnectButton token="tk" onSyncComplete={onSyncComplete} />);
+    render(<PluggyConnectButton onSyncComplete={onSyncComplete} />);
 
     const button = await screen.findByRole('button', { name: 'Sincronizar Itaú' });
     expect(button).toBeEnabled();
@@ -94,7 +94,7 @@ describe('PluggyConnectButton (FIN-107)', () => {
       }
     } as unknown as typeof window.PluggyConnect;
     const onSyncComplete = vi.fn();
-    render(<PluggyConnectButton token="tk" onSyncComplete={onSyncComplete} />);
+    render(<PluggyConnectButton onSyncComplete={onSyncComplete} />);
 
     const connect = screen.getByRole('button', { name: 'Conectar banco' });
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());

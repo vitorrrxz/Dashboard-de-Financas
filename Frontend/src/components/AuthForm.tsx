@@ -1,32 +1,12 @@
 import { useState } from 'react';
 import { Mail, Lock, User, ArrowRight, ArrowLeft, ShieldCheck } from 'lucide-react';
-import { apiFetch } from '../services/api';
+import { signIn, signUp, verifyTwoFactor, type AuthUser } from '../services/auth';
 import { recoveryNotice } from '../utils/twoFactor';
 import { FinFlowMark } from './FinFlowMark';
 
-type AuthUser = { id: string; name: string; email: string };
-
 interface AuthFormProps {
-  onLogin: (token: string, user: AuthUser) => void;
-}
-
-/**
- * Resposta de login/registro. Com a verificação em duas etapas ativa (FIN-078), o login com a
- * senha certa devolve só `twoFactorRequired`, e o token vem no segundo envio, junto do código.
- * Tudo `unknown` porque a resposta é normalizada antes de usada.
- */
-interface AuthResponse {
-  token?: unknown;
-  user?: unknown;
-  twoFactorRequired?: unknown;
-  recoveryCodeUsed?: unknown;
-  recoveryCodesRemaining?: unknown;
-}
-
-function isAuthUser(value: unknown): value is AuthUser {
-  if (!value || typeof value !== 'object') return false;
-  const u = value as Record<string, unknown>;
-  return typeof u.id === 'string' && typeof u.name === 'string' && typeof u.email === 'string';
+  /** Chamado já com a sessão aberta: o cookie veio na resposta do login (FIN-121). */
+  onLogin: (user: AuthUser) => void;
 }
 
 const inputClass = 'w-full bg-white/5 border border-[var(--line)] rounded-xl pl-11 pr-4 py-3 text-white focus:outline-none focus:border-primary/50 transition-colors';
@@ -50,24 +30,23 @@ export function AuthForm({ onLogin }: AuthFormProps) {
     setError('');
 
     try {
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-      const body = !isLogin ? { name, email, password }
-        : twoFactorStep ? { email, password, code }
-        : { email, password };
-
-      const data = await apiFetch<AuthResponse | null>(endpoint, { method: 'POST', body });
-
-      if (isLogin && !twoFactorStep && data?.twoFactorRequired === true) {
+      if (!isLogin) {
+        onLogin(await signUp(name, email, password));
+        return;
+      }
+      if (twoFactorStep) {
+        const user = await verifyTwoFactor(code, useRecovery);
+        if (useRecovery) alert(recoveryNotice(null));
+        onLogin(user);
+        return;
+      }
+      // FIN-078: com a verificação em duas etapas ativa, a senha certa só leva ao passo do código.
+      const result = await signIn(email, password);
+      if ('twoFactorRequired' in result) {
         setTwoFactorStep(true);
         return;
       }
-      if (typeof data?.token !== 'string' || !isAuthUser(data.user)) {
-        throw new Error('Resposta inesperada do servidor. Tente novamente.');
-      }
-      if (data.recoveryCodeUsed === true) {
-        alert(recoveryNotice(typeof data.recoveryCodesRemaining === 'number' ? data.recoveryCodesRemaining : null));
-      }
-      onLogin(data.token, data.user);
+      onLogin(result.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       if (twoFactorStep) setCode('');

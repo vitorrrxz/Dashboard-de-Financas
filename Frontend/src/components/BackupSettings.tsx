@@ -14,7 +14,6 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
 const secondaryButton = 'flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-[var(--line)] text-textMuted hover:text-white hover:bg-white/5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 
 interface BackupSettingsProps {
-  token: string;
   /** Chamado depois de uma restauração bem-sucedida, com o resumo do que voltou — o App recarrega os dados. */
   onRestored: (summary: string) => void;
 }
@@ -24,7 +23,7 @@ interface BackupSettingsProps {
  * substitui todos os dados atuais, então só é liberada com o arquivo conferido (o resumo aparece
  * antes), a senha e a confirmação explícita.
  */
-export function BackupSettings({ token, onRestored }: BackupSettingsProps) {
+export function BackupSettings({ onRestored }: BackupSettingsProps) {
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState('');
   const [exportError, setExportError] = useState('');
@@ -43,7 +42,7 @@ export function BackupSettings({ token, onRestored }: BackupSettingsProps) {
     setExportError('');
     setExportNotice('');
     try {
-      const data = await apiFetch<unknown>('/api/account/export', { token });
+      const data = await apiFetch<unknown>('/api/account/export');
       const info = summarizeBackup(data);
       if (!info) throw new Error(UNEXPECTED);
       downloadJSON(`finflow-backup-${exportDateSuffix()}.json`, data);
@@ -98,7 +97,7 @@ export function BackupSettings({ token, onRestored }: BackupSettingsProps) {
     setRestoring(true);
     setRestoreError('');
     try {
-      const response = await apiFetch<unknown>('/api/account/import', { method: 'POST', token, body: { password, backup } });
+      const response = await apiFetch<unknown>('/api/account/import', { method: 'POST', body: { password, backup } });
       const counts = parseRestoreResult(response);
       setPassword('');
       forgetFile();

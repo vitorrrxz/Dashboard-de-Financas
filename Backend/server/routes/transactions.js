@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
 import { transactionSchema, transactionBatchSchema, transactionUpdateSchema } from '../lib/schemas.js';
 import { accountCurrencies, currencyForAccount, hasForeignAccount, ACCOUNT_NOT_FOUND } from '../lib/accountAccess.js';
@@ -35,7 +35,7 @@ function computeImportHash(userId, tx) {
 // para `stats`, e o reload após import/sync). Com os parâmetros, retorna um objeto
 // `{ transactions, total, page, pageSize }`, usado pelo frontend para "carregar mais"
 // além do limite de 2000.
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   try {
     if (req.query.page === undefined && req.query.pageSize === undefined) {
@@ -64,7 +64,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   // Supports batch insert
   if (Array.isArray(req.body.transactions)) {
@@ -123,7 +123,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/bulk', authenticateToken, async (req, res) => {
+router.delete('/bulk', requireAuth, async (req, res) => {
   try {
     await prisma.transaction.deleteMany({ where: { userId: req.user.userId } });
     res.json({ success: true });
@@ -134,7 +134,7 @@ router.delete('/bulk', authenticateToken, async (req, res) => {
 
 // Registradas depois de `/bulk` — Express casa rotas na ordem de registro, e `/:id`
 // capturaria "bulk" como id se viesse antes (ver FIN-022).
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const validation = validateBody(transactionUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
@@ -156,7 +156,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     await prisma.transaction.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
     res.json({ success: true });

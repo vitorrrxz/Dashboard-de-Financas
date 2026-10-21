@@ -1,6 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError } from '../lib/http.js';
 import { toCents } from '../lib/money.js';
 import {
@@ -56,7 +56,7 @@ function runExclusive(key, task) {
 }
 
 // POST /api/pluggy/connect-token — Gera o token temporário para o widget
-router.post('/connect-token', authenticateToken, async (req, res) => {
+router.post('/connect-token', requireAuth, async (req, res) => {
   try {
     const response = await getPluggyClient().createConnectToken(undefined, {
       clientUserId: req.user.userId,
@@ -68,7 +68,7 @@ router.post('/connect-token', authenticateToken, async (req, res) => {
 });
 
 // POST /api/pluggy/connect-item — Recebe itemId do widget e registra no banco
-router.post('/connect-item', authenticateToken, async (req, res) => {
+router.post('/connect-item', requireAuth, async (req, res) => {
   const { itemId } = req.body;
   if (!itemId) return res.status(400).json({ error: 'itemId é obrigatório.' });
 
@@ -324,7 +324,7 @@ async function syncPluggyItem(userId, itemId) {
 }
 
 // POST /api/pluggy/sync/:itemId — Sincroniza contas e transações do banco conectado
-router.post('/sync/:itemId', authenticateToken, async (req, res) => {
+router.post('/sync/:itemId', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   try {
     // FIN-107: só a conexão registrada para o próprio usuário, e uma sincronização por vez.
@@ -341,7 +341,7 @@ router.post('/sync/:itemId', authenticateToken, async (req, res) => {
 // de 6 h, menos a de login expirado (FIN-041), e devolve a lista para a tela mostrar a hora da última
 // sincronização. A falha de uma conexão fica no log e não impede as outras nem a resposta.
 const AUTO_SYNC_AFTER_MS = 6 * 60 * 60 * 1000;
-router.post('/auto-sync', authenticateToken, async (req, res) => {
+router.post('/auto-sync', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   try {
     const synced = await runExclusive(userId, async () => {

@@ -57,9 +57,9 @@ describe('frontend servido pela API (FIN-108)', () => {
   });
 
   it('os caminhos de /api continuam com a API', async () => {
-    const me = await request(app).get('/api/auth/me');
+    const me = await request(app).get('/api/accounts');
     expect(me.status).toBe(401);
-    expect(me.body.error).toMatch(/token/i);
+    expect(me.body.error).toMatch(/login/i);
 
     for (const url of ['/api', '/api/nao-existe', '/API/nao-existe']) {
       const res = await request(app).get(url);
