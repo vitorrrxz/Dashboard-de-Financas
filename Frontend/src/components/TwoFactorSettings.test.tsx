@@ -36,7 +36,7 @@ const CODES = Array.from({ length: 10 }, (_, i) => `ABCD${'23456789AB'[i]}-EFGH$
 async function reachSetup() {
   fireEvent.click(await screen.findByRole('button', { name: 'Ativar verificação em duas etapas' }));
   fireEvent.change(screen.getByLabelText('Sua senha'), { target: { value: 'senha123' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Gerar QR code' }));
   return screen.findByRole('img', { name: /QR code/ });
 }
 
@@ -80,7 +80,7 @@ describe('TwoFactorSettings', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Ativar verificação em duas etapas' }));
     fireEvent.change(screen.getByLabelText('Sua senha'), { target: { value: 'errada' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Gerar QR code' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Senha incorreta.');
     expect(screen.getByLabelText('Sua senha')).toHaveValue('');

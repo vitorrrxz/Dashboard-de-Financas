@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { TwoFactorSetupGate } from './TwoFactorSetupGate';
-import { getTwoFactorPolicy, hasPassword, isTwoFactorEnabled } from '../services/auth';
+import { getTwoFactorPolicy, hasPassword, isTwoFactorEnabled, startTwoFactorSetup } from '../services/auth';
 
 vi.mock('../services/auth', () => ({
   isTwoFactorEnabled: vi.fn(),
@@ -15,6 +15,8 @@ vi.mock('../services/auth', () => ({
   getTwoFactorUri: vi.fn(),
 }));
 
+const TOTP_URI = 'otpauth://totp/FinFlow:fulano%40teste.com?secret=JBSWY3DPEHPK3PXP&issuer=FinFlow';
+
 describe('TwoFactorSetupGate', () => {
   beforeEach(() => {
     vi.mocked(isTwoFactorEnabled).mockResolvedValue(false);
@@ -22,10 +24,25 @@ describe('TwoFactorSetupGate', () => {
     vi.mocked(hasPassword).mockResolvedValue(true);
   });
 
-  it('explica a exigência e já oferece a ativação', async () => {
+  it('explica a exigência e já abre pedindo a senha que gera o QR code', async () => {
+    vi.mocked(startTwoFactorSetup).mockResolvedValueOnce({ totpURI: TOTP_URI, backupCodes: ['ABCDE-FGHJK'] });
     render(<TwoFactorSetupGate onEnabled={() => {}} onLogout={() => {}} />);
     expect(screen.getByRole('heading', { name: 'Proteja sua conta' })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Ativar verificação em duas etapas' })).toBeInTheDocument();
+    fireEvent.change(await screen.findByLabelText('Sua senha'), { target: { value: 'senha123' } });
+    expect(screen.queryByRole('button', { name: 'Cancelar' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Gerar QR code' }));
+    expect(await screen.findByRole('img', { name: /QR code/ })).toBeInTheDocument();
+    expect(startTwoFactorSetup).toHaveBeenCalledWith('senha123');
+  });
+
+  it('conta sem senha: um clique gera o QR code', async () => {
+    vi.mocked(hasPassword).mockResolvedValue(false);
+    vi.mocked(startTwoFactorSetup).mockResolvedValueOnce({ totpURI: TOTP_URI, backupCodes: ['ABCDE-FGHJK'] });
+    render(<TwoFactorSetupGate onEnabled={() => {}} onLogout={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Gerar QR code' }));
+    expect(await screen.findByRole('img', { name: /QR code/ })).toBeInTheDocument();
+    expect(startTwoFactorSetup).toHaveBeenCalledWith(undefined);
+    expect(screen.queryByLabelText('Sua senha')).not.toBeInTheDocument();
   });
 
   it('dá para sair sem ativar', () => {

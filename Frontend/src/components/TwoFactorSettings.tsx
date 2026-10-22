@@ -32,6 +32,8 @@ const groupedSecret = (secret: string) => secret.match(/.{1,4}/g)?.join(' ') ?? 
 interface TwoFactorSettingsProps {
   /** Chamado quando a ativação termina (códigos de recuperação guardados) — ver TwoFactorSetupGate. */
   onEnabled?: () => void;
+  /** Abre já no primeiro passo da ativação, sem o botão "Ativar" antes (TwoFactorSetupGate). */
+  startOpen?: boolean;
 }
 
 /**
@@ -42,13 +44,13 @@ interface TwoFactorSettingsProps {
  * FIN-123 — com a verificação obrigatória no servidor, não há "Desativar": no lugar, "Configurar em
  * outro celular" mostra o mesmo QR code de novo. Conta sem senha (só Google/GitHub) não digita senha.
  */
-export function TwoFactorSettings({ onEnabled }: TwoFactorSettingsProps = {}) {
+export function TwoFactorSettings({ onEnabled, startOpen = false }: TwoFactorSettingsProps = {}) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [required, setRequired] = useState(false);
   const [needsPassword, setNeedsPassword] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<Phase>(startOpen ? 'password' : 'idle');
   const [setupData, setSetupData] = useState<TwoFactorSetup | null>(null);
   // Gerados junto com o segredo, mas só mostrados depois da confirmação com o código.
   const [pendingCodes, setPendingCodes] = useState<string[]>([]);
@@ -318,14 +320,21 @@ export function TwoFactorSettings({ onEnabled }: TwoFactorSettingsProps = {}) {
     if (phase === 'password') {
       return (
         <form onSubmit={startSetup} className="space-y-3 max-w-sm">
-          <FormField label="Sua senha" htmlFor="twofa-enable-password">
-            <input id="twofa-enable-password" type="password" required autoComplete="current-password" autoFocus
-              value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
-          </FormField>
+          {needsPassword ? (
+            <>
+              <p className="text-sm text-textMuted">Confirme sua senha para gerar o QR code.</p>
+              <FormField label="Sua senha" htmlFor="twofa-enable-password">
+                <input id="twofa-enable-password" type="password" required autoComplete="current-password" autoFocus
+                  value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
+              </FormField>
+            </>
+          ) : (
+            <p className="text-sm text-textMuted">Tenha o aplicativo autenticador aberto no celular.</p>
+          )}
           <div className="flex flex-wrap gap-3 pt-1">
-            <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>
+            {!startOpen && <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>}
             <button type="submit" disabled={busy} className={primaryButton} style={primaryStyle}>
-              {busy ? 'Gerando QR code…' : 'Continuar'}
+              {busy ? 'Gerando QR code…' : 'Gerar QR code'}
             </button>
           </div>
         </form>

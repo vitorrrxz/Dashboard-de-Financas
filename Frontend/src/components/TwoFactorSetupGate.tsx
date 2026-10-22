@@ -36,7 +36,7 @@ export function TwoFactorSetupGate({ onEnabled, onLogout }: TwoFactorSetupGatePr
             Google/GitHub), um código do aplicativo autenticador do celular.
           </p>
         </div>
-        <TwoFactorSettings onEnabled={onEnabled} />
+        <TwoFactorSettings onEnabled={onEnabled} startOpen />
       </div>
     </main>
   );
