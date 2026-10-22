@@ -43,4 +43,14 @@ describe('Rate limit em /api/auth (FIN-007)', () => {
     for (let i = 0; i < LIMIT; i++) expect((await verify()).status).not.toBe(429);
     expect((await verify()).status).toBe(429);
   });
+
+  it('as consultas que a tela faz ao abrir não gravam contagem no banco (FIN-124)', async () => {
+    await prisma.rateLimit.deleteMany();
+    const ip = '203.0.113.4';
+    // Várias ao mesmo tempo, como a tela faz: no Turso, as gravações simultâneas davam SQLITE_BUSY.
+    const responses = await Promise.all(['/get-session', '/list-accounts', '/social-providers', '/two-factor-policy']
+      .flatMap(path => Array.from({ length: LIMIT + 2 }, () => request(app).get(`/api/auth${path}`).set('X-Forwarded-For', ip))));
+    for (const res of responses) expect(res.status).not.toBe(429);
+    expect(await prisma.rateLimit.count()).toBe(0);
+  });
 });
