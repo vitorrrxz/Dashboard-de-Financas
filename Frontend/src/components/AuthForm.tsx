@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Mail, Lock, User, ArrowRight, ArrowLeft, ShieldCheck } from 'lucide-react';
 import {
-  getSocialProviders, signIn, signInSocial, signUp, takeOAuthError, verifyTwoFactor,
+  getSocialProviders, signIn, signInSocial, signUp, takeOAuthError, takeTwoFactorRedirect, verifyTwoFactor,
   SOCIAL_PROVIDER_LABELS, type AuthUser, type SocialProvider,
 } from '../services/auth';
 import { recoveryNotice } from '../utils/twoFactor';
@@ -35,6 +35,8 @@ export function AuthForm({ onLogin }: AuthFormProps) {
     // Voltou do provedor com erro (?error=): mostra e tira da barra de endereço.
     const oauthError = takeOAuthError();
     if (oauthError) setError(oauthError);
+    // FIN-123: voltou do provedor numa conta com verificação em duas etapas — falta só o código.
+    if (takeTwoFactorRedirect()) setTwoFactorStep(true);
     let cancelled = false;
     getSocialProviders()
       .then(list => { if (!cancelled) setProviders(list); })

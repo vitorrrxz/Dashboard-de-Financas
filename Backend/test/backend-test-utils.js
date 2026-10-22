@@ -19,7 +19,7 @@ export const TEST_AUTH_SECRET = 'test_auth_secret_' + 'x'.repeat(40); // >= 32 c
 // concordarem em onde ele está, sem um terceiro lugar para configurar o mesmo valor duas vezes.
 export const TEST_TEMPLATE_DB = './test_template.db';
 
-export async function createTestApp(dbName, { authRateLimit, frontendDir, socialProviders = {} } = {}) {
+export async function createTestApp(dbName, { authRateLimit, frontendDir, socialProviders = {}, twoFactorRequired = false } = {}) {
   const dbFile = `./test_${dbName}.db`;
   for (const suffix of ['', '-journal', '-wal', '-shm']) {
     if (existsSync(dbFile + suffix)) unlinkSync(dbFile + suffix);
@@ -38,6 +38,9 @@ export async function createTestApp(dbName, { authRateLimit, frontendDir, social
   // FIN-108: pasta do build do frontend servida pela API. Sem `frontendDir`, vazia — mesmo que o .env de
   // quem roda os testes defina FRONTEND_DIR, porque o dotenv não sobrescreve variável que já existe.
   process.env.FRONTEND_DIR = frontendDir ?? '';
+  // FIN-123: a verificação em duas etapas obrigatória fica de fora, a não ser no teste dela — senão
+  // cada teste teria de ativá-la antes de usar qualquer rota.
+  process.env.TWO_FACTOR_REQUIRED = twoFactorRequired ? 'true' : 'false';
   // FIN-122: login social desligado, a não ser que o teste passe credenciais (ex.: { google: true }).
   for (const provider of ['GOOGLE', 'GITHUB', 'MICROSOFT']) {
     const on = socialProviders[provider.toLowerCase()];

@@ -6,7 +6,8 @@ import { createAuthClient } from 'better-auth/client';
 import { twoFactorClient } from 'better-auth/client/plugins';
 import { API_URL } from './api';
 
-export type AuthUser = { id: string; name: string; email: string };
+/** `twoFactorEnabled`: a verificação em duas etapas está ativa (FIN-123: obrigatória para usar o app). */
+export type AuthUser = { id: string; name: string; email: string; twoFactorEnabled?: boolean };
 
 const authClient = createAuthClient({
   // Vazia, a API é a da própria origem da página (build na Vercel/Docker — ver api.ts).
@@ -28,10 +29,12 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_PASSWORD: 'Senha incorreta.',
   INVALID_CODE: 'Código de verificação inválido.',
   INVALID_BACKUP_CODE: 'Código de recuperação inválido.',
-  INVALID_TWO_FACTOR_COOKIE: 'A verificação expirou. Volte e entre de novo com e-mail e senha.',
+  INVALID_TWO_FACTOR_COOKIE: 'A verificação expirou. Volte e entre de novo.',
   FAILED_TO_UNLINK_LAST_ACCOUNT: 'Esta é a única forma de entrar na sua conta e não pode ser desconectada.',
   SOCIAL_ACCOUNT_ALREADY_LINKED: 'Esta conta do provedor já está conectada.',
   INVALID_CALLBACK_URL: 'Endereço de retorno não permitido.',
+  TWO_FACTOR_REQUIRED: 'A verificação em duas etapas é obrigatória e não pode ser desativada.',
+  TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE: 'Muitas tentativas. Entre de novo para receber um novo desafio.',
 };
 
 type ClientError = { code?: string; message?: string; status?: number } | null;
@@ -47,7 +50,7 @@ function toAuthUser(value: unknown): AuthUser {
   if (typeof u.id !== 'string' || typeof u.name !== 'string' || typeof u.email !== 'string') {
     throw new Error('Resposta inesperada do servidor. Tente novamente.');
   }
-  return { id: u.id, name: u.name, email: u.email };
+  return { id: u.id, name: u.name, email: u.email, twoFactorEnabled: u.twoFactorEnabled === true };
 }
 
 /** Quem está logado neste navegador, ou `null`. Lança se o servidor não responder (sem conexão). */
@@ -92,9 +95,27 @@ export async function isTwoFactorEnabled(): Promise<boolean> {
   return Boolean((data?.user as { twoFactorEnabled?: boolean | null } | undefined)?.twoFactorEnabled);
 }
 
+/** FIN-123 — a verificação em duas etapas é obrigatória neste servidor. */
+export async function getTwoFactorPolicy(): Promise<{ required: boolean }> {
+  const { data, error } = await authClient.$fetch<{ required?: unknown }>('/two-factor-policy', { method: 'GET' });
+  if (error) throw toError(error);
+  return { required: data?.required === true };
+}
+
+/** A conta tem senha (quem entrou só pelo Google/GitHub não tem, e não a digita para mexer no 2FA). */
+export async function hasPassword(): Promise<boolean> {
+  const { data, error } = await authClient.listAccounts();
+  if (error) throw toError(error);
+  return (data ?? []).some(account => account.providerId === 'credential');
+}
+
+// Sem senha (conta só do Google/GitHub), o servidor dispensa o campo (allowPasswordless); o tipo do
+// cliente não sabe disso e sempre o pede.
+const passwordBody = (password?: string) => (password ? { password } : {}) as { password: string };
+
 /** Primeiro passo da ativação: com a senha, gera o segredo (URI otpauth) e os códigos de recuperação. */
-export async function startTwoFactorSetup(password: string): Promise<{ totpURI: string; backupCodes: string[] }> {
-  const { data, error } = await authClient.twoFactor.enable({ password });
+export async function startTwoFactorSetup(password?: string): Promise<{ totpURI: string; backupCodes: string[] }> {
+  const { data, error } = await authClient.twoFactor.enable(passwordBody(password));
   if (error) throw toError(error);
   // `method: 'otp'` é o 2FA por código enviado (e-mail/SMS), que o FinFlow não usa.
   if (!data || data.method !== 'totp' || typeof data.totpURI !== 'string' || !Array.isArray(data.backupCodes)) {
@@ -109,9 +130,29 @@ export async function confirmTwoFactorSetup(code: string): Promise<void> {
   if (error) throw toError(error);
 }
 
-export async function disableTwoFactor(password: string): Promise<void> {
-  const { error } = await authClient.twoFactor.disable({ password });
+export async function disableTwoFactor(password?: string): Promise<void> {
+  const { error } = await authClient.twoFactor.disable(passwordBody(password));
   if (error) throw toError(error);
+}
+
+/** FIN-123 — o QR code da verificação já ativa, para configurar outro celular (o mesmo segredo). */
+export async function getTwoFactorUri(password?: string): Promise<string> {
+  const { data, error } = await authClient.twoFactor.getTotpUri(passwordBody(password));
+  if (error) throw toError(error);
+  if (typeof data?.totpURI !== 'string') throw new Error('Resposta inesperada do servidor.');
+  return data.totpURI;
+}
+
+/**
+ * FIN-123 — voltou do Google/GitHub numa conta com verificação em duas etapas (`?twoFactor=1`): a tela
+ * de login abre no passo do código. Tira o parâmetro da barra de endereço, como takeOAuthError.
+ */
+export function takeTwoFactorRedirect(): boolean {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('twoFactor') !== '1') return false;
+  url.searchParams.delete('twoFactor');
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  return true;
 }
 
 // FIN-122 — login com Google, GitHub e Microsoft.

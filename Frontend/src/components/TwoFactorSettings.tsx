@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import {
-  confirmTwoFactorSetup, disableTwoFactor, isTwoFactorEnabled, startTwoFactorSetup,
+  confirmTwoFactorSetup, disableTwoFactor, getTwoFactorPolicy, getTwoFactorUri, hasPassword, isTwoFactorEnabled,
+  startTwoFactorSetup,
 } from '../services/auth';
 import { FormField } from './shared/FormField';
 import { twoFactorSetupFromUri, type TwoFactorSetup } from '../utils/twoFactor';
 
-type Phase = 'idle' | 'password' | 'setup' | 'codes' | 'disable';
+// `reshow-password`/`reshow`: o QR code da verificação já ativa, para configurar outro celular (FIN-123).
+type Phase = 'idle' | 'password' | 'setup' | 'codes' | 'disable' | 'reshow-password' | 'reshow';
 
 const UNEXPECTED = 'Resposta inesperada do servidor.';
 
@@ -16,16 +18,39 @@ const primaryButton = 'px-4 py-2.5 rounded-xl text-sm text-on-accent font-semibo
 const primaryStyle = { background: 'var(--color-primary)' };
 const secondaryButton = 'px-4 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50';
 
+/** QR code e chave do aplicativo autenticador. Fundo branco fixo, em qualquer tema: leitores de QR code precisam do contraste. */
+function AuthenticatorQr({ data }: { data: TwoFactorSetup }) {
+  return (
+    <img src={data.qrCode} alt="QR code para configurar o aplicativo autenticador" width={180} height={180}
+      className="rounded-xl p-2 self-center md:self-start shrink-0"
+      style={{ backgroundColor: '#ffffff', imageRendering: 'pixelated' }} />
+  );
+}
+
+const groupedSecret = (secret: string) => secret.match(/.{1,4}/g)?.join(' ') ?? secret;
+
+interface TwoFactorSettingsProps {
+  /** Chamado quando a ativação termina (códigos de recuperação guardados) — ver TwoFactorSetupGate. */
+  onEnabled?: () => void;
+  /** Abre já no primeiro passo da ativação, sem o botão "Ativar" antes (TwoFactorSetupGate). */
+  startOpen?: boolean;
+}
+
 /**
  * FIN-078/FIN-121 — ativação e desativação da verificação em duas etapas (TOTP), pelo plugin
  * twoFactor do Better Auth. Ativar tem três passos: a senha gera o QR code, um código do aplicativo
  * confirma, e os códigos de recuperação aparecem em seguida, uma única vez. Desativar pede a senha.
+ *
+ * FIN-123 — com a verificação obrigatória no servidor, não há "Desativar": no lugar, "Configurar em
+ * outro celular" mostra o mesmo QR code de novo. Conta sem senha (só Google/GitHub) não digita senha.
  */
-export function TwoFactorSettings() {
+export function TwoFactorSettings({ onEnabled, startOpen = false }: TwoFactorSettingsProps = {}) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [required, setRequired] = useState(false);
+  const [needsPassword, setNeedsPassword] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [phase, setPhase] = useState<Phase>(startOpen ? 'password' : 'idle');
   const [setupData, setSetupData] = useState<TwoFactorSetup | null>(null);
   // Gerados junto com o segredo, mas só mostrados depois da confirmação com o código.
   const [pendingCodes, setPendingCodes] = useState<string[]>([]);
@@ -40,9 +65,11 @@ export function TwoFactorSettings() {
     let cancelled = false;
     (async () => {
       try {
-        const active = await isTwoFactorEnabled();
+        const [active, policy, withPassword] = await Promise.all([isTwoFactorEnabled(), getTwoFactorPolicy(), hasPassword()]);
         if (cancelled) return;
         setEnabled(active);
+        setRequired(policy.required);
+        setNeedsPassword(withPassword);
         setLoadError('');
       } catch (err) {
         if (!cancelled) setLoadError(errorMessage(err));
@@ -62,12 +89,12 @@ export function TwoFactorSettings() {
     setReloadKey(k => k + 1);
   };
 
-  const startSetup = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const startSetup = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const { totpURI, backupCodes } = await startTwoFactorSetup(password);
+      const { totpURI, backupCodes } = await startTwoFactorSetup(needsPassword ? password : undefined);
       const data = twoFactorSetupFromUri(totpURI);
       if (!data || backupCodes.length === 0) throw new Error(UNEXPECTED);
       resetForm();
@@ -107,6 +134,25 @@ export function TwoFactorSettings() {
     setRecoveryCodes([]);
     setPhase('idle');
     setNotice('Verificação em duas etapas ativada.');
+    onEnabled?.();
+  };
+
+  const showQrAgain = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const data = twoFactorSetupFromUri(await getTwoFactorUri(needsPassword ? password : undefined));
+      if (!data) throw new Error(UNEXPECTED);
+      resetForm();
+      setSetupData(data);
+      setPhase('reshow');
+    } catch (err) {
+      setError(errorMessage(err));
+      setPassword('');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const copyCodes = async () => {
@@ -123,7 +169,7 @@ export function TwoFactorSettings() {
     setBusy(true);
     setError('');
     try {
-      await disableTwoFactor(password);
+      await disableTwoFactor(needsPassword ? password : undefined);
       resetForm();
       setEnabled(false);
       setPhase('idle');
@@ -174,19 +220,33 @@ export function TwoFactorSettings() {
       );
     }
 
-    if (phase === 'setup' && setupData) {
-      const grouped = setupData.secret.match(/.{1,4}/g)?.join(' ') ?? setupData.secret;
+    if (phase === 'reshow' && setupData) {
       return (
         <div className="flex flex-col md:flex-row gap-6">
-          {/* Fundo branco fixo, em qualquer tema: leitores de QR code precisam do contraste. */}
-          <img src={setupData.qrCode} alt="QR code para configurar o aplicativo autenticador" width={180} height={180}
-            className="rounded-xl p-2 self-center md:self-start shrink-0"
-            style={{ backgroundColor: '#ffffff', imageRendering: 'pixelated' }} />
+          <AuthenticatorQr data={setupData} />
+          <div className="flex-1 min-w-0">
+            <ol className="text-sm text-textMuted space-y-1.5 list-decimal ml-4 mb-4">
+              <li>No aplicativo autenticador do celular novo, adicione uma conta e escaneie o QR code.</li>
+              <li>
+                Sem câmera? Digite a chave <code className="text-white font-mono break-all">{groupedSecret(setupData.secret)}</code>
+              </li>
+              <li>Os códigos dos dois celulares passam a valer — apague a conta do antigo, se não for mais usá-lo.</li>
+            </ol>
+            <button type="button" onClick={cancel} className={primaryButton} style={primaryStyle}>Pronto</button>
+          </div>
+        </div>
+      );
+    }
+
+    if (phase === 'setup' && setupData) {
+      return (
+        <div className="flex flex-col md:flex-row gap-6">
+          <AuthenticatorQr data={setupData} />
           <div className="flex-1 min-w-0">
             <ol className="text-sm text-textMuted space-y-1.5 list-decimal ml-4 mb-4">
               <li>No aplicativo autenticador, adicione uma conta e escaneie o QR code.</li>
               <li>
-                Sem câmera? Digite a chave <code className="text-white font-mono break-all">{grouped}</code>
+                Sem câmera? Digite a chave <code className="text-white font-mono break-all">{groupedSecret(setupData.secret)}</code>
               </li>
               <li>Confirme com o código de 6 dígitos que o aplicativo mostrar.</li>
             </ol>
@@ -213,12 +273,33 @@ export function TwoFactorSettings() {
           <p className="flex flex-wrap items-center gap-2 text-sm">
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold border border-teal-500/30 bg-teal-500/10 text-teal-400">Ativa</span>
           </p>
-          {phase === 'disable' ? (
-            <form onSubmit={confirmDisable} className="space-y-3 mt-4">
-              <FormField label="Sua senha" htmlFor="twofa-disable-password">
-                <input id="twofa-disable-password" type="password" required autoComplete="current-password"
+          {phase === 'reshow-password' ? (
+            <form onSubmit={showQrAgain} className="space-y-3 mt-4 max-w-sm">
+              <FormField label="Sua senha" htmlFor="twofa-reshow-password">
+                <input id="twofa-reshow-password" type="password" required autoComplete="current-password" autoFocus
                   value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
               </FormField>
+              <div className="flex flex-wrap gap-3 pt-1">
+                <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>
+                <button type="submit" disabled={busy} className={primaryButton} style={primaryStyle}>
+                  {busy ? 'Carregando…' : 'Mostrar QR code'}
+                </button>
+              </div>
+            </form>
+          ) : required ? (
+            <button type="button" disabled={busy}
+              onClick={() => { resetForm(); setNotice(''); if (needsPassword) setPhase('reshow-password'); else void showQrAgain(); }}
+              className={`${secondaryButton} mt-4`}>
+              Configurar em outro celular
+            </button>
+          ) : phase === 'disable' ? (
+            <form onSubmit={confirmDisable} className="space-y-3 mt-4">
+              {needsPassword && (
+                <FormField label="Sua senha" htmlFor="twofa-disable-password">
+                  <input id="twofa-disable-password" type="password" required autoComplete="current-password"
+                    value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
+                </FormField>
+              )}
               <div className="flex flex-wrap gap-3 pt-1">
                 <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>
                 <button type="submit" disabled={busy}
@@ -239,14 +320,21 @@ export function TwoFactorSettings() {
     if (phase === 'password') {
       return (
         <form onSubmit={startSetup} className="space-y-3 max-w-sm">
-          <FormField label="Sua senha" htmlFor="twofa-enable-password">
-            <input id="twofa-enable-password" type="password" required autoComplete="current-password" autoFocus
-              value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
-          </FormField>
+          {needsPassword ? (
+            <>
+              <p className="text-sm text-textMuted">Confirme sua senha para gerar o QR code.</p>
+              <FormField label="Sua senha" htmlFor="twofa-enable-password">
+                <input id="twofa-enable-password" type="password" required autoComplete="current-password" autoFocus
+                  value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
+              </FormField>
+            </>
+          ) : (
+            <p className="text-sm text-textMuted">Tenha o aplicativo autenticador aberto no celular.</p>
+          )}
           <div className="flex flex-wrap gap-3 pt-1">
-            <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>
+            {!startOpen && <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>}
             <button type="submit" disabled={busy} className={primaryButton} style={primaryStyle}>
-              {busy ? 'Gerando QR code…' : 'Continuar'}
+              {busy ? 'Gerando QR code…' : 'Gerar QR code'}
             </button>
           </div>
         </form>
@@ -254,8 +342,10 @@ export function TwoFactorSettings() {
     }
 
     return (
-      <button type="button" onClick={() => { resetForm(); setNotice(''); setPhase('password'); }} className={primaryButton} style={primaryStyle}>
-        Ativar verificação em duas etapas
+      <button type="button" disabled={busy}
+        onClick={() => { resetForm(); setNotice(''); if (needsPassword) setPhase('password'); else void startSetup(); }}
+        className={primaryButton} style={primaryStyle}>
+        {busy ? 'Gerando QR code…' : 'Ativar verificação em duas etapas'}
       </button>
     );
   };
@@ -267,7 +357,7 @@ export function TwoFactorSettings() {
           <h2 id="twofa-title" className="text-base font-medium text-white">Verificação em duas etapas</h2>
           <p className="text-sm text-textMuted">
             Além da senha, o login pede um código de 6 dígitos do aplicativo autenticador do celular (Google Authenticator,
-            Microsoft Authenticator, Authy, 1Password…).
+            Microsoft Authenticator, Authy, 1Password…).{required && ' Obrigatória em todas as contas.'}
           </p>
         </div>
       </div>

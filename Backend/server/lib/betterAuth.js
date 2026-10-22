@@ -3,7 +3,8 @@ import bcrypt from 'bcrypt';
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { APIError, createAuthEndpoint, createAuthMiddleware } from 'better-auth/api';
-import { setSessionCookie } from 'better-auth/cookies';
+import { deleteSessionCookie, setSessionCookie } from 'better-auth/cookies';
+import { generateRandomString } from 'better-auth/crypto';
 import { bearer, twoFactor } from 'better-auth/plugins';
 import { prisma } from './prisma.js';
 
@@ -36,11 +37,12 @@ const authAttemptsRule = { window: 15 * 60, max: Number(process.env.AUTH_RATE_LI
 // Login desativado temporariamente: com VITE_AUTH_DISABLED=true (fora de produção), o frontend pula a
 // tela de login e pede aqui uma sessão do primeiro usuário cadastrado — o app é de um usuário só. Sem a
 // variável, a rota responde 404 e o login volta a ser exigido.
+const localSessionEnabled = () => process.env.VITE_AUTH_DISABLED === 'true' && process.env.NODE_ENV !== 'production';
 const localSession = () => ({
   id: 'local-session',
   endpoints: {
     localSession: createAuthEndpoint('/local-session', { method: 'POST' }, async ctx => {
-      if (process.env.VITE_AUTH_DISABLED !== 'true' || process.env.NODE_ENV === 'production') {
+      if (!localSessionEnabled()) {
         throw new APIError('NOT_FOUND', { message: 'Não encontrado.' });
       }
       // Banco vazio: cria o usuário local sem senha (o login fica desativado mesmo).
@@ -84,6 +86,39 @@ const socialProvidersList = () => ({
       async ctx => ctx.json({ providers: enabledSocialProviders })),
   },
 });
+
+// FIN-123 — verificação em duas etapas obrigatória: sem ela ativa, a sessão só serve para ativá-la — as
+// rotas do app respondem 403 (requireAuth) e a tela leva direto à configuração do aplicativo
+// autenticador. TWO_FACTOR_REQUIRED=false desliga a exigência (a suíte de testes usa); com o login
+// desativado (sessão local), não faz sentido pedir código.
+export const TWO_FACTOR_REQUIRED = process.env.TWO_FACTOR_REQUIRED !== 'false' && !localSessionEnabled();
+
+// A tela pergunta se a verificação é obrigatória, para levar quem ainda não ativou direto à configuração.
+const twoFactorPolicy = () => ({
+  id: 'two-factor-policy',
+  endpoints: {
+    twoFactorPolicy: createAuthEndpoint('/two-factor-policy', { method: 'GET' },
+      async ctx => ctx.json({ required: TWO_FACTOR_REQUIRED })),
+  },
+});
+
+// FIN-123 — o plugin twoFactor só pede o código no login com e-mail e senha: no login social, a volta
+// do provedor (/callback/:id) já abria a sessão, e a verificação ficava para trás. Aqui a volta do
+// provedor faz o mesmo que o plugin faz no login com senha: troca a sessão recém-aberta pelo desafio
+// do segundo passo (cookie `two_factor` + registro em Verification, válidos por 10 minutos), que
+// /two-factor/verify-totp e /verify-backup-code completam.
+const TWO_FACTOR_CHALLENGE_SECONDS = 10 * 60;
+async function startTwoFactorChallenge(ctx, { session, user }) {
+  deleteSessionCookie(ctx, true);
+  await ctx.context.internalAdapter.deleteSession(session.token);
+  ctx.context.setNewSession(null);
+  const cookie = ctx.context.createAuthCookie('two_factor', { maxAge: TWO_FACTOR_CHALLENGE_SECONDS });
+  const identifier = `2fa-${generateRandomString(20)}`;
+  const expiresAt = new Date(Date.now() + TWO_FACTOR_CHALLENGE_SECONDS * 1000);
+  await ctx.context.internalAdapter.createVerificationValue({ value: user.id, identifier, expiresAt });
+  await ctx.context.internalAdapter.createVerificationValue({ value: '0', identifier: `2fa-attempts-${identifier}`, expiresAt });
+  await ctx.setSignedCookie(cookie.name, identifier, ctx.context.secret, cookie.attributes);
+}
 
 const FRONTEND_ORIGIN = new URL(process.env.FRONTEND_URL || 'http://localhost:5173').origin;
 // FIN-122 — para onde o login social pode mandar a pessoa depois do provedor: caminho relativo ou o
@@ -133,6 +168,11 @@ export const auth = betterAuth({
   },
   hooks: {
     before: createAuthMiddleware(async ctx => {
+      // FIN-123 — com a verificação obrigatória, desligá-la não é opção (trocar de celular é mostrar o
+      // QR code de novo: /two-factor/get-totp-uri).
+      if (ctx.path === '/two-factor/disable' && TWO_FACTOR_REQUIRED) {
+        throw new APIError('FORBIDDEN', { code: 'TWO_FACTOR_REQUIRED', message: 'A verificação em duas etapas é obrigatória.' });
+      }
       if (ctx.path === '/sign-in/social' || ctx.path === '/link-social') {
         if (!CALLBACK_FIELDS.every(field => isAppUrl(ctx.body?.[field]))) {
           throw new APIError('FORBIDDEN', { code: 'INVALID_CALLBACK_URL', message: 'Endereço de retorno não permitido.' });
@@ -145,6 +185,15 @@ export const auth = betterAuth({
       if (typeof name !== 'string' || !name.trim()) {
         throw new APIError('BAD_REQUEST', { code: 'NAME_REQUIRED', message: 'Nome completo é obrigatório.' });
       }
+    }),
+    after: createAuthMiddleware(async ctx => {
+      if (ctx.path !== '/callback/:id') return;
+      // Só o login abre sessão aqui; conectar um provedor (linkSocial) volta pelo mesmo caminho sem abrir.
+      const data = ctx.context.newSession;
+      if (!data?.user.twoFactorEnabled) return;
+      await startTwoFactorChallenge(ctx, data);
+      // A tela de login abre direto no passo do código.
+      throw ctx.redirect(`${FRONTEND_ORIGIN}/?twoFactor=1`);
     }),
   },
   rateLimit: {
@@ -164,7 +213,12 @@ export const auth = betterAuth({
     // Mesmo formato dos ids que o app já usa (@default(uuid()) no schema).
     database: { generateId: 'uuid' },
   },
-  plugins: [twoFactor({ issuer: 'FinFlow' }), bearer(), localSession(), socialProvidersList()],
+  // allowPasswordless: quem entrou só pelo Google/GitHub (sem senha) também ativa a verificação; quem tem
+  // senha continua tendo de digitá-la para ativar, desativar ou ver o QR code de novo.
+  plugins: [
+    twoFactor({ issuer: 'FinFlow', allowPasswordless: true }),
+    bearer(), localSession(), socialProvidersList(), twoFactorPolicy(),
+  ],
 });
 
 /** Confere a senha do usuário (ex.: restaurar backup). `false` também para conta sem senha. */
