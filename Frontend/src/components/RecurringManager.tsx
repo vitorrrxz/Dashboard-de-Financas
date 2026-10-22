@@ -5,6 +5,7 @@ import type { Account, RecurrenceFrequency, RecurringTransaction, Transaction } 
 import { CATEGORIES, EXPENSE_CATEGORIES, categoryDot } from '../utils/categories';
 import { todayISO } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
+import { bankGroupOf, groupByBank, primaryAccountOf } from '../utils/accountGroups';
 import {
   detectSubscriptions, monthlySubscriptionCost, readDismissedSubscriptions, dismissSubscription,
   type DetectedSubscription,
@@ -46,6 +47,9 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<RecurringFormData>(EMPTY_RECURRING);
+  // O vínculo é com o banco: conta corrente e cartão do mesmo banco aparecem uma vez só, e grava a
+  // conta que representa o banco (`primaryAccountOf`).
+  const bankGroups = useMemo(() => groupByBank(accounts), [accounts]);
 
   // FIN-111 — sugestões de assinatura, descartadas só neste navegador (ver utils/subscriptions.ts).
   const [dismissed, setDismissed] = useState<Set<string>>(() => readDismissedSubscriptions());
@@ -112,8 +116,11 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
   /** Envia o formulário, aplicando o sinal do valor conforme despesa/receita. */
   const handleSave = async () => {
     if (!form.name.trim() || form.amount <= 0 || !form.nextOccurrence) return;
+    const bank = bankGroupOf(bankGroups, form.accountId);
     const payload: RecurringFormData = {
       ...form,
+      // Recorrência antiga ligada ao cartão passa para a conta do banco ao ser salva.
+      accountId: bank ? primaryAccountOf(bank).id : form.accountId,
       amount: kind === 'expense' ? -Math.abs(form.amount) : Math.abs(form.amount),
     };
     try {
@@ -187,7 +194,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
         )}
 
         {recurring.map(rec => {
-          const account = accounts.find(a => a.id === rec.accountId);
+          const bank = bankGroupOf(bankGroups, rec.accountId);
           return (
             <div key={rec.id} className={`panel rounded-xl p-4 flex items-center gap-4 ${rec.active ? '' : 'opacity-60'}`}>
               <div className="flex-1 min-w-0">
@@ -204,7 +211,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
                 </div>
                 <p className="text-xs text-textMuted flex items-center gap-1.5 flex-wrap">
                   <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0" style={categoryDot(rec.category)} aria-hidden="true"/>{rec.category}
-                  {account ? ` · ${account.name}` : ''}
+                  {bank ? ` · ${bank.bank}` : ''}
                   {rec.active ? ` · próxima em ${formatDateBR(rec.nextOccurrence)}` : ''}
                 </p>
               </div>
@@ -291,11 +298,14 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
               </FormField>
 
               <FormField label="Vincular à Conta" htmlFor="recurring-account">
-                <select id="recurring-account" value={form.accountId || ''}
-                  onChange={e => set('accountId', e.target.value)} className="input-field">
+                <select id="recurring-account" value={bankGroupOf(bankGroups, form.accountId)?.key ?? ''}
+                  onChange={e => {
+                    const bank = bankGroups.find(g => g.key === e.target.value);
+                    set('accountId', bank ? primaryAccountOf(bank).id : '');
+                  }} className="input-field">
                   <option value="">Sem conta específica</option>
-                  {accounts.map(acc => (
-                    <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
+                  {bankGroups.map(group => (
+                    <option key={group.key} value={group.key}>{group.bank}</option>
                   ))}
                 </select>
               </FormField>

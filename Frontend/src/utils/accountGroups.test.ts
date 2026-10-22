@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { accountIdsOf, groupByBank, inAccounts } from './accountGroups';
+import { accountIdsOf, bankGroupOf, groupByBank, inAccounts, primaryAccountOf } from './accountGroups';
 import type { Account } from '../types';
 
 function acc(id: string, bank: string, type: Account['type'] = 'checking'): Account {
@@ -14,6 +14,23 @@ describe('groupByBank', () => {
       ['Itaú', ['cc', 'card']],
       ['Nubank', ['nu']],
     ]);
+  });
+});
+
+describe('primaryAccountOf / bankGroupOf', () => {
+  it('o banco é representado pela conta corrente, mesmo listada depois do cartão', () => {
+    const groups = groupByBank([acc('card', 'Itaú', 'credit'), acc('cc', 'itau')]);
+    expect(primaryAccountOf(groups[0]).id).toBe('cc');
+  });
+  it('sem conta corrente, outra que não seja cartão; só cartão, o cartão', () => {
+    expect(primaryAccountOf(groupByBank([acc('card', 'XP', 'credit'), acc('inv', 'XP', 'investment')])[0]).id).toBe('inv');
+    expect(primaryAccountOf(groupByBank([acc('card', 'C6', 'credit')])[0]).id).toBe('card');
+  });
+  it('acha o banco do cartão; sem conta, nenhum', () => {
+    const groups = groupByBank(accounts);
+    expect(bankGroupOf(groups, 'card')?.bank).toBe('Itaú');
+    expect(bankGroupOf(groups, undefined)).toBeUndefined();
+    expect(bankGroupOf(groups, 'excluida')).toBeUndefined();
   });
 });
 
