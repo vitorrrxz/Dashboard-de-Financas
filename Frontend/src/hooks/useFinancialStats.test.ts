@@ -2,15 +2,21 @@
 // função pura extraída em FIN-086 (não precisa renderizar componentes React).
 import { describe, it, expect } from 'vitest';
 import { billPeriod, computeFinancialStats } from './useFinancialStats';
-import { advanceDays } from '../utils/dates';
+import { advanceDays, dateInMonth, shiftMonth } from '../utils/dates';
 import { todayISO } from '../utils/debts';
-import type { Account, Debt, Transaction } from '../types';
+import type { Account, Debt, RecurringTransaction, Transaction } from '../types';
 
 function tx(overrides: Partial<Transaction>): Transaction {
   return { id: Math.random().toString(), name: 'Tx', category: 'Outros', date: '2026-01-01', amount: 0, ...overrides };
 }
 function acc(overrides: Partial<Account>): Account {
   return { id: Math.random().toString(), name: 'Conta', bank: 'Banco', type: 'checking', balance: 0, color: '#fff', ...overrides };
+}
+function rec(overrides: Partial<RecurringTransaction>): RecurringTransaction {
+  return {
+    id: Math.random().toString(), name: 'Aluguel', category: 'Moradia', amount: -1000, frequency: 'monthly',
+    nextOccurrence: '2026-01-01', active: true, createdAt: '2026-01-01T00:00:00.000Z', ...overrides,
+  };
 }
 function debt(overrides: Partial<Debt>): Debt {
   return {
@@ -210,5 +216,60 @@ describe('computeFinancialStats — saídas por dia (sobra quinzenal)', () => {
     expect(total).toBe(s.monthCardExpense + s.monthDebtPayments);
     expect(s.monthOutflows).toContainEqual({ day: 10, amount: 100 });
     expect(s.monthOutflows).toContainEqual({ day: 25, amount: 50 });
+  });
+});
+
+describe('computeFinancialStats — recorrências nas dívidas do mês', () => {
+  const month = todayISO().slice(0, 7);
+  const nextMonth = shiftMonth(month, 1);
+
+  it('a que ainda vai cair no mês entra nas dívidas, na régua e em débito/PIX', () => {
+    const s = computeFinancialStats([], [acc({ id: 'chk' })], [], null, [],
+      [rec({ accountId: 'chk', amount: -1500, nextOccurrence: dateInMonth(month, 28) })]);
+    expect(s.monthRecurring).toBe(1500);
+    expect(s.monthOutflows).toContainEqual({ day: 28, amount: 1500 });
+    expect(s.monthDebtsByType.debitPix).toBe(1500);
+  });
+
+  it('a já lançada no mês conta uma vez, pela transação gerada; outra despesa com nome diferente não conta', () => {
+    const txs = [
+      tx({ accountId: 'chk', name: 'Aluguel', amount: -1000, date: dateInMonth(month, 1) }),
+      tx({ accountId: 'chk', name: 'Mercado', amount: -1000, date: dateInMonth(month, 1) }),
+    ];
+    const s = computeFinancialStats(txs, [acc({ id: 'chk' })], [], null, [],
+      [rec({ accountId: 'chk', nextOccurrence: dateInMonth(nextMonth, 1) })]);
+    expect(s.monthRecurring).toBe(1000);
+    expect(s.monthOutflows).toEqual([{ day: 1, amount: 1000 }]);
+  });
+
+  it('semanal conta cada ocorrência que ainda cai no mês', () => {
+    const s = computeFinancialStats([], [], [], null, [],
+      [rec({ amount: -50, frequency: 'weekly', nextOccurrence: dateInMonth(month, 1) })]);
+    // Do dia 1, de 7 em 7: 1, 8, 15, 22, 29 — o 29 só existe fora de fevereiro comum.
+    const occurrences = [1, 8, 15, 22, 29].filter(d => dateInMonth(month, d).endsWith(String(d).padStart(2, '0')));
+    expect(s.monthRecurring).toBe(50 * occurrences.length);
+  });
+
+  it('no cartão, a lançada já está na fatura (não soma de novo); a que vai cair nesta fatura entra como crédito', () => {
+    const card = acc({ id: 'card', type: 'credit' });
+    const launched = tx({ accountId: 'card', name: 'Streaming', amount: -40, date: dateInMonth(month, 1) });
+    const s = computeFinancialStats([launched], [card], [], null, [], [
+      rec({ accountId: 'card', name: 'Streaming', amount: -40, nextOccurrence: dateInMonth(nextMonth, 1) }),
+      rec({ accountId: 'card', name: 'Academia', amount: -90, nextOccurrence: dateInMonth(month, 28) }),
+    ]);
+    expect(s.monthCardExpense).toBe(40);
+    expect(s.monthRecurring).toBe(90);
+    expect(s.monthDebtsByType.credit).toBe(130);
+  });
+
+  it('pausada, receita, de outro mês ou de outra conta filtrada não entram', () => {
+    const s = computeFinancialStats([], [acc({ id: 'a' }), acc({ id: 'b' })], [], 'a', [], [
+      rec({ accountId: 'a', active: false, nextOccurrence: dateInMonth(month, 28) }),
+      rec({ accountId: 'a', amount: 3000, nextOccurrence: dateInMonth(month, 28) }),
+      rec({ accountId: 'a', nextOccurrence: dateInMonth(nextMonth, 1) }),
+      rec({ accountId: 'b', nextOccurrence: dateInMonth(month, 28) }),
+    ]);
+    expect(s.monthRecurring).toBe(0);
+    expect(s.monthOutflows).toEqual([]);
   });
 });

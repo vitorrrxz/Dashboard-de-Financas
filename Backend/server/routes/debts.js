@@ -2,7 +2,7 @@ import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
-import { debtSchema, debtUpdateSchema } from '../lib/schemas.js';
+import { debtCreateSchema, debtUpdateSchema } from '../lib/schemas.js';
 import { accountOwnershipError } from '../lib/accountAccess.js';
 
 export const router = express.Router();
@@ -20,7 +20,7 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 router.post('/', requireAuth, async (req, res) => {
-  const validation = validateBody(debtSchema, req.body);
+  const validation = validateBody(debtCreateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
     const accountError = await accountOwnershipError(req.user.userId, validation.data.accountId);

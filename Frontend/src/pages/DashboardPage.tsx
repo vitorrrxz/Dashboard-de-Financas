@@ -122,6 +122,7 @@ function PaymentTypeBreakdown({ values, tone = 'text-white' }: { values: ByPayme
 function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary; monthly: number; month: string; bonus: number; onSave: (s: Salary) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState('');
+  const [secondAmount, setSecondAmount] = useState('');
   const [frequency, setFrequency] = useState<SalaryFrequency>('monthly');
   const [payDay, setPayDay] = useState(15);
   const [bonusInput, setBonusInput] = useState('');
@@ -130,6 +131,7 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
 
   const startEdit = () => {
     setAmount(salary.amount ? String(salary.amount) : '');
+    setSecondAmount(salary.secondAmount ? String(salary.secondAmount) : '');
     setFrequency(salary.frequency);
     setPayDay(salary.payDay);
     setBonusInput(bonus ? String(bonus) : '');
@@ -142,7 +144,10 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
     setSaving(true);
     try {
       const bonusValue = Number(bonusInput) || 0;
-      await onSave({ amount: Number(amount) || 0, frequency, payDay, bonus: bonusValue, bonusHalf, bonusMonth: bonusValue > 0 ? month : null });
+      // Mensal não tem 2º pagamento: guarda o mesmo valor, que já vem preenchido se virar quinzenal.
+      const first = Number(amount) || 0;
+      const second = frequency === 'biweekly' ? Number(secondAmount) || 0 : first;
+      await onSave({ amount: first, secondAmount: second, frequency, payDay, bonus: bonusValue, bonusHalf, bonusMonth: bonusValue > 0 ? month : null });
       setEditing(false);
     } catch {
       // onSave já avisou o usuário; o formulário continua aberto para corrigir.
@@ -155,10 +160,17 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
     return (
       <form onSubmit={submit} className="flex flex-col gap-2">
         <label htmlFor="salary-amount" className="text-sm text-textMuted">
-          {frequency === 'biweekly' ? 'Valor de cada quinzena' : 'Salário mensal'}
+          {frequency === 'biweekly' ? `Salário dia ${payDay}` : 'Salário mensal'}
         </label>
         <input id="salary-amount" type="number" min="0" step="0.01" inputMode="decimal" required autoFocus
           value={amount} onChange={e => setAmount(e.target.value)} className="input-field" />
+        {frequency === 'biweekly' && (
+          <>
+            <label htmlFor="salary-second-amount" className="text-sm text-textMuted">Salário dia {payDay + 15}</label>
+            <input id="salary-second-amount" type="number" min="0" step="0.01" inputMode="decimal" required
+              value={secondAmount} onChange={e => setSecondAmount(e.target.value)} className="input-field" />
+          </>
+        )}
         <label htmlFor="salary-frequency" className="sr-only">Periodicidade</label>
         <select id="salary-frequency" value={frequency} onChange={e => setFrequency(e.target.value as SalaryFrequency)} className="input-field">
           <option value="monthly">Mensal</option>
@@ -205,8 +217,11 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
       </div>
       <p className={`text-[22px] leading-8 font-bold ${monthly === 0 ? 'text-textMuted' : 'text-teal-400'}`}>{fmt(monthly)}</p>
       <p className="text-xs text-textMuted mt-1">
-        {salary.amount === 0 ? 'Informe o salário no lápis para calcular a sobra'
-          : salary.frequency === 'biweekly' ? `Quinzenal, dias ${salary.payDay} e ${salary.payDay + 15} · 2 × ${fmt(salary.amount)}` : 'Mensal'}
+        {salaryPerMonth(salary) === 0 ? 'Informe o salário no lápis para calcular a sobra'
+          : salary.frequency === 'biweekly'
+            ? `Quinzenal, dias ${salary.payDay} e ${salary.payDay + 15} · ${salary.amount === salary.secondAmount
+              ? `2 × ${fmt(salary.amount)}` : `${fmt(salary.amount)} + ${fmt(salary.secondAmount)}`}`
+            : 'Mensal'}
       </p>
       {bonus > 0 && (
         <p className="text-xs text-teal-400 mt-0.5">
@@ -265,7 +280,7 @@ export function DashboardPage({
   const bonus = activeBonus(salary, month);
   const monthlySalary = salaryPerMonth(salary) + bonus;
   // Tudo o que se deve no mês é dívida: compras no cartão (à vista e parcelas) + parcelas cadastradas.
-  const monthDebts = stats.monthCardExpense + stats.monthDebtPayments;
+  const monthDebts = stats.monthCardExpense + stats.monthDebtPayments + stats.monthRecurring;
   // Sobra = salário − dívidas do mês. As despesas do mês são só informativas (o total gasto).
   const leftover = monthlySalary - monthDebts;
   const now = new Date();
@@ -278,7 +293,7 @@ export function DashboardPage({
     }
     const halves = biweeklyLeftovers(salary, stats.monthOutflows, monthDays, bonus);
     return halves.map((h, i) => {
-      const pay = salary.amount + (salary.bonusHalf === i + 1 ? bonus : 0);
+      const pay = (i === 0 ? salary.amount : salary.secondAmount) + (salary.bonusHalf === i + 1 ? bonus : 0);
       const until = i === 0 ? `até o dia ${halves[1].day - 1}` : 'até o fim do mês';
       return { label: `Pagamento do dia ${h.day}`, detail: `Recebe ${fmt(pay)} · dívidas ${until}: ${fmt(pay - h.leftover)}`, pay, owed: pay - h.leftover };
     });
@@ -307,7 +322,7 @@ export function DashboardPage({
     ? 'Informe o salário para ver quanto sobra depois das dívidas do mês.'
     : leftover < 0
       ? `As dívidas de ${monthName} passam o salário em ${fmt(leftover)}.`
-      : `Sobram ${fmt(leftover)} de ${monthName} depois do cartão e das parcelas.`;
+      : `Sobram ${fmt(leftover)} de ${monthName} depois do cartão, das parcelas e das recorrências.`;
 
   return (
     <>
@@ -413,6 +428,7 @@ export function DashboardPage({
                 <p className="text-sm text-textMuted">Dívidas do mês</p>
                 <p className="text-[22px] leading-8 font-bold text-debt">{fmt(monthDebts)}</p>
                 <PaymentTypeBreakdown values={stats.monthDebtsByType} tone="text-debt" />
+                {stats.monthRecurring > 0 && <p className="text-xs text-textMuted mt-1">Inclui recorrências: {fmt(stats.monthRecurring)}</p>}
               </button>
               <button type="button" onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }}
                 className="p-5 md:px-6 text-left hover:bg-white/[0.02] transition-colors">

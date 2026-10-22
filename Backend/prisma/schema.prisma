@@ -16,9 +16,10 @@ model User {
   image            String?
   updatedAt        DateTime  @default(now()) @updatedAt
   twoFactorEnabled Boolean?  @default(false)
-  // Salário informado manualmente: valor de CADA pagamento, em centavos. "biweekly" (quinzenal)
-  // = dois pagamentos no mês; "monthly" = um.
+  // Salário informado manualmente, em centavos. "monthly" = um pagamento (salaryCents);
+  // "biweekly" (quinzenal) = dois: salaryCents no 1º e salarySecondCents no 2º.
   salaryCents     Int        @default(0)
+  salarySecondCents Int      @default(0)
   salaryFrequency String     @default("monthly")
   // Quinzenal: dia do 1º pagamento (1 a 15); o 2º cai 15 dias depois (5 e 20, 15 e 30).
   salaryPayDay    Int        @default(15)

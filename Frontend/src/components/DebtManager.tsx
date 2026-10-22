@@ -10,6 +10,8 @@ import { formatBRL } from '../utils/money';
 
 const DEBT_CATEGORIES: DebtCategory[] = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
 
+const ACCOUNT_REQUIRED = 'Selecione a conta vinculada à dívida.';
+
 const EMPTY_DEBT: Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallments'> = {
   name: '',
   description: '',
@@ -21,6 +23,10 @@ const EMPTY_DEBT: Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallmen
   interestRate: 0,
   accountId: '',
 };
+
+function NoAccountsHint() {
+  return <p className="text-xs text-textMuted -mt-2">Nenhuma conta cadastrada. Cadastre uma em Contas antes de registrar a dívida.</p>;
+}
 
 interface DebtManagerProps {
   debts: Debt[];
@@ -37,14 +43,17 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
   const [pendingGroup, setPendingGroup] = useState<{ items: Debt[], total: number } | null>(null);
   const [groupName, setGroupName] = useState('');
   const [groupCategory, setGroupCategory] = useState<DebtCategory>('Cartão de Crédito');
-  const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || '');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // FIN-125 — toda dívida precisa de uma conta vinculada; o aviso aparece no modal aberto.
+  const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
 
   const openAdd = () => {
     setEditing(null);
     setForm(EMPTY_DEBT);
+    setFormError(null);
     setShowForm(true);
   };
 
@@ -59,12 +68,15 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       totalInstallments: debt.totalInstallments,
       nextDueDate: debt.nextDueDate,
       interestRate: debt.interestRate,
+      accountId: debt.accountId ?? '',
     });
+    setFormError(null);
     setShowForm(true);
   };
 
   const handleSave = async () => {
     if (!form.name.trim() || form.totalAmount <= 0) return;
+    if (!form.accountId) { setFormError(ACCOUNT_REQUIRED); return; }
     try {
       if (editing) {
         await onUpdate(editing.id, {
@@ -76,12 +88,11 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
           totalInstallments: form.totalInstallments,
           nextDueDate: form.nextDueDate,
           interestRate: form.interestRate,
-          accountId: form.accountId || undefined,
+          accountId: form.accountId,
         });
       } else {
         await onAdd({
           ...form,
-          accountId: form.accountId || undefined,
           paidAmount: 0,
           paidInstallments: 0,
         });
@@ -158,6 +169,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       // In consolidated mode, we use parseDebtsAsGroup
       const result = await parseDebtsAsGroup(file);
       if (result.items.length > 0) {
+        setFormError(null);
         setPendingGroup(result);
         setGroupName(file.name.replace('.csv', ''));
       } else {
@@ -172,11 +184,12 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
   const finalizeGroupImport = async () => {
     if (!pendingGroup || !groupName.trim()) return;
+    if (!selectedAccountId) { setFormError(ACCOUNT_REQUIRED); return; }
 
     const newDebtData: Omit<Debt, 'id' | 'createdAt'> = {
       name: groupName,
       category: groupCategory,
-      accountId: selectedAccountId || undefined,
+      accountId: selectedAccountId,
       totalAmount: pendingGroup.total,
       paidAmount: 0,
       monthlyPayment: pendingGroup.total,
@@ -453,13 +466,18 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
               </FormField>
 
               <FormField label="Vincular à Conta" htmlFor="debt-account">
-                <select id="debt-account" value={form.accountId || ''} onChange={e => set('accountId', e.target.value)} className="input-field">
-                  <option value="">Sem conta específica</option>
+                <select id="debt-account" required value={form.accountId || ''}
+                  onChange={e => { set('accountId', e.target.value); setFormError(null); }}
+                  aria-invalid={formError ? true : undefined} className="input-field">
+                  <option value="" disabled>Selecione uma conta</option>
                   {accounts.map(acc => (
                     <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
                   ))}
                 </select>
               </FormField>
+              {accounts.length === 0 && <NoAccountsHint />}
+
+              {formError && <p role="alert" className="text-sm text-red-400">{formError}</p>}
             </div>
 
             <div className="flex gap-3 mt-6">
@@ -514,15 +532,21 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
               <FormField label="Vincular à Conta" htmlFor="group-account">
                 <select
                   id="group-account"
+                  required
                   value={selectedAccountId}
-                  onChange={e => setSelectedAccountId(e.target.value)}
+                  onChange={e => { setSelectedAccountId(e.target.value); setFormError(null); }}
+                  aria-invalid={formError ? true : undefined}
                   className="input-field"
                 >
+                  <option value="" disabled>Selecione uma conta</option>
                   {accounts.map(acc => (
                     <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
                   ))}
                 </select>
               </FormField>
+              {accounts.length === 0 && <NoAccountsHint />}
+
+              {formError && <p role="alert" className="text-sm text-red-400">{formError}</p>}
             </div>
 
             <div className="flex gap-3 mt-8">

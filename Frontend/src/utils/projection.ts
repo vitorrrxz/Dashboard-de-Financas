@@ -1,6 +1,7 @@
-import type { Debt, Salary } from '../types';
+import type { Debt, RecurringTransaction, Salary } from '../types';
 import { advanceMonth } from './dates';
 import { remainingDebtSchedule, todayISO } from './debts';
+import { upcomingRecurringOutflows } from './recurring';
 import { activeBonus, salaryPerMonth } from './salary';
 
 // FIN-058 — projeção de saldo futuro: saldo atual + salário − dívidas do mês, mês a mês. Função
@@ -18,7 +19,7 @@ export interface ProjectionPoint {
   balance: number;
   /** Salário do mês, com o bônus quando ele cai no mês. */
   salaryDelta: number;
-  /** Dívidas do mês: fatura do cartão, parcelas do cartão e parcelas das dívidas (positivo, é saída). */
+  /** Dívidas do mês: fatura do cartão, parcelas do cartão, parcelas das dívidas e recorrências de despesa (positivo, é saída). */
   debtDelta: number;
 }
 
@@ -31,6 +32,10 @@ export interface ProjectionOptions {
   currentBill?: number;
   /** Parcelas do cartão ainda não lançadas, cada uma no mês da sua data. */
   cardInstallments?: { date: string; amount: number }[];
+  /** Recorrências do mês corrente, lançadas ou não (`monthRecurring` do Dashboard), que saem no primeiro mês. */
+  currentRecurring?: number;
+  /** Recorrências: dos meses seguintes saem as ocorrências ainda não lançadas, cada uma no mês da sua data. */
+  recurring?: RecurringTransaction[];
 }
 
 /** Chave YYYY-MM de uma data ISO. */
@@ -47,15 +52,15 @@ function monthLabel(month: string): string {
 
 /**
  * Projeta o saldo dos próximos meses: a cada mês entra o salário (e o bônus, no mês dele) e saem
- * as dívidas — a fatura atual do cartão no primeiro mês, as parcelas do cartão e as parcelas ainda
- * não pagas das dívidas cadastradas no mês em que vencem.
+ * as dívidas — a fatura atual do cartão no primeiro mês, as parcelas do cartão, as parcelas ainda
+ * não pagas das dívidas cadastradas no mês em que vencem e as recorrências de despesa.
  *
  * Parcelas com data já vencida caem no primeiro mês: o dinheiro ainda não saiu da conta. A última
  * parcela de uma dívida é limitada ao saldo devedor (`remainingDebtSchedule`, em `debts.ts`).
  *
  * ponytail: o mês corrente conta o salário e as dívidas inteiros, como o card de sobra — se o
- * salário do mês já caiu na conta, ele entra duas vezes. Gastos futuros fora de parcelas e dívidas
- * (compras novas no cartão, contas do dia a dia) não entram.
+ * salário do mês já caiu na conta, ele entra duas vezes. Gastos futuros fora de parcelas, dívidas e
+ * recorrências (compras novas no cartão, contas do dia a dia) não entram.
  */
 export function computeBalanceProjection(
   currentBalance: number,
@@ -76,7 +81,7 @@ export function computeBalanceProjection(
   const firstMonth = monthKeys[0];
   const lastMonth = monthKeys[monthKeys.length - 1];
 
-  const debtByMonth: Record<string, number> = { [firstMonth]: options.currentBill ?? 0 };
+  const debtByMonth: Record<string, number> = { [firstMonth]: (options.currentBill ?? 0) + (options.currentRecurring ?? 0) };
   const addDebt = (dateISO: string, amount: number) => {
     const key = monthKey(dateISO);
     if (key > lastMonth) return;
@@ -86,6 +91,10 @@ export function computeBalanceProjection(
   for (const installment of options.cardInstallments ?? []) addDebt(installment.date, installment.amount);
   for (const debt of debts) {
     for (const installment of remainingDebtSchedule(debt)) addDebt(installment.dueDate, installment.amount);
+  }
+  // O mês corrente já veio em `currentRecurring`; daqui só os meses seguintes.
+  for (const occurrence of upcomingRecurringOutflows(options.recurring ?? [], lastMonth)) {
+    if (monthKey(occurrence.date) > firstMonth) addDebt(occurrence.date, occurrence.amount);
   }
 
   let running = currentBalance;

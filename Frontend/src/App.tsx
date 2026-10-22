@@ -48,7 +48,7 @@ import {
 import { isInstallmentTransaction } from './utils/installments';
 import {
   BASE_CURRENCY, accountsInBase, currencyOf, foreignCurrencies,
-  investmentsInBase, parseExchangeRates, transactionsInBase,
+  investmentsInBase, parseExchangeRates, recurringInBase, transactionsInBase,
   type ExchangeRates,
 } from './utils/currency';
 import type {
@@ -296,7 +296,7 @@ export default function App() {
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
   const [budgets, setBudgets]         = useState<Budget[]>([]);
-  const [salary, setSalary]           = useState<Salary>({ amount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
+  const [salary, setSalary]           = useState<Salary>({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
   const [goals, setGoals]             = useState<Goal[]>([]);
   const [recurring, setRecurring]     = useState<RecurringTransaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]); // FIN-072
@@ -333,7 +333,7 @@ export default function App() {
     setTxs([]);
     setDebts([]);
     setBudgets([]);
-    setSalary({ amount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
+    setSalary({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
     setGoals([]);
     setRecurring([]);
     setInvestments([]);
@@ -394,7 +394,7 @@ export default function App() {
         setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
         setInvestments((investmentsData as Investment[]).map(investmentFromApi));
         setNetWorthHistory((netWorthHistoryData as NetWorthSnapshot[]).map(netWorthSnapshotFromApi));
-        setSalary({ amount: toReais(salaryData.salaryCents), frequency: salaryData.salaryFrequency, payDay: salaryData.salaryPayDay ?? 15,
+        setSalary({ amount: toReais(salaryData.salaryCents), secondAmount: toReais(salaryData.salarySecondCents ?? salaryData.salaryCents), frequency: salaryData.salaryFrequency, payDay: salaryData.salaryPayDay ?? 15,
           bonus: toReais(salaryData.bonusCents ?? 0), bonusHalf: salaryData.bonusHalf === 2 ? 2 : 1, bonusMonth: salaryData.bonusMonth ?? null });
       }).catch(err => {
         // FIN-082: só uma sessão recusada (401/403) volta para o login. Sem conexão — o app instalado
@@ -713,7 +713,7 @@ export default function App() {
   /** Salva o salário manual via `PUT /api/profile/salary` (API em centavos, estado em reais). */
   const saveSalary = async (next: Salary) => {
     try {
-      await fetchAPI('/api/profile/salary', 'PUT', { salaryCents: toCents(next.amount), salaryFrequency: next.frequency, salaryPayDay: next.payDay,
+      await fetchAPI('/api/profile/salary', 'PUT', { salaryCents: toCents(next.amount), salarySecondCents: toCents(next.secondAmount), salaryFrequency: next.frequency, salaryPayDay: next.payDay,
         bonusCents: toCents(next.bonus), bonusHalf: next.bonusHalf, bonusMonth: next.bonusMonth });
       setSalary(next);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
@@ -827,6 +827,7 @@ export default function App() {
   const accountsBase = useMemo(() => accountsInBase(accounts, rates), [accounts, rates]);
   const transactionsBase = useMemo(() => transactionsInBase(transactions, rates), [transactions, rates]);
   const investmentsBase = useMemo(() => investmentsInBase(investments, rates), [investments, rates]);
+  const recurringBase = useMemo(() => recurringInBase(recurring, accounts, rates), [recurring, accounts, rates]);
 
   // FIN-112: guarda um retrato do patrimônio líquido de hoje, para o gráfico de evolução em
   // Relatórios. Roda de novo sempre que ele muda (contas, dívidas, investimentos ou a cotação que
@@ -885,7 +886,7 @@ export default function App() {
   const usedCurrencies = foreignKey ? foreignKey.split(',') : [];
   const conversionIssue = missingCurrencies.length > 0 || rates?.stale === true;
 
-  const stats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items);
+  const stats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items, recurringBase.items);
 
   // FIN-073: o card de Investimentos aparece com conta de investimento OU posição na carteira;
   // a legenda diz de onde vem o total (posições, contas sem posições, ou os dois).
@@ -910,8 +911,9 @@ export default function App() {
   const projection = useMemo(
     () => computeBalanceProjection(stats.realBalance, salary, debts, {
       months: 6, currentBill: stats.monthCardExpense, cardInstallments: stats.cardInstallmentsAhead,
+      currentRecurring: stats.monthRecurring, recurring: recurringBase.items,
     }),
-    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, salary, debts]
+    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, stats.monthRecurring, recurringBase.items, salary, debts]
   );
 
   // Categorias que já aparecem nas transações do usuário, além das curadas em

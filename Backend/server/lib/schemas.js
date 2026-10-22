@@ -66,7 +66,13 @@ export const debtSchema = z.object({
   accountId: accountIdField,
   subItems: z.array(debtItemSchema).optional(),
 });
-export const debtUpdateSchema = debtSchema.partial();
+// FIN-125 — toda dívida nova nasce ligada a uma conta. Só na rota: o backup continua aceitando
+// dívidas sem conta (as antigas, e as de uma conta excluída, que o banco desvincula).
+const DEBT_ACCOUNT_REQUIRED = 'Selecione a conta vinculada à dívida.';
+const debtAccountField = z.string({ error: DEBT_ACCOUNT_REQUIRED }).trim().min(1, DEBT_ACCOUNT_REQUIRED);
+export const debtCreateSchema = debtSchema.extend({ accountId: debtAccountField });
+// Editar pode trocar a conta, mas não desvincular; sem `accountId`, a dívida fica como está.
+export const debtUpdateSchema = debtSchema.extend({ accountId: debtAccountField.optional() }).partial();
 
 // FIN-042/FIN-043 — orçamento mensal por categoria (Fase 3). `category` é texto livre
 // (não um enum fechado, ao contrário de `debtSchema.category`) porque precisa casar com a
@@ -84,6 +90,8 @@ export const budgetUpdateSchema = budgetSchema.partial();
 export const salarySchema = z.object({
   salaryCents: z.coerce.number().int('Salário deve ser um inteiro em centavos.').min(0, 'Salário não pode ser negativo.'),
   salaryFrequency: z.enum(['monthly', 'biweekly'], { message: 'Periodicidade deve ser mensal ou quinzenal.' }),
+  // Quinzenal: valor do 2º pagamento (`salaryCents` é o do 1º). Opcional para quem só manda um valor.
+  salarySecondCents: z.coerce.number().int('Salário deve ser um inteiro em centavos.').min(0, 'Salário não pode ser negativo.').optional(),
   // Quinzenal: dia do 1º pagamento; o 2º é 15 dias depois. Opcional para quem só manda valor e periodicidade.
   salaryPayDay: z.coerce.number().int().min(1, 'Dia de pagamento entre 1 e 15.').max(15, 'Dia de pagamento entre 1 e 15.').optional(),
   // Bônus de um mês só, somado à 1ª ou à 2ª quinzena.

@@ -141,11 +141,13 @@ export interface NetWorthSnapshot {
   total: number;
 }
 
-// Salário informado manualmente. `amount` é o valor de CADA pagamento, em reais;
-// quinzenal ("biweekly") = dois pagamentos por mês.
+// Salário informado manualmente, em reais. Mensal: `amount` é o pagamento do mês; quinzenal
+// ("biweekly") = dois pagamentos, `amount` no 1º e `secondAmount` no 2º.
 export type SalaryFrequency = 'monthly' | 'biweekly';
 export interface Salary {
   amount: number;
+  /** Quinzenal: valor do 2º pagamento. */
+  secondAmount: number;
   frequency: SalaryFrequency;
   /** Quinzenal: dia do 1º pagamento (1 a 15); o 2º é 15 dias depois. */
   payDay: number;

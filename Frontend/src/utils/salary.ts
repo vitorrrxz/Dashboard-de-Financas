@@ -9,7 +9,7 @@ export interface Outflow {
 
 /** Total recebido no mês: quinzenal são dois pagamentos. Sem o bônus (ver `activeBonus`). */
 export function salaryPerMonth(salary: Salary): number {
-  return salary.amount * (salary.frequency === 'biweekly' ? 2 : 1);
+  return salary.amount + (salary.frequency === 'biweekly' ? salary.secondAmount : 0);
 }
 
 /** Bônus do mês (YYYY-MM): vale só no mês em que foi lançado. */
@@ -30,7 +30,7 @@ export function payDays(salary: Salary, monthDays: number): [number, number] {
 export function biweeklyLeftovers(salary: Salary, outflows: Outflow[], monthDays: number, bonus = 0) {
   const [first, second] = payDays(salary, monthDays);
   let firstLeft = salary.amount + (salary.bonusHalf === 1 ? bonus : 0);
-  let secondLeft = salary.amount + (salary.bonusHalf === 2 ? bonus : 0);
+  let secondLeft = salary.secondAmount + (salary.bonusHalf === 2 ? bonus : 0);
   for (const o of outflows) {
     if (o.day >= first && o.day < second) firstLeft -= o.amount;
     else secondLeft -= o.amount;
