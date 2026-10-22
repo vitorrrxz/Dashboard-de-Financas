@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AuthForm } from './AuthForm';
 import { recoveryNotice } from '../utils/twoFactor';
-import { getSocialProviders, signIn, signInSocial, signUp, takeOAuthError, verifyTwoFactor } from '../services/auth';
+import { getSocialProviders, signIn, signInSocial, signUp, takeOAuthError, takeTwoFactorRedirect, verifyTwoFactor } from '../services/auth';
 
 vi.mock('../services/auth', async importOriginal => ({
   ...(await importOriginal<typeof import('../services/auth')>()),
@@ -15,11 +15,13 @@ vi.mock('../services/auth', async importOriginal => ({
   getSocialProviders: vi.fn(),
   signInSocial: vi.fn(),
   takeOAuthError: vi.fn(),
+  takeTwoFactorRedirect: vi.fn(),
 }));
 
 const providersMock = vi.mocked(getSocialProviders);
 const socialMock = vi.mocked(signInSocial);
 const oauthErrorMock = vi.mocked(takeOAuthError);
+const twoFactorRedirectMock = vi.mocked(takeTwoFactorRedirect);
 const signInMock = vi.mocked(signIn);
 const signUpMock = vi.mocked(signUp);
 const verifyMock = vi.mocked(verifyTwoFactor);
@@ -48,6 +50,7 @@ describe('AuthForm', () => {
     socialMock.mockReset();
     providersMock.mockReset().mockResolvedValue([]);
     oauthErrorMock.mockReset().mockReturnValue(null);
+    twoFactorRedirectMock.mockReset().mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -178,6 +181,19 @@ describe('AuthForm', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Continuar com GitHub' }));
       expect(socialMock).toHaveBeenCalledWith('github');
       expect(await screen.findByRole('button', { name: 'Abrindo…' })).toBeDisabled();
+    });
+
+    it('volta do provedor numa conta com verificação em duas etapas: abre no passo do código (FIN-123)', async () => {
+      twoFactorRedirectMock.mockReturnValue(true);
+      verifyMock.mockResolvedValueOnce(USER);
+      const onLogin = vi.fn();
+      render(<AuthForm onLogin={onLogin} />);
+
+      expect(await screen.findByRole('heading', { name: 'Verificação em duas etapas' })).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Código do aplicativo'), { target: { value: '123456' } });
+      fireEvent.click(screen.getByRole('button', { name: /Verificar/ }));
+      await waitFor(() => expect(onLogin).toHaveBeenCalledWith(USER));
+      expect(signInMock).not.toHaveBeenCalled();
     });
 
     it('erro na volta do provedor aparece na tela', async () => {

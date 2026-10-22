@@ -10,6 +10,7 @@ import { FinFlowMark } from './components/FinFlowMark';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from './utils/paymentTypes';
 import { NotificationBell } from './components/NotificationBell';
 import { AuthForm } from './components/AuthForm';
+import { TwoFactorSetupGate } from './components/TwoFactorSetupGate';
 import { DashboardPage } from './pages/DashboardPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { AccountsPage } from './pages/AccountsPage';
@@ -27,7 +28,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ defa
 const PluggyConnectButton = lazy(() => import('./components/PluggyConnectButton').then(m => ({ default: m.PluggyConnectButton })));
 import { formatBRL as fmt, toCents, toReais } from './utils/money';
 import { apiFetch, ApiError } from './services/api';
-import { getSessionUser, signOut, type AuthUser } from './services/auth';
+import { getSessionUser, getTwoFactorPolicy, signOut, type AuthUser } from './services/auth';
 import { accountIdsOf, inAccounts } from './utils/accountGroups';
 
 import { useFinancialStats } from './hooks/useFinancialStats';
@@ -64,7 +65,7 @@ const tabFromHash = (): Tab => {
   return (TABS as readonly string[]).includes(hash) ? (hash as Tab) : 'dashboard';
 };
 
-// Login desativado temporariamente — ver `local-session` em Backend/server/routes/auth.js.
+// Login desativado temporariamente — ver `local-session` em Backend/server/lib/betterAuth.js.
 const AUTH_DISABLED = import.meta.env.VITE_AUTH_DISABLED === 'true';
 
 // FIN-066: aba para onde o clique numa notificação leva, por tipo.
@@ -239,7 +240,11 @@ export default function App() {
   // FIN-121 — a sessão é o cookie httpOnly do Better Auth: o app só sabe QUEM está logado, perguntado
   // ao servidor ao abrir (`sessionChecked`). `userId` é o que os efeitos de carga observam.
   const [user, setUser]   = useState<AuthUser | null>(null);
-  const userId = user?.id ?? null;
+  // FIN-123 — verificação em duas etapas obrigatória: sem ela ativa, o app fica na tela de ativação
+  // (TwoFactorSetupGate) e não carrega nada — `userId` só existe com a verificação em dia.
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const needsTwoFactorSetup = Boolean(user && twoFactorRequired && !user.twoFactorEnabled);
+  const userId = user && !needsTwoFactorSetup ? user.id : null;
   const [sessionChecked, setSessionChecked] = useState(false);
   const [sessionVersion, setSessionVersion] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -345,8 +350,13 @@ export default function App() {
     // O JWT do localStorage, de antes do Better Auth, não vale mais: só é apagado.
     try { localStorage.removeItem('finflow_token'); } catch { /* armazenamento indisponível */ }
     let cancelled = false;
-    getSessionUser()
-      .then(sessionUser => { if (!cancelled) { setUser(sessionUser); setLoadError(''); } })
+    Promise.all([getSessionUser(), getTwoFactorPolicy()])
+      .then(([sessionUser, policy]) => {
+        if (cancelled) return;
+        setUser(sessionUser);
+        setTwoFactorRequired(policy.required);
+        setLoadError('');
+      })
       .catch(err => {
         console.error('Falha ao verificar a sessão:', err);
         if (!cancelled) setLoadError('Não foi possível falar com o servidor. Verifique a conexão com a internet e tente de novo.');
@@ -390,7 +400,11 @@ export default function App() {
         // FIN-082: só uma sessão recusada (401/403) volta para o login. Sem conexão — o app instalado
         // aberto offline — ou com o servidor fora do ar, a sessão continua e a tela oferece tentar
         // de novo; antes, qualquer falha aqui deslogava.
-        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        if (err instanceof ApiError && err.body.code === 'TWO_FACTOR_SETUP_REQUIRED') {
+          // FIN-123: a exigência chegou com a sessão aberta (ex.: ligada no servidor depois do login).
+          setTwoFactorRequired(true);
+          setUser(u => u && { ...u, twoFactorEnabled: false });
+        } else if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
           console.error('Sessão expirada:', err);
           handleLogout(false);
         } else {
@@ -482,17 +496,17 @@ export default function App() {
   // em vez de mostrar a tela de login. Se a rota falhar, a tela de login volta a aparecer.
   const [localSessionFailed, setLocalSessionFailed] = useState(false);
   useEffect(() => {
-    if (!AUTH_DISABLED || !sessionChecked || userId || localSessionFailed || loadError) return;
+    if (!AUTH_DISABLED || !sessionChecked || user || localSessionFailed || loadError) return;
     apiFetch<{ user: AuthUser }>('/api/auth/local-session', { method: 'POST' })
       .then(data => handleLogin(data.user))
       .catch(err => { console.error('Falha ao abrir a sessão local:', err); setLocalSessionFailed(true); });
-  }, [sessionChecked, userId, localSessionFailed, loadError]);
+  }, [sessionChecked, user, localSessionFailed, loadError]);
 
   /** FIN-082: nova tentativa depois de uma carga que falhou sem conexão. */
   const retryLoad = () => {
     setLoadError('');
     // Sem conexão já ao abrir, a sessão nem foi conferida: confere de novo antes de carregar.
-    if (!userId) {
+    if (!user) {
       setSessionChecked(false);
       setSessionVersion(v => v + 1);
       return;
@@ -1076,6 +1090,9 @@ export default function App() {
   const go = (tab: Tab) => { setActiveTab(tab); setMobileNavOpen(false); };
 
   if (!sessionChecked) return <div role="status" className="h-screen w-full flex items-center justify-center bg-background text-textMuted">Carregando…</div>;
+  if (needsTwoFactorSetup) {
+    return <TwoFactorSetupGate onEnabled={() => setUser(u => u && { ...u, twoFactorEnabled: true })} onLogout={() => handleLogout()} />;
+  }
   if (!userId && !loadError) {
     return AUTH_DISABLED && !localSessionFailed
       ? <div className="h-screen w-full flex items-center justify-center bg-background text-textMuted">Entrando…</div>
