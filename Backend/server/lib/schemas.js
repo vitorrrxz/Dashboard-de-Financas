@@ -90,6 +90,8 @@ export const budgetUpdateSchema = budgetSchema.partial();
 export const salarySchema = z.object({
   salaryCents: z.coerce.number().int('Salário deve ser um inteiro em centavos.').min(0, 'Salário não pode ser negativo.'),
   salaryFrequency: z.enum(['monthly', 'biweekly'], { message: 'Periodicidade deve ser mensal ou quinzenal.' }),
+  // Quinzenal: valor do 2º pagamento (`salaryCents` é o do 1º). Opcional para quem só manda um valor.
+  salarySecondCents: z.coerce.number().int('Salário deve ser um inteiro em centavos.').min(0, 'Salário não pode ser negativo.').optional(),
   // Quinzenal: dia do 1º pagamento; o 2º é 15 dias depois. Opcional para quem só manda valor e periodicidade.
   salaryPayDay: z.coerce.number().int().min(1, 'Dia de pagamento entre 1 e 15.').max(15, 'Dia de pagamento entre 1 e 15.').optional(),
   // Bônus de um mês só, somado à 1ª ou à 2ª quinzena.

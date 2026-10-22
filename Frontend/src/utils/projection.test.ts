@@ -5,7 +5,7 @@ import { computeBalanceProjection } from './projection';
 import type { Debt, Salary } from '../types';
 
 function salary(overrides: Partial<Salary> = {}): Salary {
-  return { amount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null, ...overrides };
+  return { amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null, ...overrides };
 }
 
 function debt(overrides: Partial<Debt> = {}): Debt {
@@ -31,7 +31,7 @@ describe('computeBalanceProjection', () => {
   it('salário mensal acumula mês a mês; quinzenal conta dois pagamentos', () => {
     expect(computeBalanceProjection(0, salary({ amount: 500 }), [], { from: FROM, months: 3 }).map(x => x.balance))
       .toEqual([500, 1000, 1500]);
-    expect(computeBalanceProjection(0, salary({ amount: 500, frequency: 'biweekly' }), [], { from: FROM, months: 2 }).map(x => x.balance))
+    expect(computeBalanceProjection(0, salary({ amount: 500, secondAmount: 500, frequency: 'biweekly' }), [], { from: FROM, months: 2 }).map(x => x.balance))
       .toEqual([1000, 2000]);
   });
 

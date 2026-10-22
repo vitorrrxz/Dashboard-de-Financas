@@ -296,7 +296,7 @@ export default function App() {
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
   const [budgets, setBudgets]         = useState<Budget[]>([]);
-  const [salary, setSalary]           = useState<Salary>({ amount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
+  const [salary, setSalary]           = useState<Salary>({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
   const [goals, setGoals]             = useState<Goal[]>([]);
   const [recurring, setRecurring]     = useState<RecurringTransaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]); // FIN-072
@@ -333,7 +333,7 @@ export default function App() {
     setTxs([]);
     setDebts([]);
     setBudgets([]);
-    setSalary({ amount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
+    setSalary({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
     setGoals([]);
     setRecurring([]);
     setInvestments([]);
@@ -394,7 +394,7 @@ export default function App() {
         setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
         setInvestments((investmentsData as Investment[]).map(investmentFromApi));
         setNetWorthHistory((netWorthHistoryData as NetWorthSnapshot[]).map(netWorthSnapshotFromApi));
-        setSalary({ amount: toReais(salaryData.salaryCents), frequency: salaryData.salaryFrequency, payDay: salaryData.salaryPayDay ?? 15,
+        setSalary({ amount: toReais(salaryData.salaryCents), secondAmount: toReais(salaryData.salarySecondCents ?? salaryData.salaryCents), frequency: salaryData.salaryFrequency, payDay: salaryData.salaryPayDay ?? 15,
           bonus: toReais(salaryData.bonusCents ?? 0), bonusHalf: salaryData.bonusHalf === 2 ? 2 : 1, bonusMonth: salaryData.bonusMonth ?? null });
       }).catch(err => {
         // FIN-082: só uma sessão recusada (401/403) volta para o login. Sem conexão — o app instalado
@@ -713,7 +713,7 @@ export default function App() {
   /** Salva o salário manual via `PUT /api/profile/salary` (API em centavos, estado em reais). */
   const saveSalary = async (next: Salary) => {
     try {
-      await fetchAPI('/api/profile/salary', 'PUT', { salaryCents: toCents(next.amount), salaryFrequency: next.frequency, salaryPayDay: next.payDay,
+      await fetchAPI('/api/profile/salary', 'PUT', { salaryCents: toCents(next.amount), salarySecondCents: toCents(next.secondAmount), salaryFrequency: next.frequency, salaryPayDay: next.payDay,
         bonusCents: toCents(next.bonus), bonusHalf: next.bonusHalf, bonusMonth: next.bonusMonth });
       setSalary(next);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }

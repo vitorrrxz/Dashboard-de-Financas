@@ -2,12 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { activeBonus, biweeklyLeftovers, payDays, salaryPerMonth } from './salary';
 import type { Salary } from '../types';
 
-const salary: Salary = { amount: 1000, frequency: 'biweekly', payDay: 5, bonus: 0, bonusHalf: 1, bonusMonth: null };
+const salary: Salary = { amount: 1000, secondAmount: 1000, frequency: 'biweekly', payDay: 5, bonus: 0, bonusHalf: 1, bonusMonth: null };
 
 describe('salário quinzenal', () => {
   it('soma os dois pagamentos no mês', () => {
     expect(salaryPerMonth(salary)).toBe(2000);
     expect(salaryPerMonth({ ...salary, frequency: 'monthly' })).toBe(1000);
+  });
+
+  it('cada pagamento tem o próprio valor; o 2º não conta no mensal', () => {
+    const uneven: Salary = { ...salary, amount: 1200, secondAmount: 800 };
+    expect(salaryPerMonth(uneven)).toBe(2000);
+    expect(salaryPerMonth({ ...uneven, frequency: 'monthly' })).toBe(1200);
+    const [first, second] = biweeklyLeftovers(uneven, [{ day: 10, amount: 100 }, { day: 25, amount: 300 }], 31);
+    expect(first.leftover).toBe(1100);
+    expect(second.leftover).toBe(500);
   });
 
   it('o 2º pagamento é 15 dias depois, sem passar do fim do mês', () => {
