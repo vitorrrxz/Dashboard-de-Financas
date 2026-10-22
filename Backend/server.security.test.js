@@ -96,8 +96,12 @@ describe('Isolamento de dados entre usuários', () => {
     let debtId;
 
     beforeAll(async () => {
+      // FIN-125 — dívida nova precisa de conta vinculada.
+      const account = await request(app).post('/api/accounts').set('Authorization', `Bearer ${tokenA}`)
+        .send({ name: 'Conta da dívida A', bank: 'Banco A', type: 'checking', balance: 0, color: '#fff' });
+      expect(account.status).toBe(200);
       const res = await request(app).post('/api/debts').set('Authorization', `Bearer ${tokenA}`)
-        .send({ name: 'Divida A', category: 'Pessoal', totalAmount: 1000, monthlyPayment: 100, totalInstallments: 10, nextDueDate: '2026-02-01' });
+        .send({ name: 'Divida A', category: 'Pessoal', totalAmount: 1000, monthlyPayment: 100, totalInstallments: 10, nextDueDate: '2026-02-01', accountId: account.body.id });
       expect(res.status).toBe(200);
       expect(res.body.id).toBeDefined();
       debtId = res.body.id;

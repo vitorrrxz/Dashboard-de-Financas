@@ -66,7 +66,13 @@ export const debtSchema = z.object({
   accountId: accountIdField,
   subItems: z.array(debtItemSchema).optional(),
 });
-export const debtUpdateSchema = debtSchema.partial();
+// FIN-125 — toda dívida nova nasce ligada a uma conta. Só na rota: o backup continua aceitando
+// dívidas sem conta (as antigas, e as de uma conta excluída, que o banco desvincula).
+const DEBT_ACCOUNT_REQUIRED = 'Selecione a conta vinculada à dívida.';
+const debtAccountField = z.string({ error: DEBT_ACCOUNT_REQUIRED }).trim().min(1, DEBT_ACCOUNT_REQUIRED);
+export const debtCreateSchema = debtSchema.extend({ accountId: debtAccountField });
+// Editar pode trocar a conta, mas não desvincular; sem `accountId`, a dívida fica como está.
+export const debtUpdateSchema = debtSchema.extend({ accountId: debtAccountField.optional() }).partial();
 
 // FIN-042/FIN-043 — orçamento mensal por categoria (Fase 3). `category` é texto livre
 // (não um enum fechado, ao contrário de `debtSchema.category`) porque precisa casar com a
