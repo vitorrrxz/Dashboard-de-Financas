@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import { X, Plus, Trash2, Edit2, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
 import type { Debt, DebtCategory, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
@@ -7,6 +7,7 @@ import { formatDateBR } from '../utils/dates';
 import { downloadCSV, exportDateSuffix, formatCurrencyCSV } from '../utils/export';
 import { FormField } from './shared/FormField';
 import { formatBRL } from '../utils/money';
+import { bankGroupOf, groupByBank, primaryAccountOf } from '../utils/accountGroups';
 
 const DEBT_CATEGORIES: DebtCategory[] = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
 
@@ -48,6 +49,13 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
   // FIN-125 — toda dívida precisa de uma conta vinculada; o aviso aparece no modal aberto.
   const [formError, setFormError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Mesmo vínculo das recorrências: um item por banco, gravando a conta que o representa.
+  const bankGroups = useMemo(() => groupByBank(accounts), [accounts]);
+  const bankKeyOf = (accountId?: string) => bankGroupOf(bankGroups, accountId)?.key ?? '';
+  const accountOfBank = (key: string) => {
+    const bank = bankGroups.find(g => g.key === key);
+    return bank ? primaryAccountOf(bank).id : '';
+  };
 
 
   const openAdd = () => {
@@ -77,6 +85,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
   const handleSave = async () => {
     if (!form.name.trim() || form.totalAmount <= 0) return;
     if (!form.accountId) { setFormError(ACCOUNT_REQUIRED); return; }
+    // Dívida antiga ligada ao cartão passa para a conta do banco ao ser salva.
+    const accountId = accountOfBank(bankKeyOf(form.accountId)) || form.accountId;
     try {
       if (editing) {
         await onUpdate(editing.id, {
@@ -88,11 +98,12 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
           totalInstallments: form.totalInstallments,
           nextDueDate: form.nextDueDate,
           interestRate: form.interestRate,
-          accountId: form.accountId,
+          accountId,
         });
       } else {
         await onAdd({
           ...form,
+          accountId,
           paidAmount: 0,
           paidInstallments: 0,
         });
@@ -260,7 +271,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
     <div>
       {/* Actions */}
       <div className="flex items-center justify-end mb-4">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
           <button
             onClick={handleImportClick}
@@ -278,11 +289,28 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
             <Download size={14} />
             Exportar CSV
           </button>
+          <button onClick={openAdd}
+            className="h-9 px-4 flex items-center gap-2 rounded-md text-sm text-on-accent font-medium bg-primary hover:opacity-90 transition-opacity">
+            <Plus size={14} /> Adicionar Dívida
+          </button>
         </div>
       </div>
 
+      {debts.length > 0 && (
+        <div className="flex gap-4 mb-4 px-2">
+          <button onClick={handlePayAll}
+            className="text-xs font-semibold text-accent hover:underline flex items-center gap-1.5 transition-all">
+            <CheckCircle size={14} /> Pagar todas as parcelas do mês
+          </button>
+          <button onClick={handleDeleteAll}
+            className="text-xs font-semibold text-textMuted hover:text-red-400 flex items-center gap-1.5 transition-all ml-auto">
+            <Trash2 size={14} /> Excluir todas as dívidas
+          </button>
+        </div>
+      )}
+
       {/* Debt Cards */}
-      <div className="space-y-4 mb-4">
+      <div className="space-y-4">
         {debts.length === 0 && (
           <p className="text-sm text-textMuted">Nenhuma dívida cadastrada. Empréstimos, financiamentos e acordos entram aqui; as compras parceladas do cartão aparecem sozinhas.</p>
         )}
@@ -399,24 +427,6 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
         })}
       </div>
 
-      <button onClick={openAdd}
-        className="w-full py-3 rounded-xl border border-dashed border-[var(--line)] hover:border-red-400/40 text-textMuted hover:text-white text-sm flex items-center justify-center gap-2 transition-all">
-        <Plus size={16} /> Adicionar Dívida
-      </button>
-
-      {debts.length > 0 && (
-        <div className="flex gap-4 mt-4 px-2">
-          <button onClick={handlePayAll}
-            className="text-xs font-semibold text-accent hover:underline flex items-center gap-1.5 transition-all">
-            <CheckCircle size={14} /> Pagar todas as parcelas do mês
-          </button>
-          <button onClick={handleDeleteAll}
-            className="text-xs font-semibold text-textMuted hover:text-red-400 flex items-center gap-1.5 transition-all ml-auto">
-            <Trash2 size={14} /> Excluir todas as dívidas
-          </button>
-        </div>
-      )}
-
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
@@ -466,12 +476,12 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
               </FormField>
 
               <FormField label="Vincular à Conta" htmlFor="debt-account">
-                <select id="debt-account" required value={form.accountId || ''}
-                  onChange={e => { set('accountId', e.target.value); setFormError(null); }}
+                <select id="debt-account" required value={bankKeyOf(form.accountId)}
+                  onChange={e => { set('accountId', accountOfBank(e.target.value)); setFormError(null); }}
                   aria-invalid={formError ? true : undefined} className="input-field">
                   <option value="" disabled>Selecione uma conta</option>
-                  {accounts.map(acc => (
-                    <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
+                  {bankGroups.map(group => (
+                    <option key={group.key} value={group.key}>{group.bank}</option>
                   ))}
                 </select>
               </FormField>
@@ -533,14 +543,14 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                 <select
                   id="group-account"
                   required
-                  value={selectedAccountId}
-                  onChange={e => { setSelectedAccountId(e.target.value); setFormError(null); }}
+                  value={bankKeyOf(selectedAccountId)}
+                  onChange={e => { setSelectedAccountId(accountOfBank(e.target.value)); setFormError(null); }}
                   aria-invalid={formError ? true : undefined}
                   className="input-field"
                 >
                   <option value="" disabled>Selecione uma conta</option>
-                  {accounts.map(acc => (
-                    <option key={acc.id} value={acc.id}>{acc.bank} - {acc.name}</option>
+                  {bankGroups.map(group => (
+                    <option key={group.key} value={group.key}>{group.bank}</option>
                   ))}
                 </select>
               </FormField>
