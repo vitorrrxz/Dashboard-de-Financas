@@ -16,6 +16,7 @@ interface DebtsPageProps {
   onAdd: (debt: Omit<Debt, 'id' | 'createdAt'>) => Promise<void>;
   onUpdate: (id: string, debt: Partial<Debt>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onPaySplit: (id: string, splitId: string) => Promise<void>;
 }
 
 type DebtsTab = 'due' | 'purchases' | 'manual';
@@ -25,7 +26,7 @@ const TABS: [DebtsTab, string][] = [
   ['manual', 'Dívidas cadastradas'],
 ];
 
-export function DebtsPage({ transactionsBase, debts, accounts, accountId, onChangeAccount, onAdd, onUpdate, onDelete }: DebtsPageProps) {
+export function DebtsPage({ transactionsBase, debts, accounts, accountId, onChangeAccount, onAdd, onUpdate, onDelete, onPaySplit }: DebtsPageProps) {
   const [tab, setTab] = useState<DebtsTab>('due');
   const ids = accountIdsOf(accountId, accounts);
   const shownDebts = debts.filter(d => inAccounts(ids, d.accountId));
@@ -72,6 +73,7 @@ export function DebtsPage({ transactionsBase, debts, accounts, accountId, onChan
           onAdd={onAdd}
           onUpdate={onUpdate}
           onDelete={onDelete}
+          onPaySplit={onPaySplit}
           accounts={accounts}
         />
       </div>

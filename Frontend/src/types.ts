@@ -39,6 +39,14 @@ export interface DebtItem {
   date: string;
 }
 
+/** Dividir pagamento: uma parte da parcela do mês, paga no seu dia. `paid` vale para a parcela corrente. */
+export interface DebtSplit {
+  id?: string;
+  day: number;    // 1 a 31
+  amount: number; // reais
+  paid?: boolean;
+}
+
 export interface Debt {
   id: string;
   name: string;
@@ -53,6 +61,8 @@ export interface Debt {
   interestRate?: number; // % per month
   createdAt: string;
   subItems?: DebtItem[]; // Items from CSV import
+  /** Partes do pagamento mensal; vazio ou ausente = paga a parcela inteira de uma vez. */
+  splits?: DebtSplit[];
   accountId?: string;    // Link to an Account
 }
 

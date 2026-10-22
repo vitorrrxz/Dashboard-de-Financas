@@ -8,7 +8,7 @@ import { sendInternalError } from '../lib/http.js';
 import { BASE_CURRENCY, CURRENCY_CODE_PATTERN } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
 import {
-  accountSchema, transactionSchema, debtSchema, budgetSchema, goalSchema, recurringSchema,
+  accountSchema, transactionSchema, debtSchema, debtSplitSchema, budgetSchema, goalSchema, recurringSchema,
   investmentSchema, categoryRuleSchema,
 } from '../lib/schemas.js';
 
@@ -51,7 +51,10 @@ async function buildBackup(userId) {
     prisma.debt.findMany({
       where: { userId },
       orderBy: byCreation,
-      include: { subItems: { orderBy: [{ date: 'asc' }, { name: 'asc' }, { amount: 'asc' }] } },
+      include: {
+        subItems: { orderBy: [{ date: 'asc' }, { name: 'asc' }, { amount: 'asc' }] },
+        splits: { orderBy: [{ day: 'asc' }, { amount: 'asc' }] },
+      },
     }),
     prisma.budget.findMany({ where: { userId }, orderBy: byCreation }),
     prisma.goal.findMany({ where: { userId }, orderBy: byCreation }),
@@ -69,9 +72,10 @@ async function buildBackup(userId) {
     data: {
       accounts: accounts.map(withoutUser),
       transactions: transactions.map(withoutUser),
-      debts: debts.map(({ userId: _userId, subItems, ...debt }) => ({
+      debts: debts.map(({ userId: _userId, subItems, splits, ...debt }) => ({
         ...debt,
         subItems: subItems.map(({ name, amount, date }) => ({ name, amount, date })),
+        splits: splits.map(({ day, amount, paid }) => ({ day, amount, paid })),
       })),
       budgets: budgets.map(withoutUser),
       goals: goals.map(withoutUser),
@@ -122,7 +126,11 @@ const backupTransactionSchema = transactionSchema.omit({ externalId: true }).ext
   name: z.string().max(500),
   createdAt: backupDateField,
 });
-const backupDebtSchema = debtSchema.extend({ id: backupIdField, accountId: backupAccountRef, createdAt: backupDateField });
+// Partes do pagamento (`splits`) com o `paid` da parcela corrente; backup de antes delas não tem a lista.
+const backupDebtSchema = debtSchema.extend({
+  id: backupIdField, accountId: backupAccountRef, createdAt: backupDateField,
+  splits: z.array(debtSplitSchema.extend({ paid: z.boolean().optional() })).optional(),
+});
 const backupBudgetSchema = budgetSchema.extend({ id: backupIdField, createdAt: backupDateField });
 // FIN-113 — `investmentId` no arquivo passa pela mesma regra de `accountId` (id opcional, "" vira
 // null): o formato é genérico, só o campo que muda.
@@ -275,6 +283,7 @@ function buildRestoreRows(userId, data, reuseIds) {
   const investmentRef = investmentId => (investmentId ? investmentIds.get(investmentId) : null);
 
   const debtItems = [];
+  const debtSplits = [];
   return {
     accounts: data.accounts.map(({ id, ...account }) => ({
       ...account, id: accountIds.get(id), userId, currency: account.currency ?? BASE_CURRENCY,
@@ -287,12 +296,14 @@ function buildRestoreRows(userId, data, reuseIds) {
       accountId: accountRef(accountId),
       currency: accountId ? accountCurrency.get(accountId) : BASE_CURRENCY,
     })),
-    debts: data.debts.map(({ id, accountId, subItems, ...debt }) => {
+    debts: data.debts.map(({ id, accountId, subItems, splits, ...debt }) => {
       const debtId = newId(id);
       for (const item of subItems ?? []) debtItems.push({ ...item, debtId });
+      for (const split of splits ?? []) debtSplits.push({ ...split, debtId });
       return { paidAmount: 0, paidInstallments: 0, ...debt, id: debtId, userId, accountId: accountRef(accountId) };
     }),
     debtItems,
+    debtSplits,
     budgets: data.budgets.map(({ id, ...budget }) => ({ ...budget, id: newId(id), userId })),
     // FIN-113 — `investmentId` refeito pelo mapa (accountId já era); `id: investmentIds.get(id)`
     // abaixo, e não outro `newId(id)`, é o que faz o vínculo apontar para o MESMO id novo do
@@ -341,6 +352,7 @@ router.post('/import', authLimiter, requireAuth, backupImportJsonBody, async (re
     await prisma.$transaction([
       // Filhos antes dos pais, por causa das chaves estrangeiras.
       prisma.debtItem.deleteMany({ where: { debt: { userId } } }),
+      prisma.debtSplit.deleteMany({ where: { debt: { userId } } }),
       prisma.debt.deleteMany({ where: { userId } }),
       prisma.transaction.deleteMany({ where: { userId } }),
       prisma.recurringTransaction.deleteMany({ where: { userId } }),
@@ -358,6 +370,7 @@ router.post('/import', authLimiter, requireAuth, backupImportJsonBody, async (re
       prisma.transaction.createMany({ data: rows.transactions }),
       prisma.debt.createMany({ data: rows.debts }),
       prisma.debtItem.createMany({ data: rows.debtItems }),
+      prisma.debtSplit.createMany({ data: rows.debtSplits }),
       prisma.budget.createMany({ data: rows.budgets }),
       prisma.goal.createMany({ data: rows.goals }),
       prisma.recurringTransaction.createMany({ data: rows.recurring }),

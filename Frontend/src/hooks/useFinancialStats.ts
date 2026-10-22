@@ -186,8 +186,10 @@ export function computeFinancialStats(
   const monthOutflows: Outflow[] = [
     ...expenses.filter(t => isCard(t) && inThisBill(t))
       .map(t => ({ day: (t.accountId && dueDays.get(t.accountId)) || dayOf(t.date), amount: Math.abs(t.amount) })),
-    ...activeDebts.filter(d => d.paidInstallments < d.totalInstallments)
-      .map(d => ({ day: dayOf(d.nextDueDate), amount: d.monthlyPayment })),
+    // Pagamento dividido: cada parte no seu dia, para cair na quinzena certa.
+    ...activeDebts.filter(d => d.paidInstallments < d.totalInstallments).flatMap(d => d.splits?.length
+      ? d.splits.map(part => ({ day: part.day, amount: part.amount }))
+      : [{ day: dayOf(d.nextDueDate), amount: d.monthlyPayment }]),
     ...recurringOutflows.map(o => ({
       day: (isCardAccount(o.accountId) && o.accountId && dueDays.get(o.accountId)) || dayOf(o.date), amount: o.amount,
     })),

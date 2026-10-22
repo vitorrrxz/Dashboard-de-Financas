@@ -128,6 +128,7 @@ model Debt {
   user              User       @relation(fields: [userId], references: [id])
   account           Account?   @relation(fields: [accountId], references: [id])
   subItems          DebtItem[]
+  splits            DebtSplit[]
 
   @@index([userId]) // ver FIN-019
 }
@@ -254,6 +255,21 @@ model DebtItem {
   date        String
 
   debt        Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+}
+
+// Dividir pagamento: a parcela do mês paga em partes, cada uma no seu dia (ex.: 500 no dia 10 e 500
+// no dia 25). As partes somam `monthlyPayment`. `paid` vale para a parcela corrente: quando a última
+// parte é paga, a parcela avança e todas voltam a `false`.
+model DebtSplit {
+  id     String  @id @default(uuid())
+  debtId String
+  day    Int     // dia do mês, 1 a 31 (meses mais curtos: o último dia)
+  amount Int     // centavos — ver FIN-015
+  paid   Boolean @default(false)
+
+  debt   Debt    @relation(fields: [debtId], references: [id], onDelete: Cascade)
+
+  @@index([debtId])
 }
 
 // FIN-065 — notificação da central do sino (Fase 6). `dedupeKey` identifica a ocorrência que

@@ -273,3 +273,16 @@ describe('computeFinancialStats — recorrências nas dívidas do mês', () => {
     expect(s.monthOutflows).toEqual([]);
   });
 });
+
+describe('computeFinancialStats — pagamento dividido', () => {
+  it('cada parte entra no seu dia, somando a parcela', () => {
+    const debts = [debt({
+      monthlyPayment: 1000, totalInstallments: 3, nextDueDate: '2099-01-10',
+      splits: [{ id: 's1', day: 10, amount: 600, paid: true }, { id: 's2', day: 25, amount: 400, paid: false }],
+    })];
+    const s = computeFinancialStats([], [], debts, null);
+    expect(s.monthOutflows).toEqual([{ day: 10, amount: 600 }, { day: 25, amount: 400 }]);
+    expect(s.monthDebtPayments).toBe(1000);
+  });
+});
+

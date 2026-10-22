@@ -136,6 +136,7 @@ function debtFromApi(d: Debt): Debt {
     paidAmount: toReais(d.paidAmount),
     monthlyPayment: toReais(d.monthlyPayment),
     subItems: d.subItems?.map(si => ({ ...si, amount: toReais(si.amount) })),
+    splits: d.splits?.map(sp => ({ ...sp, amount: toReais(sp.amount) })),
   };
 }
 function debtToApi<T extends Partial<Debt>>(d: T): T {
@@ -144,6 +145,7 @@ function debtToApi<T extends Partial<Debt>>(d: T): T {
   if (out.paidAmount != null) out.paidAmount = toCents(out.paidAmount);
   if (out.monthlyPayment != null) out.monthlyPayment = toCents(out.monthlyPayment);
   if (out.subItems != null) out.subItems = out.subItems.map(si => ({ ...si, amount: toCents(si.amount) }));
+  if (out.splits != null) out.splits = out.splits.map(({ day, amount }) => ({ day, amount: toCents(amount) }));
   return out;
 }
 /** Converte `monthlyLimit` de centavos (API) para reais (UI) — ver conversão no topo deste bloco. */
@@ -706,6 +708,14 @@ export default function App() {
   const updateDebt = async (id: string, debtData: Partial<Debt>) => {
     try {
       const updated = await fetchAPI(`/api/debts/${id}`, 'PUT', debtToApi(debtData));
+      setDebts(prev => prev.map(d => d.id === id ? debtFromApi(updated) : d));
+    } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
+  };
+
+  /** Paga uma parte da parcela do mês (dividir pagamento) via `POST /api/debts/:id/splits/:splitId/pay`. */
+  const payDebtSplit = async (id: string, splitId: string) => {
+    try {
+      const updated = await fetchAPI(`/api/debts/${id}/splits/${splitId}/pay`, 'POST');
       setDebts(prev => prev.map(d => d.id === id ? debtFromApi(updated) : d));
     } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
   };
@@ -1318,6 +1328,7 @@ export default function App() {
               onAdd={addDebt}
               onUpdate={updateDebt}
               onDelete={deleteDebt}
+              onPaySplit={payDebtSplit}
             />
           )}
 

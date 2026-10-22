@@ -52,6 +52,14 @@ export const debtItemSchema = z.object({
   amount: z.coerce.number().int(),
   date: z.string().trim().min(1),
 });
+// Dividir pagamento: uma parte da parcela do mês, paga no seu dia. Ver `DebtSplit` no schema.
+export const debtSplitSchema = z.object({
+  day: z.coerce.number().int().min(1, 'Dia da parte entre 1 e 31.').max(31, 'Dia da parte entre 1 e 31.'),
+  amount: z.coerce.number().int('Valor da parte deve ser um inteiro em centavos.').min(1, 'Cada parte precisa de um valor maior que zero.'),
+});
+// Lista vazia desfaz a divisão; uma parte só não divide nada.
+const debtSplitsField = z.array(debtSplitSchema).max(10, 'Divida o pagamento em no máximo 10 partes.')
+  .refine(splits => splits.length !== 1, 'Divida o pagamento em pelo menos 2 partes.');
 export const debtSchema = z.object({
   name: z.string({ error: 'Nome da dívida é obrigatório.' }).trim().min(1, 'Nome da dívida é obrigatório.'),
   description: z.string().trim().nullable().optional(),
@@ -65,6 +73,7 @@ export const debtSchema = z.object({
   interestRate: z.coerce.number().finite().nullable().optional(), // % ao mês, não é dinheiro
   accountId: accountIdField,
   subItems: z.array(debtItemSchema).optional(),
+  splits: debtSplitsField.optional(),
 });
 // FIN-125 — toda dívida nova nasce ligada a uma conta. Só na rota: o backup continua aceitando
 // dívidas sem conta (as antigas, e as de uma conta excluída, que o banco desvincula).

@@ -1,8 +1,8 @@
 import { useMemo, useState, useRef } from 'react';
 import { X, Plus, Trash2, Edit2, AlertCircle, CheckCircle, Download, Upload } from 'lucide-react';
-import type { Debt, DebtCategory, Account } from '../types';
+import type { Debt, DebtCategory, DebtSplit, Account } from '../types';
 import { parseDebtsAsGroup } from '../utils/parsers';
-import { isDebtOverdue, isDebtPaid, computeNextInstallment } from '../utils/debts';
+import { isDebtOverdue, isDebtPaid, computeNextInstallment, defaultSplits, splitsMatchPayment, splitsTotal } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
 import { downloadCSV, exportDateSuffix, formatCurrencyCSV } from '../utils/export';
 import { FormField } from './shared/FormField';
@@ -12,6 +12,8 @@ import { bankGroupOf, groupByBank, primaryAccountOf } from '../utils/accountGrou
 const DEBT_CATEGORIES: DebtCategory[] = ['Empréstimo', 'Financiamento', 'Cartão de Crédito', 'Pessoal', 'Outros'];
 
 const ACCOUNT_REQUIRED = 'Selecione a conta vinculada à dívida.';
+// Mesmo teto da API (`debtSplitsField`).
+const MAX_SPLITS = 10;
 
 const EMPTY_DEBT: Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallments'> = {
   name: '',
@@ -23,6 +25,7 @@ const EMPTY_DEBT: Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallmen
   nextDueDate: new Date().toISOString().slice(0, 10),
   interestRate: 0,
   accountId: '',
+  splits: [],
 };
 
 function NoAccountsHint() {
@@ -34,10 +37,12 @@ interface DebtManagerProps {
   onAdd: (debt: Omit<Debt, 'id' | 'createdAt'>) => Promise<void>;
   onUpdate: (id: string, debtData: Partial<Debt>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** Paga uma parte da parcela do mês (dívida com pagamento dividido). */
+  onPaySplit: (id: string, splitId: string) => Promise<void>;
   accounts: Account[];
 }
 
-export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: DebtManagerProps) {
+export function DebtManager({ debts, onAdd, onUpdate, onDelete, onPaySplit, accounts }: DebtManagerProps) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Debt | null>(null);
   const [form, setForm] = useState<Omit<Debt, 'id' | 'createdAt' | 'paidAmount' | 'paidInstallments'>>(EMPTY_DEBT);
@@ -77,6 +82,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
       nextDueDate: debt.nextDueDate,
       interestRate: debt.interestRate,
       accountId: debt.accountId ?? '',
+      splits: debt.splits?.map(({ day, amount }) => ({ day, amount })) ?? [],
     });
     setFormError(null);
     setShowForm(true);
@@ -85,6 +91,11 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
   const handleSave = async () => {
     if (!form.name.trim() || form.totalAmount <= 0) return;
     if (!form.accountId) { setFormError(ACCOUNT_REQUIRED); return; }
+    const splits = form.splits ?? [];
+    if (!splitsMatchPayment(splits, form.monthlyPayment)) {
+      setFormError(`As partes precisam somar a parcela mensal (${formatBRL(form.monthlyPayment)}).`);
+      return;
+    }
     // Dívida antiga ligada ao cartão passa para a conta do banco ao ser salva.
     const accountId = accountOfBank(bankKeyOf(form.accountId)) || form.accountId;
     try {
@@ -99,6 +110,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
           nextDueDate: form.nextDueDate,
           interestRate: form.interestRate,
           accountId,
+          splits,
         });
       } else {
         await onAdd({
@@ -124,8 +136,44 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
     }
   };
 
+  /** Paga uma parte do mês. O aviso de erro já vem de quem salva (App). */
+  const handlePaySplit = async (debt: Debt, part: DebtSplit) => {
+    if (!part.id || part.paid || isPaid(debt)) return;
+    try {
+      await onPaySplit(debt.id, part.id);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  /**
+   * Paga o mês de uma dívida: a parcela inteira, ou as partes que faltam, em ordem. Para quando o
+   * saldo acaba — na última parcela, uma parte pode já quitar a dívida.
+   */
+  const payMonth = async (debt: Debt) => {
+    if (!debt.splits?.length) return onUpdate(debt.id, computeNextInstallment(debt));
+    let left = remaining(debt);
+    for (const part of debt.splits) {
+      if (left <= 0) break;
+      if (part.paid || !part.id) continue;
+      await onPaySplit(debt.id, part.id);
+      left -= part.amount;
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (confirm('Remover esta dívida?')) await onDelete(id);
+  };
+
+  // Partes do pagamento no formulário.
+  const formSplits = form.splits ?? [];
+  const setSplits = (splits: DebtSplit[]) => { setForm(f => ({ ...f, splits })); setFormError(null); };
+  const updateSplit = (index: number, patch: Partial<DebtSplit>) =>
+    setSplits(formSplits.map((part, i) => (i === index ? { ...part, ...patch } : part)));
+  const addSplit = () => {
+    const last = formSplits[formSplits.length - 1];
+    const missing = Math.max(0, Math.round((form.monthlyPayment - splitsTotal(formSplits)) * 100) / 100);
+    setSplits([...formSplits, { day: Math.min(31, (last?.day ?? 0) + 1), amount: missing }]);
   };
 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) =>
@@ -236,9 +284,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
 
     if (!confirm(`Deseja pagar uma parcela de todas as ${unpaidDebts.length} dívidas pendentes?`)) return;
 
-    const results = await Promise.allSettled(
-      unpaidDebts.map(debt => onUpdate(debt.id, computeNextInstallment(debt)))
-    );
+    const results = await Promise.allSettled(unpaidDebts.map(payMonth));
 
     const failedNames = results
       .map((r, i) => ({ r, debt: unpaidDebts[i] }))
@@ -321,6 +367,8 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
           const overdue = isOverdue(debt);
           const isExpanded = expandedId === debt.id;
           const isGroup = !!(debt.subItems && debt.subItems.length > 0);
+          const splits = debt.splits ?? [];
+          const splitLeft = splits.filter(part => !part.paid).reduce((s, part) => s + part.amount, 0);
 
           return (
             <div key={debt.id} className="panel rounded-xl overflow-hidden">
@@ -336,7 +384,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                     {debt.description && <p className="text-xs text-textMuted mt-0.5">{debt.description}</p>}
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    {!paid && (
+                    {!paid && splits.length === 0 && (
                       <button onClick={() => handlePayInstallment(debt)}
                         title={isGroup ? 'Registrar pagamento da fatura' : 'Marcar parcela como paga'}
                         className="h-8 px-3 rounded-md text-sm text-white bg-card border border-[var(--control)] hover:border-[var(--color-textMuted)] transition-colors">
@@ -381,6 +429,27 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
                     </p>
                   </div>
                 </div>
+
+                {!paid && splits.length > 0 && (
+                  <ul aria-label={`Partes do pagamento de ${debt.name}`} className="mt-3 pt-3 border-t border-white/5 space-y-1.5">
+                    {splits.map(part => (
+                      <li key={part.id ?? part.day} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-textMuted">Dia {part.day} · <span className="text-white font-medium">{formatBRL(part.amount)}</span></span>
+                        {part.paid ? (
+                          <span className="text-xs text-teal-400 flex items-center gap-1"><CheckCircle size={12} /> Paga</span>
+                        ) : (
+                          <button onClick={() => handlePaySplit(debt, part)} aria-label={`Pagar a parte do dia ${part.day} de ${debt.name}`}
+                            className="h-7 px-3 rounded-md text-xs text-white bg-card border border-[var(--control)] hover:border-[var(--color-textMuted)] transition-colors">
+                            Pagar
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                    {splits.some(part => part.paid) && (
+                      <li className="text-xs text-textMuted">Falta {formatBRL(splitLeft)} neste mês</li>
+                    )}
+                  </ul>
+                )}
 
                 {isGroup && (
                   <button
@@ -474,6 +543,43 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, accounts }: Debt
               <FormField label="Próximo Vencimento" htmlFor="debt-next-due-date">
                 <input id="debt-next-due-date" type="date" value={form.nextDueDate} onChange={e => set('nextDueDate', e.target.value)} className="input-field" />
               </FormField>
+
+              <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+                <input type="checkbox" checked={formSplits.length > 0}
+                  onChange={e => setSplits(e.target.checked ? defaultSplits(form.monthlyPayment, form.nextDueDate) : [])} />
+                Dividir pagamento
+              </label>
+              {formSplits.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-textMuted -mt-2">Pague a parcela do mês em partes, cada uma no seu dia.</p>
+                  {formSplits.map((part, i) => (
+                    <div key={i} className="grid grid-cols-[5.5rem_1fr_auto] gap-2 items-end">
+                      <FormField label={`Dia · parte ${i + 1}`} htmlFor={`debt-split-day-${i}`}>
+                        <input id={`debt-split-day-${i}`} type="number" min={1} max={31} value={part.day || ''}
+                          onChange={e => updateSplit(i, { day: Math.min(31, Math.max(1, parseInt(e.target.value) || 1)) })} className="input-field" />
+                      </FormField>
+                      <FormField label="Valor (R$)" htmlFor={`debt-split-amount-${i}`}>
+                        <input id={`debt-split-amount-${i}`} type="number" step="0.01" min={0} value={part.amount || ''}
+                          onChange={e => updateSplit(i, { amount: parseFloat(e.target.value) || 0 })} className="input-field" />
+                      </FormField>
+                      <button type="button" onClick={() => setSplits(formSplits.filter((_, j) => j !== i))}
+                        disabled={formSplits.length <= 2} aria-label={`Remover parte ${i + 1}`}
+                        className="h-10 px-2 rounded-lg text-textMuted hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-30 disabled:pointer-events-none">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <button type="button" onClick={addSplit} disabled={formSplits.length >= MAX_SPLITS}
+                      className="font-semibold text-accent hover:underline flex items-center gap-1 disabled:opacity-40 disabled:no-underline">
+                      <Plus size={12} /> Adicionar parte
+                    </button>
+                    <span className={splitsMatchPayment(formSplits, form.monthlyPayment) ? 'text-textMuted' : 'text-red-400'}>
+                      Soma {formatBRL(splitsTotal(formSplits))} de {formatBRL(form.monthlyPayment)}
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <FormField label="Vincular à Conta" htmlFor="debt-account">
                 <select id="debt-account" required value={bankKeyOf(form.accountId)}
