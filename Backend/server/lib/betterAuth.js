@@ -201,6 +201,14 @@ export const auth = betterAuth({
     // No banco, e não em memória: na Vercel cada instância da função teria a sua contagem (FIN-120).
     storage: 'database',
     customRules: {
+      // FIN-124 — sem limite nas consultas que a tela faz sozinha, várias ao mesmo tempo, ao abrir: cada
+      // requisição limitada grava a contagem no banco, e as gravações simultâneas no Turso esbarravam
+      // umas nas outras (SQLITE_BUSY → 500 → tela de "sem conexão"). Elas não recebem senha nem código;
+      // o limite fica nas rotas que recebem (abaixo).
+      '/get-session': false,
+      '/list-accounts': false,
+      '/social-providers': false,
+      '/two-factor-policy': false,
       '/sign-in/email': authAttemptsRule,
       '/sign-up/email': authAttemptsRule,
       '/sign-in/social': authAttemptsRule,
