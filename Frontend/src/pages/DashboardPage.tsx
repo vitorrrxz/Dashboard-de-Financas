@@ -1,5 +1,6 @@
-import { memo, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
-import { Pencil, Upload } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { createPortal } from 'react-dom';
+import { Pencil, Plus, Upload, X } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, ReferenceLine,
@@ -9,14 +10,13 @@ import { describeHoldings, type InvestmentHoldings } from '../utils/investments'
 import type { BudgetProgress } from '../utils/budget';
 import type { ProjectionPoint } from '../utils/projection';
 import type { ByPaymentType, FinancialStats } from '../hooks/useFinancialStats';
-import type { Account, Salary, SalaryFrequency } from '../types';
+import type { Account, ExtraIncome, Salary, SalaryFrequency } from '../types';
 import type { Tab } from '../App';
 import { AccountOptions } from '../components/AccountFilter';
+import { FormField } from '../components/shared/FormField';
 import { MonthNavigator } from '../components/MonthNavigator';
-import { ALL_MONTHS } from '../utils/transactions';
-import { activeBonus, biweeklyLeftovers, salaryPerMonth } from '../utils/salary';
-import { todayISO } from '../utils/debts';
-import { advanceDays, daysInMonth, formatMonthLabel } from '../utils/dates';
+import { biweeklyLeftovers, extrasInMonth, salaryPerMonth, sumExtras } from '../utils/salary';
+import { dateInMonth, daysInMonth, formatMonthLabel } from '../utils/dates';
 import { balanceTone, formatBRL } from '../utils/money';
 import { categoryColor, categoryDot } from '../utils/categories';
 import { niceTicks } from '../utils/chart';
@@ -32,7 +32,7 @@ const axisMoney = (v: number) => (v === 0 ? '0' : `${(v / 1000).toLocaleString('
 /** Atualização de estado que escolhe `name`, ou desfaz a escolha se ele já estava escolhido. */
 const togglingTo = (name: string) => (current: string | null) => (current === name ? null : name);
 
-type CategorySlice = FinancialStats['expenseByCategory'][number];
+type CategorySlice = FinancialStats['expenseByCategoryByMonth'][string][number];
 
 /**
  * Anel do "Gastos por categoria". Fica isolado e memoizado de propósito: o Recharts recria as
@@ -120,24 +120,102 @@ function PaymentTypeBreakdown({ values, tone = 'text-white' }: { values: ByPayme
   );
 }
 
-/** `month` (YYYY-MM) é o mês corrente: o bônus lançado vale só para ele. `bonus` é o bônus ativo nele. */
-function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary; monthly: number; month: string; bonus: number; onSave: (s: Salary) => Promise<void> }) {
+/** Receita extra no formulário: o valor fica como texto enquanto é digitado. */
+type ExtraDraft = Omit<ExtraIncome, 'amount'> & { amount: string };
+
+/** Popup para adicionar ou editar uma receita extra. Confirmar só devolve o rascunho: quem salva é o formulário do salário. */
+function ExtraIncomeDialog({ initial, isNew, payDay, biweekly, onConfirm, onClose }: {
+  initial: ExtraDraft; isNew: boolean; payDay: number; biweekly: boolean; onConfirm: (draft: ExtraDraft) => void; onClose: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const set = (patch: Partial<ExtraDraft>) => setDraft(d => ({ ...d, ...patch }));
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onConfirm({ ...draft, name: draft.name.trim() });
+  };
+
+  // Portal: o popup fica fora do <form> do salário (form dentro de form não vale) e de qualquer card com transform.
+  return createPortal(
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <form role="dialog" aria-modal="true" aria-labelledby="extra-income-title" onSubmit={submit}
+        className="w-full max-w-sm panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-5">
+          <h3 id="extra-income-title" className="text-base font-medium text-white">{isNew ? 'Nova receita extra' : 'Editar receita extra'}</h3>
+          <button type="button" onClick={onClose} aria-label="Fechar" className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="space-y-4">
+          <FormField label="Nome" htmlFor="extra-income-name">
+            <input id="extra-income-name" required autoFocus maxLength={60} placeholder="Ex.: PLR, 13º 1ª parcela"
+              value={draft.name} onChange={e => set({ name: e.target.value })} className="input-field" />
+          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Valor (R$)" htmlFor="extra-income-amount">
+              <input id="extra-income-amount" type="number" min="0.01" step="0.01" inputMode="decimal" required placeholder="0,00"
+                value={draft.amount} onChange={e => set({ amount: e.target.value })} className="input-field" />
+            </FormField>
+            <FormField label="Mês" htmlFor="extra-income-month">
+              <input id="extra-income-month" type="month" required
+                value={draft.month} onChange={e => set({ month: e.target.value })} className="input-field" />
+            </FormField>
+          </div>
+          {biweekly && (
+            <FormField label="Entra com o pagamento" htmlFor="extra-income-half">
+              <select id="extra-income-half" value={draft.half} onChange={e => set({ half: e.target.value === '2' ? 2 : 1 })} className="input-field">
+                <option value={1}>Do dia {payDay}</option>
+                <option value={2}>Do dia {payDay + 15}</option>
+              </select>
+            </FormField>
+          )}
+          <label className="flex items-center gap-2 text-sm text-white cursor-pointer">
+            <input type="checkbox" checked={draft.yearly} onChange={e => set({ yearly: e.target.checked })} />
+            Repete todo ano
+          </label>
+        </div>
+        <div className="flex gap-3 mt-6">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 transition-colors">Cancelar</button>
+          <button type="submit" className="flex-1 py-2.5 rounded-xl text-sm text-on-accent font-medium bg-primary hover:opacity-90 transition-opacity">
+            {isNew ? 'Adicionar' : 'Salvar'}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body
+  );
+}
+
+/** `month` (YYYY-MM) é o mês corrente; `extras` são as receitas extras que caem nele. */
+function SalaryCell({ salary, monthly, month, extras, onSave }: { salary: Salary; monthly: number; month: string; extras: ExtraIncome[]; onSave: (s: Salary) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState('');
   const [secondAmount, setSecondAmount] = useState('');
   const [frequency, setFrequency] = useState<SalaryFrequency>('monthly');
   const [payDay, setPayDay] = useState(15);
-  const [bonusInput, setBonusInput] = useState('');
-  const [bonusHalf, setBonusHalf] = useState<1 | 2>(1);
+  const [extraDrafts, setExtraDrafts] = useState<ExtraDraft[]>([]);
+  // Popup aberto: `index` null = nova receita extra; senão, a posição da que está sendo editada.
+  const [extraDialog, setExtraDialog] = useState<{ index: number | null; draft: ExtraDraft } | null>(null);
   const [saving, setSaving] = useState(false);
+  const closeExtraDialog = useCallback(() => setExtraDialog(null), []);
+  const confirmExtra = (draft: ExtraDraft) => {
+    const index = extraDialog?.index ?? null;
+    setExtraDrafts(list => index === null ? [...list, draft] : list.map((e, j) => j === index ? draft : e));
+    setExtraDialog(null);
+  };
 
   const startEdit = () => {
     setAmount(salary.amount ? String(salary.amount) : '');
     setSecondAmount(salary.secondAmount ? String(salary.secondAmount) : '');
     setFrequency(salary.frequency);
     setPayDay(salary.payDay);
-    setBonusInput(bonus ? String(bonus) : '');
-    setBonusHalf(salary.bonusHalf);
+    setExtraDrafts(salary.extras.map(e => ({ ...e, amount: String(e.amount) })));
     setEditing(true);
   };
 
@@ -145,11 +223,11 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
     e.preventDefault();
     setSaving(true);
     try {
-      const bonusValue = Number(bonusInput) || 0;
       // Mensal não tem 2º pagamento: guarda o mesmo valor, que já vem preenchido se virar quinzenal.
       const first = Number(amount) || 0;
       const second = frequency === 'biweekly' ? Number(secondAmount) || 0 : first;
-      await onSave({ amount: first, secondAmount: second, frequency, payDay, bonus: bonusValue, bonusHalf, bonusMonth: bonusValue > 0 ? month : null });
+      const nextExtras = extraDrafts.map(e => ({ ...e, name: e.name.trim(), amount: Number(e.amount) || 0 }));
+      await onSave({ amount: first, secondAmount: second, frequency, payDay, extras: nextExtras });
       setEditing(false);
     } catch {
       // onSave já avisou o usuário; o formulário continua aberto para corrigir.
@@ -160,6 +238,7 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
 
   if (editing) {
     return (
+      <>
       <form onSubmit={submit} className="flex flex-col gap-2">
         <label htmlFor="salary-amount" className="text-sm text-textMuted">
           {frequency === 'biweekly' ? `Salário dia ${payDay}` : 'Salário mensal'}
@@ -188,23 +267,40 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
             </select>
           </>
         )}
-        <label htmlFor="salary-bonus" className="text-sm text-textMuted">Bônus deste mês (opcional)</label>
-        <input id="salary-bonus" type="number" min="0" step="0.01" inputMode="decimal" placeholder="0,00"
-          value={bonusInput} onChange={e => setBonusInput(e.target.value)} className="input-field" />
-        {frequency === 'biweekly' && Number(bonusInput) > 0 && (
-          <>
-            <label htmlFor="salary-bonus-half" className="text-sm text-textMuted">Bônus entra na quinzena</label>
-            <select id="salary-bonus-half" value={bonusHalf} onChange={e => setBonusHalf(e.target.value === '2' ? 2 : 1)} className="input-field">
-              <option value={1}>Do dia {payDay}</option>
-              <option value={2}>Do dia {payDay + 15}</option>
-            </select>
-          </>
+        <p className="text-sm text-textMuted mt-1">Receitas extras (PLR, 13º, férias...)</p>
+        {extraDrafts.length > 0 && (
+          <ul className="flex flex-col gap-1">
+            {extraDrafts.map((extra, i) => (
+              <li key={i} className="flex items-center gap-1 text-sm">
+                <button type="button" onClick={() => setExtraDialog({ index: i, draft: extra })} aria-label={`Editar ${extra.name}`}
+                  className="flex-1 min-w-0 flex justify-between gap-2 px-2 py-1.5 rounded-md text-left hover:bg-white/[0.06] transition-colors">
+                  <span className="truncate text-white">{extra.name}</span>
+                  <span className="shrink-0 text-textMuted">
+                    {fmt(Number(extra.amount) || 0)} · {formatMonthLabel(extra.month)}{extra.yearly ? ' · todo ano' : ''}
+                  </span>
+                </button>
+                <button type="button" onClick={() => setExtraDrafts(list => list.filter((_, j) => j !== i))} aria-label={`Remover ${extra.name}`}
+                  className="p-1.5 rounded-md text-textMuted hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                  <X size={14} />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
+        <button type="button" onClick={() => setExtraDialog({ index: null, draft: { name: '', amount: '', month, half: 1, yearly: false } })}
+          className="self-start text-xs font-semibold text-accent hover:underline flex items-center gap-1">
+          <Plus size={12} /> Adicionar receita extra
+        </button>
         <div className="flex gap-2 mt-1">
           <button type="submit" disabled={saving} className="h-9 px-4 rounded-md bg-primary text-on-accent text-sm font-medium disabled:opacity-60">Salvar</button>
           <button type="button" onClick={() => setEditing(false)} className="h-9 px-4 rounded-md text-sm text-white bg-white/[0.06] hover:bg-white/10">Cancelar</button>
         </div>
       </form>
+      {extraDialog && (
+        <ExtraIncomeDialog initial={extraDialog.draft} isNew={extraDialog.index === null} payDay={payDay} biweekly={frequency === 'biweekly'}
+          onConfirm={confirmExtra} onClose={closeExtraDialog} />
+      )}
+      </>
     );
   }
 
@@ -238,11 +334,11 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
               ? `2 × ${fmt(salary.amount)}` : `${fmt(salary.amount)} + ${fmt(salary.secondAmount)}`}`
             : 'Mensal'}
       </p>
-      {bonus > 0 && (
-        <p className="text-xs text-teal-400 mt-0.5">
-          + bônus {fmt(bonus)}{salary.frequency === 'biweekly' ? ` no dia ${salary.bonusHalf === 1 ? salary.payDay : salary.payDay + 15}` : ''}
+      {extras.map((extra, i) => (
+        <p key={i} className="text-xs text-teal-400 mt-0.5">
+          + {extra.name} {fmt(extra.amount)}{salary.frequency === 'biweekly' ? ` no dia ${extra.half === 1 ? salary.payDay : salary.payDay + 15}` : ''}
         </p>
-      )}
+      ))}
     </div>
   );
 }
@@ -254,6 +350,11 @@ interface DashboardPageProps {
   stats: FinancialStats;
   overBudget: BudgetProgress[];
   budgetProgress: BudgetProgress[];
+  /** Mês do Dashboard (YYYY-MM): sobra, dívidas, gastos, categorias e orçamento são deste mês. */
+  month: string;
+  /** Meses do seletor, do mais recente para o mais antigo. */
+  months: string[];
+  onChangeMonth: (month: string) => void;
   usedCurrencies: string[];
   rates: ExchangeRates | null;
   ratesFailed: boolean;
@@ -263,8 +364,8 @@ interface DashboardPageProps {
   investmentHoldings: InvestmentHoldings;
   isEmpty: boolean;
   hasAccounts: boolean;
-  chartPeriod: '30d' | 'all';
-  onChangeChartPeriod: (period: '30d' | 'all') => void;
+  chartPeriod: 'daily' | 'all';
+  onChangeChartPeriod: (period: 'daily' | 'all') => void;
   projection: ProjectionPoint[];
   onNavigate: (tab: Tab) => void;
   onFilterTransactions: (filter: 'all' | 'income' | 'expense') => void;
@@ -281,7 +382,7 @@ interface DashboardPageProps {
  * categorias, projeção e orçamento respondem às perguntas seguintes, nessa ordem.
  */
 export function DashboardPage({
-  accounts, dashboardAccountId, onChangeDashboardAccount, stats, overBudget, budgetProgress,
+  accounts, dashboardAccountId, onChangeDashboardAccount, stats, overBudget, budgetProgress, month, months, onChangeMonth,
   usedCurrencies, rates, ratesFailed, conversionIssue, missingCurrencies, hasInvestments,
   investmentHoldings, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
   projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary, connectBank,
@@ -291,12 +392,9 @@ export function DashboardPage({
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
   const [pickedCategory, setPickedCategory] = useState<string | null>(null);
   const togglePicked = (name: string) => setPickedCategory(togglingTo(name));
-  const today = todayISO();
-  const month = today.slice(0, 7);
-  const [categoryMonth, setCategoryMonth] = useState(month);
   const monthName = formatMonthLabel(month).split('/')[0].toLowerCase();
-  const bonus = activeBonus(salary, month);
-  const monthlySalary = salaryPerMonth(salary) + bonus;
+  const monthExtras = useMemo(() => extrasInMonth(salary, month), [salary, month]);
+  const monthlySalary = salaryPerMonth(salary) + sumExtras(monthExtras);
   // Tudo o que se deve no mês é dívida: compras no cartão (à vista e parcelas) + parcelas cadastradas.
   const monthDebts = stats.monthCardExpense + stats.monthDebtPayments + stats.monthRecurring;
   // Entradas do mês: salário + recorrências de receita (Devedores).
@@ -304,37 +402,34 @@ export function DashboardPage({
   const monthlyIncome = monthlySalary + debtorsIncome;
   // Sobra = entradas − dívidas do mês. As despesas do mês são só informativas (o total gasto).
   const leftover = monthlyIncome - monthDebts;
-  const now = new Date();
-  const monthDays = daysInMonth(now.getFullYear(), now.getMonth() + 1);
+  const monthDays = daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7)));
 
   // Uma régua por pagamento: no quinzenal, cada metade com as dívidas que vencem até o pagamento seguinte.
   const rulers = useMemo(() => {
     if (salary.frequency !== 'biweekly') {
       return [{ label: `Salário de ${monthName}`, detail: `Recebe ${fmt(monthlyIncome)} · dívidas do mês ${fmt(monthDebts)}`, pay: monthlyIncome, owed: monthDebts }];
     }
-    const halves = biweeklyLeftovers(salary, stats.monthOutflows, monthDays, bonus, stats.monthInflows);
+    const halves = biweeklyLeftovers(salary, stats.monthOutflows, monthDays, monthExtras, stats.monthInflows);
     return halves.map((h, i) => {
       const until = i === 0 ? `até o dia ${halves[1].day - 1}` : 'até o fim do mês';
       return { label: `Pagamento do dia ${h.day}`, detail: `Recebe ${fmt(h.pay)} · dívidas ${until}: ${fmt(h.pay - h.leftover)}`, pay: h.pay, owed: h.pay - h.leftover };
     });
-  }, [salary, stats.monthOutflows, stats.monthInflows, monthDays, bonus, monthName, monthDebts, monthlyIncome]);
+  }, [salary, stats.monthOutflows, stats.monthInflows, monthDays, monthExtras, monthName, monthDebts, monthlyIncome]);
   const rulerScale = Math.max(...rulers.map(r => Math.max(r.pay, r.owed)));
 
-  // Fluxo diário: os últimos 31 dias inteiros, com zero nos dias sem lançamento (o eixo é tempo).
+  // Fluxo diário: cada dia do mês, com zero nos dias sem lançamento (o eixo é tempo).
   const dailyFlow = useMemo(() => {
     const byKey = new Map(stats.dailyEvolution.map(d => [d.name, d.balance]));
-    return Array.from({ length: 31 }, (_, i) => {
-      const iso = advanceDays(today, i - 30);
+    return Array.from({ length: monthDays }, (_, i) => {
+      const iso = dateInMonth(month, i + 1);
       return { name: `${iso.slice(8, 10)}/${iso.slice(5, 7)}`, balance: byKey.get(`${iso.slice(5, 7)}/${iso.slice(8, 10)}`) ?? 0 };
     });
-  }, [stats.dailyEvolution, today]);
-  const flowData = chartPeriod === '30d' ? dailyFlow : stats.balanceByMonth;
+  }, [stats.dailyEvolution, month, monthDays]);
+  const flowData = chartPeriod === 'daily' ? dailyFlow : stats.balanceByMonth;
   const flowTicks = niceTicks(flowData.map(d => d.balance));
   const projectionTicks = niceTicks(projection.map(p => p.balance));
 
-  // Filtro mensal do donut (o mesmo seletor de Transações e Dívidas): abre no mês corrente.
-  const categoryMonths = Array.from(new Set([month, ...Object.keys(stats.expenseByCategoryByMonth)])).sort().reverse();
-  const categories = categoryMonth === ALL_MONTHS ? stats.expenseByCategory : stats.expenseByCategoryByMonth[categoryMonth] ?? [];
+  const categories = stats.expenseByCategoryByMonth[month] ?? [];
   const categoryTotal = categories.reduce((s, c) => s + c.amount, 0);
   const categoryShare = (amount: number) =>
     categoryTotal > 0 ? `${((amount / categoryTotal) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%` : '—';
@@ -351,8 +446,12 @@ export function DashboardPage({
     <>
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 mb-6">
         <div className="min-w-0">
-          <h1 className="text-2xl font-medium tracking-tight text-white">Visão geral</h1>
-          <p className="text-sm text-textMuted mt-1">{finding}</p>
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+            <h1 className="text-2xl font-medium tracking-tight text-white">Visão geral</h1>
+            <MonthNavigator id="dashboard-month" value={month} months={months}
+              onChange={m => { onChangeMonth(m); setPickedCategory(null); }}/>
+          </div>
+          <p className="text-sm text-textMuted mt-2">{finding}</p>
         </div>
         <div className="flex items-center gap-2">
           {accounts.length > 0 && (
@@ -445,7 +544,7 @@ export function DashboardPage({
             </div>
             <div className="grid lg:grid-cols-3 border-t border-white/[0.07] divide-y lg:divide-y-0 lg:divide-x divide-white/[0.07]">
               <div className="p-5 md:px-6">
-                <SalaryCell salary={salary} monthly={monthlySalary} month={month} bonus={bonus} onSave={onSaveSalary} />
+                <SalaryCell salary={salary} monthly={monthlySalary} month={month} extras={monthExtras} onSave={onSaveSalary} />
               </div>
               <button type="button" onClick={() => onNavigate('debts')} className="p-5 md:px-6 text-left hover:bg-white/[0.02] transition-colors">
                 <p className="text-sm text-textMuted">Dívidas do mês</p>
@@ -489,10 +588,10 @@ export function DashboardPage({
             <section aria-labelledby="flow-title" className="panel rounded-2xl p-5 md:p-6 lg:col-span-2">
               <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
                 <h2 id="flow-title" className="text-base font-medium text-white">
-                  {chartPeriod === '30d' ? 'Entradas menos saídas, por dia' : 'Entradas menos saídas, por mês'}
+                  {chartPeriod === 'daily' ? `Entradas menos saídas, por dia de ${monthName}` : 'Entradas menos saídas, por mês'}
                 </h2>
                 <div role="group" aria-label="Período" className="flex p-0.5 rounded-md bg-white/[0.06]">
-                  {([['30d', 'Últimos 30 dias'], ['all', 'Por mês']] as const).map(([value, label]) => (
+                  {([['daily', 'Dias do mês'], ['all', 'Por mês']] as const).map(([value, label]) => (
                     <button key={value} type="button" aria-pressed={chartPeriod === value} onClick={() => onChangeChartPeriod(value)}
                       className={`h-7 px-3 text-xs rounded transition-colors ${chartPeriod === value ? 'bg-card text-white font-medium' : 'text-textMuted hover:text-white'}`}>
                       {label}
@@ -504,11 +603,11 @@ export function DashboardPage({
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={flowData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
                     <CartesianGrid vertical={false}/>
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} interval={chartPeriod === '30d' ? 5 : 0} tickMargin={6}/>
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} interval={chartPeriod === 'daily' ? 5 : 0} tickMargin={6}/>
                     <YAxis axisLine={false} tickLine={false} tickFormatter={axisMoney} width={60} ticks={flowTicks} domain={[flowTicks[0], flowTicks[flowTicks.length - 1]]} interval={0}/>
                     <ReferenceLine y={0} stroke="var(--chart-axis)" strokeOpacity={0.6}/>
                     <RechartsTooltip {...tooltipStyle} formatter={(v) => [signed(Number(v)), 'Entradas − saídas']}/>
-                    <Bar dataKey="balance" maxBarSize={chartPeriod === '30d' ? 14 : 36} {...chartAnimation}>
+                    <Bar dataKey="balance" maxBarSize={chartPeriod === 'daily' ? 14 : 36} {...chartAnimation}>
                       {flowData.map(d => <Cell key={d.name} fill={d.balance < 0 ? 'var(--color-red-500)' : 'var(--color-teal-500)'}/>)}
                     </Bar>
                   </BarChart>
@@ -518,14 +617,10 @@ export function DashboardPage({
             </section>
 
             <section aria-labelledby="category-title" className="panel rounded-2xl p-5 md:p-6">
-              <h2 id="category-title" className="text-base font-medium text-white mb-3">Gastos por categoria</h2>
-              <div className="mb-4">
-                <MonthNavigator id="category-month" value={categoryMonth} months={categoryMonths} allowAll
-                  onChange={m => { setCategoryMonth(m); setPickedCategory(null); }}/>
-              </div>
+              <h2 id="category-title" className="text-base font-medium text-white mb-4">Gastos por categoria em {monthName}</h2>
               {categories.length === 0 ? (
                 <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">
-                  {categoryMonth !== ALL_MONTHS ? 'Nenhum gasto neste mês.' : 'Nenhum gasto registrado ainda.'}
+                  Nenhum gasto neste mês.
                 </p>
               ) : (
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-5 items-center sm:items-start lg:items-center">
@@ -574,7 +669,7 @@ export function DashboardPage({
                 <section aria-labelledby="projection-title" className="panel rounded-2xl p-5 md:p-6">
                   <div className="flex justify-between items-baseline gap-3 mb-4">
                     <h2 id="projection-title" className="text-base font-medium text-white">Saldo projetado</h2>
-                    <span className="text-xs text-textMuted">Próximos 6 meses</span>
+                    <span className="text-xs text-textMuted">{projection[0].name} a {projection[projection.length - 1].name}</span>
                   </div>
                   <div className="h-48">
                     <ResponsiveContainer width="100%" height="100%">
@@ -591,7 +686,7 @@ export function DashboardPage({
                     </ResponsiveContainer>
                   </div>
                   <p className="text-xs text-textMuted mt-2">
-                    Saldo de hoje, mais o salário de cada mês, menos a fatura, as parcelas do cartão e as dívidas.
+                    Saldo de hoje, mais o salário e as receitas extras de cada mês, menos a fatura, as parcelas do cartão e as dívidas.
                   </p>
                 </section>
               )}

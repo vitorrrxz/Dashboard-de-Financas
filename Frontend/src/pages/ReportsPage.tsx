@@ -1,5 +1,6 @@
 import { ReportsView } from '../components/ReportsView';
 import type { Account, Debt, Investment, NetWorthSnapshot, Transaction } from '../types';
+import type { ProjectionPoint } from '../utils/projection';
 
 interface ReportsPageProps {
   transactions: Transaction[];
@@ -7,14 +8,15 @@ interface ReportsPageProps {
   debts: Debt[];
   investments: Investment[];
   netWorthHistory: NetWorthSnapshot[];
+  projection: ProjectionPoint[];
 }
 
-export function ReportsPage({ transactions, accounts, debts, investments, netWorthHistory }: ReportsPageProps) {
+export function ReportsPage({ transactions, accounts, debts, investments, netWorthHistory, projection }: ReportsPageProps) {
   return (
     <>
       <div className="mb-6">
         <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Relatórios</h1>
-        <p className="text-textMuted text-sm">Patrimônio líquido e comparativos de receitas e despesas</p>
+        <p className="text-textMuted text-sm">Patrimônio líquido, receitas e despesas e o que vem nos próximos meses</p>
       </div>
       <ReportsView
         transactions={transactions}
@@ -22,6 +24,7 @@ export function ReportsPage({ transactions, accounts, debts, investments, netWor
         debts={debts}
         investments={investments}
         netWorthHistory={netWorthHistory}
+        projection={projection}
       />
     </>
   );

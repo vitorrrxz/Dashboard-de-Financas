@@ -7,6 +7,7 @@ import { recurringSchema, recurringUpdateSchema } from '../lib/schemas.js';
 import { accountOwnershipError } from '../lib/accountAccess.js';
 import { advanceOccurrence, todayISO } from '../lib/dates.js';
 import { BASE_CURRENCY } from '../lib/money.js';
+import { isDebtPaid } from '../lib/notificationsCore.js';
 
 export const router = express.Router();
 
@@ -27,6 +28,15 @@ function recurringOccurrenceHash(userId, recurringId, occurrenceDate) {
 // estrago caso `advanceOccurrence` deixe de avançar por um dado inesperado.
 const MAX_OCCURRENCES_PER_RUN = 120;
 
+/** A dívida vinculada precisa ser do usuário — a chave estrangeira só garante que ela existe. */
+async function recurringLinkError(userId, { accountId, debtId }) {
+  const accountError = await accountOwnershipError(userId, accountId);
+  if (accountError) return accountError;
+  if (!debtId) return null;
+  const owned = await prisma.debt.count({ where: { id: debtId, userId } });
+  return owned > 0 ? null : 'Dívida vinculada não encontrada.';
+}
+
 // --- RECURRING TRANSACTIONS (FIN-054) ---
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -41,8 +51,8 @@ router.post('/', requireAuth, async (req, res) => {
   const validation = validateBody(recurringSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
-    const accountError = await accountOwnershipError(req.user.userId, validation.data.accountId);
-    if (accountError) return res.status(400).json({ error: accountError });
+    const linkError = await recurringLinkError(req.user.userId, validation.data);
+    if (linkError) return res.status(400).json({ error: linkError });
     const data = { active: true, ...validation.data, userId: req.user.userId };
     const recurring = await prisma.recurringTransaction.create({ data });
     res.json(recurring);
@@ -71,11 +81,16 @@ router.post('/process', requireAuth, async (req, res) => {
     const dueRecurrences = await prisma.recurringTransaction.findMany({
       where: { userId, active: true, nextOccurrence: { lte: today } },
       // FIN-074: a ocorrência nasce na moeda da conta da recorrência (real, sem conta).
-      include: { account: { select: { currency: true } } },
+      include: {
+        account: { select: { currency: true } },
+        debt: { select: { paidAmount: true, totalAmount: true, paidInstallments: true, totalInstallments: true } },
+      },
     });
 
     let processed = 0;
     for (const rec of dueRecurrences) {
+      // Devedor de uma dívida já quitada: ele parou de pagar, então não há o que lançar.
+      if (rec.debt && isDebtPaid(rec.debt)) continue;
       const ops = [];
       let occurrence = rec.nextOccurrence;
 
@@ -126,8 +141,8 @@ router.put('/:id', requireAuth, async (req, res) => {
   const validation = validateBody(recurringUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
-    const accountError = await accountOwnershipError(req.user.userId, validation.data.accountId);
-    if (accountError) return res.status(400).json({ error: accountError });
+    const linkError = await recurringLinkError(req.user.userId, validation.data);
+    if (linkError) return res.status(400).json({ error: linkError });
     const recurring = await prisma.recurringTransaction.updateMany({
       where: { id: req.params.id, userId: req.user.userId },
       data: validation.data,

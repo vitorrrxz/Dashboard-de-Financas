@@ -144,7 +144,7 @@ describe('transferências entre contas e pagamento de fatura (FIN-103)', () => {
     expect(s.income).toBe(1000);
     expect(s.expense).toBe(300);
     expect(s.monthExpense).toBe(300);
-    expect(s.expenseByCategory).toEqual([{ name: 'Alimentação', amount: 300 }]);
+    expect(s.expenseByCategoryByMonth[today.slice(0, 7)]).toEqual([{ name: 'Alimentação', amount: 300 }]);
     expect(s.balanceByMonth.map(m => m.balance)).toEqual([700]);
     expect(s.dailyEvolution.map(d => d.balance)).toEqual([700]);
   });
@@ -162,8 +162,7 @@ describe('computeFinancialStats — gastos por categoria, mês a mês', () => {
     expect(s.expenseByCategoryByMonth).toEqual({
       '2026-05': [{ name: 'Lazer', amount: 100 }],
       '2026-06': [{ name: 'Saúde', amount: 60 }, { name: 'Lazer', amount: 40 }],
-    });
-    expect(s.expenseByCategory).toEqual([{ name: 'Lazer', amount: 140 }, { name: 'Saúde', amount: 60 }]);
+    });
   });
 });
 
@@ -307,6 +306,27 @@ describe('computeFinancialStats — devedores (recorrências de receita) nas ent
     expect(s.monthRecurringIncome).toBe(500);
     expect(s.monthInflows).toEqual([{ day: 1, amount: 300 }, { day: 28, amount: 200 }]);
     expect(s.monthRecurring).toBe(1000);
+  });
+});
+
+describe('computeFinancialStats — mês escolhido no Dashboard', () => {
+  const month = todayISO().slice(0, 7);
+
+  it('nos outros meses, as dívidas são as parcelas do cronograma que vencem no mês', () => {
+    // 3 parcelas de 100 a partir do mês que vem: entram no mês 1, 2 e 3 à frente, e não no 4º.
+    const debts = [debt({ monthlyPayment: 100, totalAmount: 300, paidAmount: 0, totalInstallments: 3, paidInstallments: 0,
+      nextDueDate: dateInMonth(shiftMonth(month, 1), 10) })];
+    const payments = [1, 2, 3, 4].map(i => computeFinancialStats([], [], debts, null, [], [], shiftMonth(month, i)).monthDebtPayments);
+    expect(payments).toEqual([100, 100, 100, 0]);
+  });
+
+  it('gastos, categorias e fluxo diário são do mês escolhido', () => {
+    const next = shiftMonth(month, 1);
+    const txs = [tx({ date: dateInMonth(month, 5), amount: -50, category: 'Lazer' }), tx({ date: dateInMonth(next, 5), amount: -80, category: 'Saúde' })];
+    const s = computeFinancialStats(txs, [], [], null, [], [], next);
+    expect(s.monthExpense).toBe(80);
+    expect(s.expenseByCategoryByMonth[next]).toEqual([{ name: 'Saúde', amount: 80 }]);
+    expect(s.dailyEvolution).toEqual([{ name: `${next.slice(5, 7)}/05`, balance: -80 }]);
   });
 });
 

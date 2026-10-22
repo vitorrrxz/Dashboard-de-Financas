@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { activeBonus, biweeklyLeftovers, payDays, salaryPerMonth } from './salary';
-import type { Salary } from '../types';
+import { biweeklyLeftovers, extrasInMonth, payDays, salaryPerMonth } from './salary';
+import type { ExtraIncome, Salary } from '../types';
 
-const salary: Salary = { amount: 1000, secondAmount: 1000, frequency: 'biweekly', payDay: 5, bonus: 0, bonusHalf: 1, bonusMonth: null };
+const salary: Salary = { amount: 1000, secondAmount: 1000, frequency: 'biweekly', payDay: 5, extras: [] };
 
 describe('salário quinzenal', () => {
   it('soma os dois pagamentos no mês', () => {
@@ -38,23 +38,28 @@ describe('salário quinzenal', () => {
   });
 
   it('o que os devedores pagam entra na quinzena do dia em que cai', () => {
-    const [first, second] = biweeklyLeftovers(salary, [{ day: 10, amount: 100 }], 31, 0, [{ day: 12, amount: 300 }, { day: 2, amount: 50 }]);
+    const [first, second] = biweeklyLeftovers(salary, [{ day: 10, amount: 100 }], 31, [], [{ day: 12, amount: 300 }, { day: 2, amount: 50 }]);
     expect(first).toEqual({ day: 5, pay: 1300, leftover: 1200 });
     expect(second).toEqual({ day: 20, pay: 1050, leftover: 1050 });
   });
 });
 
-describe('bônus', () => {
-  const withBonus: Salary = { ...salary, bonus: 400, bonusHalf: 2, bonusMonth: '2026-10' };
+describe('receitas extras', () => {
+  const plr: ExtraIncome = { name: 'PLR', amount: 400, month: '2026-10', half: 2, yearly: false };
+  const thirteenth: ExtraIncome = { name: '13º', amount: 1000, month: '2026-11', half: 1, yearly: true };
+  const withExtras: Salary = { ...salary, extras: [plr, thirteenth] };
 
-  it('vale só no mês em que foi lançado', () => {
-    expect(activeBonus(withBonus, '2026-10')).toBe(400);
-    expect(activeBonus(withBonus, '2026-11')).toBe(0);
+  it('a única vale só no mês dela; a anual repete no mesmo mês dos anos seguintes, nunca antes', () => {
+    expect(extrasInMonth(withExtras, '2026-10')).toEqual([plr]);
+    expect(extrasInMonth(withExtras, '2027-10')).toEqual([]);
+    expect(extrasInMonth(withExtras, '2026-11')).toEqual([thirteenth]);
+    expect(extrasInMonth(withExtras, '2027-11')).toEqual([thirteenth]);
+    expect(extrasInMonth(withExtras, '2025-11')).toEqual([]);
   });
 
-  it('entra só na quinzena escolhida', () => {
-    const [first, second] = biweeklyLeftovers(withBonus, [], 31, 400);
-    expect(first.leftover).toBe(1000);
+  it('cada uma entra só na quinzena escolhida', () => {
+    const [first, second] = biweeklyLeftovers(salary, [], 31, [plr, thirteenth]);
+    expect(first.leftover).toBe(2000);
     expect(second.leftover).toBe(1400);
   });
 });

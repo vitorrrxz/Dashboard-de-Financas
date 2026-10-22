@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { X, Plus, Trash2, Edit2, Pause, Play } from 'lucide-react';
 import { formatBRL } from '../utils/money';
-import type { Account, RecurrenceFrequency, RecurringTransaction, Transaction } from '../types';
+import type { Account, Debt, RecurrenceFrequency, RecurringTransaction, Transaction } from '../types';
 import { CATEGORIES, EXPENSE_CATEGORIES, OWN_TRANSFER_CATEGORIES, categoryDot } from '../utils/categories';
-import { todayISO } from '../utils/debts';
+import { isDebtPaid, todayISO } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
 import { bankGroupOf, groupByBank, primaryAccountOf } from '../utils/accountGroups';
 import {
@@ -29,6 +29,8 @@ const EMPTY_RECURRING: RecurringFormData = {
 interface RecurringManagerProps {
   recurring: RecurringTransaction[];
   accounts: Account[];
+  /** Dívidas que um devedor pode pagar (vínculo `debtId`, só na aba Devedores). */
+  debts: Debt[];
   onAdd: (recurring: RecurringFormData) => Promise<void>;
   onUpdate: (id: string, recurring: Partial<RecurringFormData>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -45,7 +47,7 @@ interface RecurringManagerProps {
  * uma aba por tipo (o sinal de `amount`). Não lança nada por conta própria: quem gera as `Transaction` reais é o
  * endpoint `/api/recurring-transactions/process`, disparado no carregamento do app (FIN-055).
  */
-export function RecurringManager({ recurring: allRecurring, accounts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind }: RecurringManagerProps) {
+export function RecurringManager({ recurring: allRecurring, accounts, debts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind }: RecurringManagerProps) {
   const isExpense = kind === 'expense';
   const recurring = useMemo(
     () => allRecurring.filter(r => (r.amount < 0) === isExpense),
@@ -113,8 +115,17 @@ export function RecurringManager({ recurring: allRecurring, accounts, onAdd, onU
       nextOccurrence: rec.nextOccurrence,
       active: rec.active,
       accountId: rec.accountId,
+      debtId: rec.debtId ?? null,
     });
     setShowForm(true);
+  };
+
+  // Dívidas que dá para vincular: as em aberto, mais a já vinculada (mesmo quitada, para não sumir do select).
+  const linkableDebts = debts.filter(d => !isDebtPaid(d) || d.id === form.debtId);
+  /** Vincula o devedor a uma dívida; sem valor digitado, sugere a parcela dela. */
+  const linkDebt = (debtId: string) => {
+    const debt = debts.find(d => d.id === debtId);
+    setForm(f => ({ ...f, debtId: debt ? debt.id : null, amount: f.amount || debt?.monthlyPayment || 0 }));
   };
 
   /** Envia o formulário, aplicando o sinal do valor conforme a aba. */
@@ -203,6 +214,7 @@ export function RecurringManager({ recurring: allRecurring, accounts, onAdd, onU
 
         {recurring.map(rec => {
           const bank = bankGroupOf(bankGroups, rec.accountId);
+          const linkedDebt = rec.debtId ? debts.find(d => d.id === rec.debtId) : undefined;
           return (
             <div key={rec.id} className={`panel rounded-xl p-4 flex items-center gap-4 ${rec.active ? '' : 'opacity-60'}`}>
               <div className="flex-1 min-w-0">
@@ -222,6 +234,12 @@ export function RecurringManager({ recurring: allRecurring, accounts, onAdd, onU
                   {bank ? ` · ${bank.bank}` : ''}
                   {rec.active ? ` · próxima em ${formatDateBR(rec.nextOccurrence)}` : ''}
                 </p>
+                {linkedDebt && (
+                  <p className="text-xs text-textMuted mt-0.5">
+                    Paga a dívida <span className="text-white">{linkedDebt.name}</span>{' · '}
+                    {isDebtPaid(linkedDebt) ? 'quitada, não entra mais' : `parcela ${linkedDebt.paidInstallments + 1} de ${linkedDebt.totalInstallments}`}
+                  </p>
+                )}
               </div>
 
               <div className="text-right shrink-0">
@@ -311,6 +329,18 @@ export function RecurringManager({ recurring: allRecurring, accounts, onAdd, onU
                   ))}
                 </select>
               </FormField>
+
+              {!isExpense && (
+                <FormField label="Dívida que ele paga" htmlFor="recurring-debt">
+                  <select id="recurring-debt" value={form.debtId ?? ''} onChange={e => linkDebt(e.target.value)} className="input-field">
+                    <option value="">Nenhuma</option>
+                    {linkableDebts.map(d => (
+                      <option key={d.id} value={d.id}>{d.name} · {formatBRL(d.monthlyPayment)}/mês</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-textMuted mt-1.5">A receita para de entrar quando a dívida for quitada.</p>
+                </FormField>
+              )}
             </div>
 
             <div className="flex gap-3 mt-6">

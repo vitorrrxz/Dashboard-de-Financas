@@ -65,7 +65,7 @@ describe('computeMonthlyComparison', () => {
     const r = computeMonthlyComparison([
       tx({ date: '2027-01-10', amount: 100 }),
       tx({ date: '2026-12-10', amount: 200 }),
-    ]);
+    ], 12, '2027-12-31');
     expect(r.map(x => x.period)).toEqual(['2026-12', '2027-01']);
   });
 });
@@ -91,7 +91,36 @@ describe('computeYearlyComparison', () => {
   });
 });
 
+describe('comparativo só com o que já aconteceu', () => {
+  // Parcelas futuras do cartão já vêm lançadas com a data delas: não podem virar meses só de despesa.
+  const txs = [
+    tx({ date: '2026-10-05', amount: 3000 }),
+    tx({ date: '2026-10-20', amount: -500 }),
+    tx({ date: '2026-11-20', amount: -500 }),
+    tx({ date: '2027-01-20', amount: -500 }),
+  ];
+
+  it('mensal ignora transações depois de hoje', () => {
+    expect(computeMonthlyComparison(txs, 12, '2026-10-22').map(r => r.period)).toEqual(['2026-10']);
+  });
+
+  it('anual também', () => {
+    expect(computeYearlyComparison(txs, '2026-10-22')).toEqual([
+      { period: '2026', label: '2026', income: 3000, expense: 500, balance: 2500 },
+    ]);
+  });
+});
+
 describe('computeNetWorth', () => {
+  it('parcelas futuras do cartão entram nos passivos', () => {
+    const parcelas = [1, 2, 3].map(n => tx({ name: `Loja ${n}/3`, paymentType: 'credit', amount: -100, date: `2026-${String(8 + n).padStart(2, '0')}-10` }));
+    const r = computeNetWorth([acc({ type: 'checking', balance: 1000 })], [], [], parcelas, '2026-10-22');
+    // 1/3 (set) e 2/3 (out) já estão em alguma fatura; falta a 3/3 (nov).
+    expect(r.cardInstallments).toBe(100);
+    expect(r.liabilities).toBe(100);
+    expect(r.total).toBe(900);
+  });
+
   it('soma ativos e subtrai passivos', () => {
     const r = computeNetWorth(
       [

@@ -68,6 +68,10 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
     await call(user, 'post', '/api/recurring-transactions', {
       name: 'Aluguel', category: 'Moradia', amount: -250000, frequency: 'monthly', nextOccurrence: '2099-01-05', accountId: checking.id,
     });
+    // Devedor que paga a dívida: o vínculo tem que ir e voltar no backup.
+    await call(user, 'post', '/api/recurring-transactions', {
+      name: 'Amigo', category: 'Receita', amount: 100000, frequency: 'monthly', nextOccurrence: '2099-01-10', debtId: debt.id,
+    });
     await call(user, 'post', '/api/investments', {
       name: 'Tesouro Selic', type: 'fixed_income', amountInvested: 1000000, currentValue: 1050000, accountId: checking.id,
     });
@@ -85,13 +89,15 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
 
   const clone = value => JSON.parse(JSON.stringify(value));
 
-  /** Conteúdo sem os ids: o vínculo com a conta vira o nome dela, e as linhas ficam em ordem estável. */
+  /** Conteúdo sem os ids: o vínculo com a conta (e o do devedor com a dívida) vira o nome, e as linhas ficam em ordem estável. */
   function withoutIds(data) {
     const accountName = new Map(data.accounts.map(a => [a.id, a.name]));
+    const debtName = new Map(data.debts.map(d => [d.id, d.name]));
     const out = {};
     for (const section of SECTIONS) {
       out[section] = data[section]
         .map(({ id: _id, accountId, ...row }) => (section === 'accounts' ? row : { ...row, account: accountId ? accountName.get(accountId) : null }))
+        .map(({ debtId, ...row }) => (section === 'recurring' ? { ...row, debt: debtId ? debtName.get(debtId) : null } : row))
         .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
     }
     return out;
@@ -118,7 +124,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       expect(backup).toMatchObject({ format: 'finflow-backup', version: 1, user: { name: 'Pessoa ' + counter, email: user.email } });
       expect(new Date(backup.exportedAt).toISOString()).toBe(backup.exportedAt);
       expect(Object.keys(backup.data)).toEqual(SECTIONS);
-      expect(SECTIONS.map(s => backup.data[s].length)).toEqual([3, 5, 1, 1, 1, 1, 1, 1]);
+      expect(SECTIONS.map(s => backup.data[s].length)).toEqual([3, 5, 1, 1, 1, 2, 1, 1]);
 
       expect(backup.data.transactions.find(t => t.name === 'Mercado').amount).toBe(-35049);
       expect(backup.data.transactions.find(t => t.name === 'Livro')).toMatchObject({ currency: 'USD', accountId: usd.id });
@@ -165,7 +171,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
         success: true,
-        restored: { accounts: 3, transactions: 5, debts: 1, budgets: 1, goals: 1, recurring: 1, investments: 1, categoryRules: 1 },
+        restored: { accounts: 3, transactions: 5, debts: 1, budgets: 1, goals: 1, recurring: 2, investments: 1, categoryRules: 1 },
       });
       expect((await exportOf(user)).data).toEqual(backup.data);
     });

@@ -137,7 +137,7 @@ const backupBudgetSchema = budgetSchema.extend({ id: backupIdField, createdAt: b
 const backupGoalSchema = goalSchema.extend({
   id: backupIdField, accountId: backupAccountRef, investmentId: backupAccountRef, createdAt: backupDateField,
 });
-const backupRecurringSchema = recurringSchema.extend({ id: backupIdField, accountId: backupAccountRef, createdAt: backupDateField });
+const backupRecurringSchema = recurringSchema.extend({ id: backupIdField, accountId: backupAccountRef, debtId: backupAccountRef, createdAt: backupDateField });
 const backupInvestmentSchema = investmentSchema.extend({
   id: backupIdField,
   accountId: backupAccountRef,
@@ -207,6 +207,12 @@ function backupConsistencyError(data) {
       if (row.accountId && !accountTypes.has(row.accountId)) {
         return `${backupRowLabel(section, index)}: aponta para uma conta que não está no arquivo.`;
       }
+    }
+  }
+  const debtIds = new Set(data.debts.map(debt => debt.id));
+  for (const [index, rec] of data.recurring.entries()) {
+    if (rec.debtId && !debtIds.has(rec.debtId)) {
+      return `${backupRowLabel('recurring', index)}: aponta para uma dívida que não está no arquivo.`;
     }
   }
   for (const [index, investment] of data.investments.entries()) {
@@ -281,6 +287,9 @@ function buildRestoreRows(userId, data, reuseIds) {
   // à restauração (o investimento também ganha um id novo, calculado abaixo).
   const investmentIds = new Map(data.investments.map(investment => [investment.id, newId(investment.id)]));
   const investmentRef = investmentId => (investmentId ? investmentIds.get(investmentId) : null);
+  // O vínculo do devedor com a dívida que ele paga, refeito pelo mesmo mapa.
+  const debtIds = new Map(data.debts.map(debt => [debt.id, newId(debt.id)]));
+  const debtRef = debtId => (debtId ? debtIds.get(debtId) : null);
 
   const debtItems = [];
   const debtSplits = [];
@@ -297,7 +306,7 @@ function buildRestoreRows(userId, data, reuseIds) {
       currency: accountId ? accountCurrency.get(accountId) : BASE_CURRENCY,
     })),
     debts: data.debts.map(({ id, accountId, subItems, splits, ...debt }) => {
-      const debtId = newId(id);
+      const debtId = debtIds.get(id);
       for (const item of subItems ?? []) debtItems.push({ ...item, debtId });
       for (const split of splits ?? []) debtSplits.push({ ...split, debtId });
       return { paidAmount: 0, paidInstallments: 0, ...debt, id: debtId, userId, accountId: accountRef(accountId) };
@@ -311,8 +320,8 @@ function buildRestoreRows(userId, data, reuseIds) {
     goals: data.goals.map(({ id, accountId, investmentId, ...goal }) => ({
       currentAmount: 0, ...goal, id: newId(id), userId, accountId: accountRef(accountId), investmentId: investmentRef(investmentId),
     })),
-    recurring: data.recurring.map(({ id, accountId, ...rec }) => ({
-      active: true, ...rec, id: newId(id), userId, accountId: accountRef(accountId),
+    recurring: data.recurring.map(({ id, accountId, debtId, ...rec }) => ({
+      active: true, ...rec, id: newId(id), userId, accountId: accountRef(accountId), debtId: debtRef(debtId),
     })),
     investments: data.investments.map(({ id, accountId, ...investment }) => ({
       ...investment, id: investmentIds.get(id), userId, accountId: accountRef(accountId), currency: investment.currency ?? BASE_CURRENCY,

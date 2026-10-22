@@ -8,6 +8,7 @@ import { niceTicks } from '../utils/chart';
 import { useChartAnimation } from '../hooks/useMediaQuery';
 import type { Account, Debt, Investment, NetWorthSnapshot, Transaction } from '../types';
 import { computeMonthlyComparison, computeYearlyComparison, computeNetWorth, monthLabel, type NetWorth } from '../utils/reports';
+import type { ProjectionPoint } from '../utils/projection';
 
 interface ReportsViewProps {
   transactions: Transaction[];
@@ -17,6 +18,8 @@ interface ReportsViewProps {
   investments: Investment[];
   /** Retratos mensais do patrimônio líquido (FIN-112), do mais antigo ao mais recente. */
   netWorthHistory: NetWorthSnapshot[];
+  /** Saldo projetado dos próximos meses — o mesmo do gráfico do Dashboard (`computeBalanceProjection`). */
+  projection: ProjectionPoint[];
 }
 
 /** Eixo em milhares: "2 mil", "−1,5 mil". */
@@ -58,15 +61,15 @@ function CompositionCell({ title, amount, negative, balance, detail }: {
 }
 
 /**
- * Aba "Relatórios" (FIN-062, FIN-063 e FIN-064) — patrimônio líquido e comparativos de
- * receitas × despesas por mês e por ano. Tudo derivado no cliente a partir dos dados já
- * carregados (`src/utils/reports.ts`), sem endpoint dedicado.
+ * Aba "Relatórios" (FIN-062, FIN-063 e FIN-064) — patrimônio líquido, comparativos de
+ * receitas × despesas por mês e por ano e o detalhe dos próximos meses. Tudo derivado no
+ * cliente a partir dos dados já carregados (`src/utils/reports.ts`), sem endpoint dedicado.
  */
-export function ReportsView({ transactions, accounts, debts, investments, netWorthHistory }: ReportsViewProps) {
+export function ReportsView({ transactions, accounts, debts, investments, netWorthHistory, projection }: ReportsViewProps) {
   const chartAnimation = useChartAnimation();
   const [granularity, setGranularity] = useState<'monthly' | 'yearly'>('monthly');
 
-  const netWorth = useMemo(() => computeNetWorth(accounts, debts, investments), [accounts, debts, investments]);
+  const netWorth = useMemo(() => computeNetWorth(accounts, debts, investments, transactions), [accounts, debts, investments, transactions]);
   const monthly = useMemo(() => computeMonthlyComparison(transactions, 12), [transactions]);
   const yearly = useMemo(() => computeYearlyComparison(transactions), [transactions]);
   // FIN-112 — só o rótulo do mês para o eixo do gráfico; os valores já vêm em reais (App.tsx converte).
@@ -93,10 +96,11 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
               {fmt(netWorth.assets)} em ativos {netWorth.liabilities > 0 ? `− ${fmt(netWorth.liabilities)} em passivos` : 'e nenhum passivo registrado'}
             </p>
           </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/[0.07] border-t border-white/[0.07] rounded-b-2xl overflow-hidden [&>*]:bg-card">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-px bg-white/[0.07] border-t border-white/[0.07] rounded-b-2xl overflow-hidden [&>*]:bg-card">
             <CompositionCell title="Saldo em contas" amount={netWorth.liquid} balance />
             <CompositionCell title="Investimentos" amount={netWorth.investments} detail={investmentsDetail(netWorth)} />
             <CompositionCell title="Faturas em aberto" amount={netWorth.pendingBills} negative />
+            <CompositionCell title="Parcelas futuras do cartão" amount={netWorth.cardInstallments} negative />
             <CompositionCell title="Dívidas em aberto" amount={netWorth.debts} negative />
           </div>
         </div>
@@ -222,6 +226,47 @@ export function ReportsView({ transactions, accounts, debts, investments, netWor
               </table>
             </div>
           </>
+        )}
+      </section>
+
+      {/* ── Próximos meses: o detalhe do saldo projetado do Dashboard ── */}
+      <section className="panel rounded-2xl p-6">
+        <h3 className="text-base font-medium text-white mb-1">Próximos meses</h3>
+        <p className="text-xs text-textMuted mb-4">
+          Entradas: salário, receitas extras (PLR, 13º...) e devedores. Saídas: fatura, parcelas do cartão, dívidas e despesas recorrentes.
+        </p>
+        {projection.every(p => p.salaryDelta === 0 && p.debtDelta === 0) ? (
+          <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">
+            Informe o salário no Dashboard ou cadastre dívidas para ver os próximos meses.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[var(--line)] text-xs text-textMuted">
+                  <th className="pb-2 font-normal">Mês</th>
+                  <th className="pb-2 font-normal text-right">Entradas</th>
+                  <th className="pb-2 font-normal text-right">Saídas</th>
+                  <th className="pb-2 font-normal text-right">Sobra do mês</th>
+                  <th className="pb-2 font-normal text-right">Saldo ao fim do mês</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm divide-y divide-white/5">
+                {projection.map(point => {
+                  const leftover = point.salaryDelta - point.debtDelta;
+                  return (
+                    <tr key={point.month} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="py-3 text-white">{point.name}</td>
+                      <td className="py-3 text-right text-white">{fmt(point.salaryDelta)}</td>
+                      <td className={`py-3 text-right ${point.debtDelta > 0 ? 'text-debt' : 'text-white'}`}>{point.debtDelta > 0 ? '−' : ''}{fmt(point.debtDelta)}</td>
+                      <td className={`py-3 text-right ${balanceTone(leftover)}`}>{leftover < 0 ? '−' : ''}{fmt(leftover)}</td>
+                      <td className={`py-3 text-right font-medium ${balanceTone(point.balance)}`}>{point.balance < 0 ? '−' : ''}{fmt(point.balance)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

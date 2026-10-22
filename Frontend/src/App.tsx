@@ -39,7 +39,7 @@ import { computeBalanceProjection } from './utils/projection';
 import { computeInvestmentHoldings } from './utils/investments';
 import { linkedGoalAmount } from './utils/goals';
 import { todayISO } from './utils/debts';
-import { formatDateBR, formatMonthLabel } from './utils/dates';
+import { formatDateBR, formatMonthLabel, monthsDescending, shiftMonth } from './utils/dates';
 import { downloadCSV, downloadPDFReport, exportDateSuffix, formatCurrencyCSV } from './utils/export';
 import { TRANSACTION_REPORT_HEADERS, transactionsPeriod, computeNetWorth, type NetWorth } from './utils/reports';
 import {
@@ -264,7 +264,9 @@ export default function App() {
   // Filtro por conta das abas Transações e Dívidas (null = todas), compartilhado entre as duas.
   const [listAccountId, setListAccountId] = useState<string | null>(null);
   const [dashboardAccountId, setDashboardAccountId] = useState<string | null>(null);
-  const [chartPeriod, setChartPeriod] = useState<'30d' | 'all'>('30d');
+  // Mês do Dashboard: tudo o que é "do mês" (sobra, dívidas, gastos, categorias, orçamento) segue ele.
+  const [dashboardMonth, setDashboardMonth] = useState<string>(() => todayISO().slice(0, 7));
+  const [chartPeriod, setChartPeriod] = useState<'daily' | 'all'>('daily');
   const [mobileNavOpen, setMobileNavOpen] = useState(false); // FIN-028
   // FIN-081: a gaveta do menu em telas pequenas — foco preso nela, Esc, deslize para fechar e
   // `inert` quando fechada. Refs do botão que abre (recebe o foco de volta) e do que fecha.
@@ -298,7 +300,7 @@ export default function App() {
   const [accounts, setAccounts]       = useState<Account[]>([]);
   const [debts, setDebts]             = useState<Debt[]>([]);
   const [budgets, setBudgets]         = useState<Budget[]>([]);
-  const [salary, setSalary]           = useState<Salary>({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
+  const [salary, setSalary]           = useState<Salary>({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, extras: [] });
   const [goals, setGoals]             = useState<Goal[]>([]);
   const [recurring, setRecurring]     = useState<RecurringTransaction[]>([]);
   const [investments, setInvestments] = useState<Investment[]>([]); // FIN-072
@@ -335,7 +337,7 @@ export default function App() {
     setTxs([]);
     setDebts([]);
     setBudgets([]);
-    setSalary({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null });
+    setSalary({ amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, extras: [] });
     setGoals([]);
     setRecurring([]);
     setInvestments([]);
@@ -397,7 +399,8 @@ export default function App() {
         setInvestments((investmentsData as Investment[]).map(investmentFromApi));
         setNetWorthHistory((netWorthHistoryData as NetWorthSnapshot[]).map(netWorthSnapshotFromApi));
         setSalary({ amount: toReais(salaryData.salaryCents), secondAmount: toReais(salaryData.salarySecondCents ?? salaryData.salaryCents), frequency: salaryData.salaryFrequency, payDay: salaryData.salaryPayDay ?? 15,
-          bonus: toReais(salaryData.bonusCents ?? 0), bonusHalf: salaryData.bonusHalf === 2 ? 2 : 1, bonusMonth: salaryData.bonusMonth ?? null });
+          extras: (salaryData.extraIncomes as { name: string; amountCents: number; month: string; half: 1 | 2; yearly: boolean }[])
+            .map(({ amountCents, ...e }) => ({ ...e, amount: toReais(amountCents) })) });
       }).catch(err => {
         // FIN-082: só uma sessão recusada (401/403) volta para o login. Sem conexão — o app instalado
         // aberto offline — ou com o servidor fora do ar, a sessão continua e a tela oferece tentar
@@ -724,7 +727,7 @@ export default function App() {
   const saveSalary = async (next: Salary) => {
     try {
       await fetchAPI('/api/profile/salary', 'PUT', { salaryCents: toCents(next.amount), salarySecondCents: toCents(next.secondAmount), salaryFrequency: next.frequency, salaryPayDay: next.payDay,
-        bonusCents: toCents(next.bonus), bonusHalf: next.bonusHalf, bonusMonth: next.bonusMonth });
+        extraIncomes: next.extras.map(({ amount, ...e }) => ({ ...e, amountCents: toCents(amount) })) });
       setSalary(next);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
@@ -849,7 +852,7 @@ export default function App() {
     let cancelled = false;
     (async () => {
       try {
-        const netWorth = computeNetWorth(accountsBase.items, debts, investmentsBase.items);
+        const netWorth = computeNetWorth(accountsBase.items, debts, investmentsBase.items, transactionsBase.items);
         await fetchAPI('/api/net-worth/snapshot', 'POST', netWorthSnapshotToApi(netWorth));
         const history = await fetchAPI('/api/net-worth/history');
         if (!cancelled) setNetWorthHistory((history as NetWorthSnapshot[]).map(netWorthSnapshotFromApi));
@@ -858,7 +861,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [userId, loading, accountsBase.items, investmentsBase.items, debts]);
+  }, [userId, loading, accountsBase.items, investmentsBase.items, debts, transactionsBase.items]);
 
   // FIN-113: mantém `currentAmount` das metas ligadas a conta/investimento em dia — o progresso
   // anda sozinho, sem digitar (quem edita manualmente é GoalsManager, para uma meta sem vínculo).
@@ -896,7 +899,7 @@ export default function App() {
   const usedCurrencies = foreignKey ? foreignKey.split(',') : [];
   const conversionIssue = missingCurrencies.length > 0 || rates?.stale === true;
 
-  const stats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items, recurringBase.items);
+  const stats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items, recurringBase.items, dashboardMonth);
 
   // FIN-073: o card de Investimentos aparece com conta de investimento OU posição na carteira;
   // a legenda diz de onde vem o total (posições, contas sem posições, ou os dois).
@@ -915,16 +918,34 @@ export default function App() {
     [transactionsBase, budgets, currentMonth]
   );
   const overBudget = budgetProgress.filter(b => b.isOverLimit); // FIN-047
+  // O card de orçamento do Dashboard mostra o mês escolhido lá; o aviso de estouro e a aba Orçamentos, o mês corrente.
+  const dashboardBudgetProgress = useMemo(
+    () => computeBudgetProgress(transactionsBase.items, budgets, dashboardMonth),
+    [transactionsBase, budgets, dashboardMonth]
+  );
+  // Meses do seletor do Dashboard: os que têm lançamento e os próximos 6, para planejar (13º, PLR...).
+  const dashboardMonths = useMemo(() => monthsDescending([
+    ...transactionsBase.items.map(t => t.date),
+    ...Array.from({ length: 7 }, (_, i) => shiftMonth(currentMonth, i)),
+  ]), [transactionsBase, currentMonth]);
 
   // FIN-058: projeção dos próximos 6 meses a partir do saldo real (contas líquidas),
   // somando o salário e descontando as dívidas de cada mês (fatura, parcelas do cartão e dívidas).
-  const projection = useMemo(
-    () => computeBalanceProjection(stats.realBalance, salary, debts, {
-      months: 6, currentBill: stats.monthCardExpense, cardInstallments: stats.cardInstallmentsAhead,
-      currentRecurring: stats.monthRecurring, currentRecurringIncome: stats.monthRecurringIncome, recurring: recurringBase.items,
+  // A projeção parte de hoje, então usa os números do mês corrente — `stats` é do mês escolhido no Dashboard.
+  const currentStats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items, recurringBase.items, currentMonth);
+  // Com um mês à frente escolhido no Dashboard, projeta até 6 meses depois dele; o Dashboard mostra
+  // a partir do mês escolhido e os Relatórios, os 6 a partir de hoje.
+  const monthsAhead = Math.max(0, (Number(dashboardMonth.slice(0, 4)) - Number(currentMonth.slice(0, 4))) * 12
+    + Number(dashboardMonth.slice(5, 7)) - Number(currentMonth.slice(5, 7)));
+  const fullProjection = useMemo(
+    () => computeBalanceProjection(currentStats.realBalance, salary, debts, {
+      months: 6 + monthsAhead, currentBill: currentStats.monthCardExpense, cardInstallments: currentStats.cardInstallmentsAhead,
+      currentRecurring: currentStats.monthRecurring, currentRecurringIncome: currentStats.monthRecurringIncome, recurring: recurringBase.items,
     }),
-    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, stats.monthRecurring, stats.monthRecurringIncome, recurringBase.items, salary, debts]
+    [currentStats, monthsAhead, recurringBase.items, salary, debts]
   );
+  const projection = useMemo(() => fullProjection.slice(0, 6), [fullProjection]);
+  const dashboardProjection = useMemo(() => fullProjection.slice(monthsAhead), [fullProjection, monthsAhead]);
 
   // Categorias que já aparecem nas transações do usuário, além das curadas em
   // EXPENSE_CATEGORIES — a importação manual aceita categoria livre, então o
@@ -1254,7 +1275,10 @@ export default function App() {
               onChangeDashboardAccount={setDashboardAccountId}
               stats={stats}
               overBudget={overBudget}
-              budgetProgress={budgetProgress}
+              budgetProgress={dashboardBudgetProgress}
+              month={dashboardMonth}
+              months={dashboardMonths}
+              onChangeMonth={setDashboardMonth}
               usedCurrencies={usedCurrencies}
               rates={rates}
               ratesFailed={ratesFailed}
@@ -1266,7 +1290,7 @@ export default function App() {
               hasAccounts={hasAccounts}
               chartPeriod={chartPeriod}
               onChangeChartPeriod={setChartPeriod}
-              projection={projection}
+              projection={dashboardProjection}
               onNavigate={setActiveTab}
               onFilterTransactions={setTxFilter}
               onShowImport={() => setShowImport(true)}
@@ -1379,6 +1403,7 @@ export default function App() {
               kind={activeTab === 'recurring' ? 'expense' : 'income'}
               recurring={recurring}
               accounts={accounts}
+              debts={debts}
               onAdd={addRecurring}
               onUpdate={updateRecurring}
               onDelete={deleteRecurring}
@@ -1395,6 +1420,7 @@ export default function App() {
                 debts={debts}
                 investments={investmentsBase.items}
                 netWorthHistory={netWorthHistory}
+                projection={projection}
               />
             </Suspense>
           )}

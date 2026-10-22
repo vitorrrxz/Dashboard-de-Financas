@@ -1,6 +1,7 @@
 import type { Account, Debt, Investment, Transaction } from '../types';
 import { isDebtPaid, todayISO } from './debts';
 import { computeInvestmentHoldings } from './investments';
+import { groupInstallmentPurchases } from './installments';
 import { isOwnTransfer } from './categories';
 
 // FIN-062/FIN-063/FIN-064 — agregações da aba Relatórios. Funções puras (sem endpoint
@@ -32,17 +33,21 @@ export function monthLabel(period: string): string {
 /**
  * Agrupa as transações por período (mês ou ano), somando receitas e despesas.
  * Períodos sem transação nenhuma não aparecem — o gráfico mostra o que existe, e não uma
- * régua de meses vazios.
+ * régua de meses vazios. Só entra o que já aconteceu (até `today`): as parcelas futuras do
+ * cartão já vêm lançadas com a data delas e criariam meses só de despesa — elas são dívida,
+ * e entram no patrimônio e nos próximos meses.
  */
 function groupByPeriod(
   transactions: Pick<Transaction, 'amount' | 'date' | 'category'>[],
   keyOf: (dateISO: string) => string,
-  labelOf: (period: string) => string
+  labelOf: (period: string) => string,
+  today: string
 ): PeriodComparison[] {
   const buckets: Record<string, { income: number; expense: number }> = {};
 
   for (const tx of transactions) {
     if (isOwnTransfer(tx)) continue; // FIN-103: nem receita nem despesa
+    if (tx.date > today) continue;
     const period = keyOf(tx.date);
     if (!buckets[period]) buckets[period] = { income: 0, expense: 0 };
     if (tx.amount >= 0) {
@@ -70,17 +75,19 @@ function groupByPeriod(
  */
 export function computeMonthlyComparison(
   transactions: Pick<Transaction, 'amount' | 'date' | 'category'>[],
-  months = 12
+  months = 12,
+  today = todayISO()
 ): PeriodComparison[] {
-  const all = groupByPeriod(transactions, date => date.slice(0, 7), monthLabel);
+  const all = groupByPeriod(transactions, date => date.slice(0, 7), monthLabel, today);
   return months > 0 ? all.slice(-months) : all;
 }
 
 /** Comparativo ano a ano (FIN-063) — mesma agregação, com granularidade anual. */
 export function computeYearlyComparison(
-  transactions: Pick<Transaction, 'amount' | 'date' | 'category'>[]
+  transactions: Pick<Transaction, 'amount' | 'date' | 'category'>[],
+  today = todayISO()
 ): PeriodComparison[] {
-  return groupByPeriod(transactions, date => date.slice(0, 4), period => period);
+  return groupByPeriod(transactions, date => date.slice(0, 4), period => period, today);
 }
 
 /** Composição do patrimônio líquido (FIN-064). */
@@ -95,11 +102,13 @@ export interface NetWorth {
   investmentAccounts: number;
   /** Faturas de cartão em aberto (passivo). */
   pendingBills: number;
+  /** Parcelas do cartão ainda não lançadas na fatura (passivo) — as mesmas do "total devido" do Dashboard. */
+  cardInstallments: number;
   /** Saldo devedor das dívidas ainda não quitadas (passivo). */
   debts: number;
   /** Total de ativos (líquido + investimentos). */
   assets: number;
-  /** Total de passivos (faturas + dívidas). */
+  /** Total de passivos (faturas + parcelas futuras do cartão + dívidas). */
   liabilities: number;
   /** Ativos − passivos. */
   total: number;
@@ -107,7 +116,7 @@ export interface NetWorth {
 
 /**
  * Calcula o patrimônio líquido: ativos (saldo líquido + investimentos) menos passivos
- * (faturas de cartão em aberto + saldo devedor das dívidas).
+ * (faturas de cartão em aberto + parcelas futuras do cartão + saldo devedor das dívidas).
  *
  * As mesmas regras de classificação de `useFinancialStats` valem aqui: cartão de crédito
  * nunca entra como ativo (seu saldo é a fatura, um passivo) e investimento é somado à
@@ -121,7 +130,9 @@ export interface NetWorth {
 export function computeNetWorth(
   accounts: Pick<Account, 'id' | 'type' | 'balance' | 'pendingBill'>[],
   debts: Pick<Debt, 'totalAmount' | 'paidAmount' | 'paidInstallments' | 'totalInstallments'>[],
-  investments: Pick<Investment, 'accountId' | 'currentValue'>[] = []
+  investments: Pick<Investment, 'accountId' | 'currentValue'>[] = [],
+  transactions: Transaction[] = [],
+  today = todayISO()
 ): NetWorth {
   const liquid = accounts
     .filter(a => a.type !== 'credit' && a.type !== 'investment')
@@ -140,8 +151,12 @@ export function computeNetWorth(
     .filter(d => !isDebtPaid(d))
     .reduce((sum, d) => sum + Math.max(0, d.totalAmount - d.paidAmount), 0);
 
+  // Parcelas do cartão com data futura: compra já feita, que a fatura atual ainda não cobra.
+  const cardInstallments = groupInstallmentPurchases(transactions.filter(t => !isOwnTransfer(t)), today)
+    .reduce((sum, p) => sum + p.remainingAmount, 0);
+
   const assets = round2(liquid + holdings.total);
-  const liabilities = round2(pendingBills + debtsTotal);
+  const liabilities = round2(pendingBills + cardInstallments + debtsTotal);
 
   return {
     liquid: round2(liquid),
@@ -149,6 +164,7 @@ export function computeNetWorth(
     portfolio: holdings.positions,
     investmentAccounts: holdings.accountBalances,
     pendingBills: round2(pendingBills),
+    cardInstallments: round2(cardInstallments),
     debts: round2(debtsTotal),
     assets,
     liabilities,
