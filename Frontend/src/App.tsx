@@ -710,10 +710,10 @@ export default function App() {
     } catch (e: unknown) { alert((e instanceof Error ? e.message : String(e))); throw e; }
   };
 
-  /** Salva o salário manual via `PUT /api/auth/salary` (API em centavos, estado em reais). */
+  /** Salva o salário manual via `PUT /api/profile/salary` (API em centavos, estado em reais). */
   const saveSalary = async (next: Salary) => {
     try {
-      await fetchAPI('/api/auth/salary', 'PUT', { salaryCents: toCents(next.amount), salaryFrequency: next.frequency, salaryPayDay: next.payDay,
+      await fetchAPI('/api/profile/salary', 'PUT', { salaryCents: toCents(next.amount), salaryFrequency: next.frequency, salaryPayDay: next.payDay,
         bonusCents: toCents(next.bonus), bonusHalf: next.bonusHalf, bonusMonth: next.bonusMonth });
       setSalary(next);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
