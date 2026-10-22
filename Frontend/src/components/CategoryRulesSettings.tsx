@@ -18,7 +18,7 @@ const labelClass = 'block text-xs font-medium text-textMuted mb-1.5 tracking-wid
  * contém o texto entra com a categoria da regra. Aqui se lista, troca a categoria, exclui e cria — o
  * servidor edita pela mesma rota da criação, identificando a regra pelo texto.
  */
-export function CategoryRulesSettings({ token }: { token: string }) {
+export function CategoryRulesSettings() {
   const id = useId();
   const [rules, setRules] = useState<CategoryRule[] | null>(null);
   const [match, setMatch] = useState('');
@@ -26,15 +26,15 @@ export function CategoryRulesSettings({ token }: { token: string }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    apiFetch<CategoryRule[]>('/api/category-rules', { token })
+    apiFetch<CategoryRule[]>('/api/category-rules')
       .then(list => setRules(Array.isArray(list) ? [...list].sort(byMatch) : []))
       .catch(err => { setRules([]); setError(errorMessage(err)); });
-  }, [token]);
+  }, []);
 
   const save = async (rule: { match: string; category: string }) => {
     setError('');
     try {
-      const saved = await apiFetch<CategoryRule>('/api/category-rules', { method: 'POST', body: rule, token });
+      const saved = await apiFetch<CategoryRule>('/api/category-rules', { method: 'POST', body: rule });
       if (!saved || typeof saved.id !== 'string') throw new Error('Resposta inesperada do servidor.');
       setRules(prev => [...(prev ?? []).filter(r => r.id !== saved.id), saved].sort(byMatch));
       return true;
@@ -47,7 +47,7 @@ export function CategoryRulesSettings({ token }: { token: string }) {
   const remove = async (rule: CategoryRule) => {
     setError('');
     try {
-      await apiFetch(`/api/category-rules/${rule.id}`, { method: 'DELETE', token });
+      await apiFetch(`/api/category-rules/${rule.id}`, { method: 'DELETE' });
       setRules(prev => (prev ?? []).filter(r => r.id !== rule.id));
     } catch (err) {
       setError(errorMessage(err));

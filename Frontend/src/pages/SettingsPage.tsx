@@ -9,13 +9,12 @@ interface SettingsPageProps {
   settingsNotice: string;
   onDismissNotice: () => void;
   theme: ReturnType<typeof useTheme>;
-  token: string;
   onRestored: (summary: string) => void;
   hasTransactions: boolean;
   onClearTransactions: () => void;
 }
 
-export function SettingsPage({ settingsNotice, onDismissNotice, theme, token, onRestored, hasTransactions, onClearTransactions }: SettingsPageProps) {
+export function SettingsPage({ settingsNotice, onDismissNotice, theme, onRestored, hasTransactions, onClearTransactions }: SettingsPageProps) {
   return (
     <>
       <div className="mb-6">
@@ -33,9 +32,9 @@ export function SettingsPage({ settingsNotice, onDismissNotice, theme, token, on
           </div>
         )}
         <ThemeSettings preference={theme.preference} onChange={theme.setPreference} />
-        <CategoryRulesSettings token={token} />
-        <TwoFactorSettings token={token} />
-        <BackupSettings token={token} onRestored={onRestored} />
+        <CategoryRulesSettings />
+        <TwoFactorSettings />
+        <BackupSettings onRestored={onRestored} />
         {hasTransactions && (
           <section aria-labelledby="danger-title" className="pt-6 border-t border-[var(--line)]">
             <h2 id="danger-title" className="text-base font-medium text-white">Apagar todas as transações</h2>

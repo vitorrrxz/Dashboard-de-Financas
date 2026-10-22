@@ -1,18 +1,21 @@
 // @vitest-environment jsdom
-// FIN-030 (base de testes do frontend) e FIN-078 (segundo passo do login quando a conta tem
-// verificação em duas etapas).
+// FIN-030 (base de testes do frontend), FIN-078 (segundo passo do login quando a conta tem
+// verificação em duas etapas) e FIN-121 (login pelo Better Auth, via services/auth).
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AuthForm } from './AuthForm';
 import { recoveryNotice } from '../utils/twoFactor';
-import { apiFetch, ApiError } from '../services/api';
+import { signIn, signUp, verifyTwoFactor } from '../services/auth';
 
-vi.mock('../services/api', async importOriginal => ({
-  ...(await importOriginal<typeof import('../services/api')>()),
-  apiFetch: vi.fn(),
+vi.mock('../services/auth', () => ({
+  signIn: vi.fn(),
+  signUp: vi.fn(),
+  verifyTwoFactor: vi.fn(),
 }));
 
-const apiFetchMock = vi.mocked(apiFetch);
+const signInMock = vi.mocked(signIn);
+const signUpMock = vi.mocked(signUp);
+const verifyMock = vi.mocked(verifyTwoFactor);
 const USER = { id: 'u1', name: 'Fulano', email: 'fulano@teste.com' };
 
 function fillCredentials() {
@@ -22,6 +25,7 @@ function fillCredentials() {
 
 /** Faz o primeiro envio (e-mail e senha) com o servidor pedindo o segundo fator. */
 async function reachTwoFactorStep(onLogin = vi.fn()) {
+  signInMock.mockResolvedValueOnce({ twoFactorRequired: true });
   render(<AuthForm onLogin={onLogin} />);
   fillCredentials();
   fireEvent.click(screen.getByRole('button', { name: /Entrar no Sistema/ }));
@@ -31,7 +35,9 @@ async function reachTwoFactorStep(onLogin = vi.fn()) {
 
 describe('AuthForm', () => {
   beforeEach(() => {
-    apiFetchMock.mockReset();
+    signInMock.mockReset();
+    signUpMock.mockReset();
+    verifyMock.mockReset();
   });
 
   afterEach(() => {
@@ -52,23 +58,43 @@ describe('AuthForm', () => {
     expect(screen.getByLabelText('Nome Completo')).toBeInTheDocument();
   });
 
+  it('cadastro envia nome, e-mail e senha e entra com o usuário criado', async () => {
+    signUpMock.mockResolvedValueOnce(USER);
+    const onLogin = vi.fn();
+    render(<AuthForm onLogin={onLogin} />);
+    fireEvent.click(screen.getByText('Cadastre-se'));
+    fireEvent.change(await screen.findByLabelText('Nome Completo'), { target: { value: USER.name } });
+    fillCredentials();
+    fireEvent.click(screen.getByRole('button', { name: /Criar Conta/ }));
+
+    await waitFor(() => expect(onLogin).toHaveBeenCalledWith(USER));
+    expect(signUpMock).toHaveBeenCalledWith(USER.name, USER.email, 'senha123');
+  });
+
   it('sem verificação em duas etapas, entra direto com e-mail e senha', async () => {
-    apiFetchMock.mockResolvedValueOnce({ token: 'tok', user: USER });
+    signInMock.mockResolvedValueOnce({ user: USER });
     const onLogin = vi.fn();
     render(<AuthForm onLogin={onLogin} />);
     fillCredentials();
     fireEvent.click(screen.getByRole('button', { name: /Entrar no Sistema/ }));
 
-    await waitFor(() => expect(onLogin).toHaveBeenCalledWith('tok', USER));
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/auth/login', {
-      method: 'POST', body: { email: USER.email, password: 'senha123' },
-    });
+    await waitFor(() => expect(onLogin).toHaveBeenCalledWith(USER));
+    expect(signInMock).toHaveBeenCalledWith(USER.email, 'senha123');
   });
 
-  it('com a verificação ativa, pede o código e o envia junto de e-mail e senha', async () => {
-    apiFetchMock
-      .mockResolvedValueOnce({ twoFactorRequired: true })
-      .mockResolvedValueOnce({ token: 'tok', user: USER });
+  it('credenciais recusadas: mostra a mensagem e não entra', async () => {
+    signInMock.mockRejectedValueOnce(new Error('Credenciais inválidas'));
+    const onLogin = vi.fn();
+    render(<AuthForm onLogin={onLogin} />);
+    fillCredentials();
+    fireEvent.click(screen.getByRole('button', { name: /Entrar no Sistema/ }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Credenciais inválidas');
+    expect(onLogin).not.toHaveBeenCalled();
+  });
+
+  it('com a verificação ativa, pede o código do aplicativo e entra com ele', async () => {
+    verifyMock.mockResolvedValueOnce(USER);
     const onLogin = await reachTwoFactorStep();
     expect(onLogin).not.toHaveBeenCalled();
 
@@ -78,16 +104,12 @@ describe('AuthForm', () => {
     fireEvent.change(codeInput, { target: { value: '123456' } });
     fireEvent.click(screen.getByRole('button', { name: /Verificar/ }));
 
-    await waitFor(() => expect(onLogin).toHaveBeenCalledWith('tok', USER));
-    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/auth/login', {
-      method: 'POST', body: { email: USER.email, password: 'senha123', code: '123456' },
-    });
+    await waitFor(() => expect(onLogin).toHaveBeenCalledWith(USER));
+    expect(verifyMock).toHaveBeenCalledWith('123456', false);
   });
 
   it('código recusado: mostra o erro, limpa o campo e continua no passo do código', async () => {
-    apiFetchMock
-      .mockResolvedValueOnce({ twoFactorRequired: true })
-      .mockRejectedValueOnce(new ApiError('Código de verificação inválido.', 400, {}));
+    verifyMock.mockRejectedValueOnce(new Error('Código de verificação inválido.'));
     const onLogin = await reachTwoFactorStep();
 
     fireEvent.change(screen.getByLabelText('Código do aplicativo'), { target: { value: '000000' } });
@@ -99,11 +121,9 @@ describe('AuthForm', () => {
     expect(onLogin).not.toHaveBeenCalled();
   });
 
-  it('código de recuperação: troca o rótulo, envia o código e avisa quantos restam', async () => {
+  it('código de recuperação: troca o rótulo, envia como recuperação e avisa que ele deixou de valer', async () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    apiFetchMock
-      .mockResolvedValueOnce({ twoFactorRequired: true })
-      .mockResolvedValueOnce({ token: 'tok', user: USER, recoveryCodeUsed: true, recoveryCodesRemaining: 9 });
+    verifyMock.mockResolvedValueOnce(USER);
     const onLogin = await reachTwoFactorStep();
 
     fireEvent.click(screen.getByRole('button', { name: 'Usar um código de recuperação' }));
@@ -112,38 +132,17 @@ describe('AuthForm', () => {
     fireEvent.change(input, { target: { value: 'ABCDE-FGHJK' } });
     fireEvent.click(screen.getByRole('button', { name: /Verificar/ }));
 
-    await waitFor(() => expect(onLogin).toHaveBeenCalledWith('tok', USER));
-    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/auth/login', {
-      method: 'POST', body: { email: USER.email, password: 'senha123', code: 'ABCDE-FGHJK' },
-    });
-    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Restam 9 códigos.'));
+    await waitFor(() => expect(onLogin).toHaveBeenCalledWith(USER));
+    expect(verifyMock).toHaveBeenCalledWith('ABCDE-FGHJK', true);
+    expect(alertSpy).toHaveBeenCalledWith(recoveryNotice(null));
   });
 
   it('"Voltar" retorna ao e-mail e senha, com a senha em branco', async () => {
-    apiFetchMock.mockResolvedValueOnce({ twoFactorRequired: true });
     await reachTwoFactorStep();
 
     fireEvent.click(screen.getByRole('button', { name: /Voltar/ }));
     expect(screen.getByText('Bem-vindo de volta!')).toBeInTheDocument();
     expect(screen.getByLabelText('E-mail')).toHaveValue(USER.email);
     expect(screen.getByLabelText('Senha')).toHaveValue('');
-  });
-
-  it('resposta sem token (formato inesperado) não entra e mostra erro', async () => {
-    apiFetchMock.mockResolvedValueOnce({ ok: true });
-    const onLogin = vi.fn();
-    render(<AuthForm onLogin={onLogin} />);
-    fillCredentials();
-    fireEvent.click(screen.getByRole('button', { name: /Entrar no Sistema/ }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Resposta inesperada do servidor.');
-    expect(onLogin).not.toHaveBeenCalled();
-  });
-
-  it('recoveryNotice: singular, plural, nenhum restante e quantidade desconhecida', () => {
-    expect(recoveryNotice(1)).toContain('Resta 1 código.');
-    expect(recoveryNotice(4)).toContain('Restam 4 códigos.');
-    expect(recoveryNotice(0)).toContain('Não resta nenhum código.');
-    expect(recoveryNotice(null)).not.toMatch(/Resta/);
   });
 });

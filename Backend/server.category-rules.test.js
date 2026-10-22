@@ -14,7 +14,7 @@ describe('regras de categoria (FIN-105)', () => {
   const auth = token => ({ Authorization: `Bearer ${token}` });
 
   async function register(email) {
-    const res = await request(app).post('/api/auth/register').send({ name: email, email, password: 'senha123' });
+    const res = await request(app).post('/api/auth/sign-up/email').send({ name: email, email, password: 'senha123' });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();
     return res.body.token;

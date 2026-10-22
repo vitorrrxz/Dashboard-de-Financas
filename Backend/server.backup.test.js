@@ -2,6 +2,7 @@
 // FIN-079/FIN-080 — backup completo (exportação) e restauração, e as respostas em JSON para
 // corpo malformado ou grande demais.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import crypto from 'crypto';
 import request from 'supertest';
 import { createTestApp } from './test/backend-test-utils.js';
 
@@ -24,7 +25,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
     counter += 1;
     const email = `pessoa${counter}@backup.test`;
     const password = 'senha-forte-123';
-    const res = await request(app).post('/api/auth/register').send({ name: `Pessoa ${counter}`, email, password });
+    const res = await request(app).post('/api/auth/sign-up/email').send({ name: `Pessoa ${counter}`, email, password });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeTruthy();
     return { email, password, token: res.body.token, id: res.body.user.id };
@@ -102,7 +103,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
     it('exporta tudo o que o usuário cadastrou, em centavos, sem senha, 2FA, notificações nem userId', async () => {
       const user = await newUser();
       const { usd } = await seed(user);
-      await prisma.userTwoFactor.create({ data: { userId: user.id, secret: 'v1.segredo.que.nunca-sai', enabledAt: new Date() } });
+      await prisma.twoFactor.create({ data: { id: crypto.randomUUID(), userId: user.id, secret: 'v1.segredo.que.nunca-sai', backupCodes: 'recoveryCodes-cifrados' } });
       await prisma.notification.create({ data: { userId: user.id, type: 'bill_due', title: 'Fatura', message: 'Vence logo', dedupeKey: 'k1' } });
 
       const res = await request(app).get('/api/account/export').set(auth(user));
@@ -124,7 +125,7 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       ]);
 
       const text = JSON.stringify(backup);
-      for (const forbidden of [user.id, 'userId', 'passwordHash', 'segredo', 'recoveryCodes', 'dedupeKey', 'Vence logo']) {
+      for (const forbidden of [user.id, 'userId', 'passwordHash', 'password', 'segredo', 'recoveryCodes', 'dedupeKey', 'Vence logo']) {
         expect(text).not.toContain(forbidden);
       }
     });
@@ -310,12 +311,12 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       const user = await newUser();
       await seed(user);
       const backup = await exportOf(user);
-      await prisma.userTwoFactor.create({ data: { userId: user.id, secret: 'v1.a.b.c', enabledAt: new Date() } });
+      await prisma.twoFactor.create({ data: { id: crypto.randomUUID(), userId: user.id, secret: 'cifrado', backupCodes: 'cifrado' } });
       await prisma.notification.create({ data: { userId: user.id, type: 'bill_due', title: 'Fatura', message: 'x', dedupeKey: 'k' } });
 
       expect((await restore(user, backup)).status).toBe(200);
       expect(await prisma.notification.count({ where: { userId: user.id } })).toBe(0);
-      expect(await prisma.userTwoFactor.findUnique({ where: { userId: user.id } })).not.toBeNull();
+      expect(await prisma.twoFactor.findFirst({ where: { userId: user.id } })).not.toBeNull();
     });
 
     it('aceita um backup grande, acima do limite de 100 kB das outras rotas', async () => {
@@ -344,14 +345,14 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
 
   describe('erros do parser de JSON', () => {
     it('corpo malformado: 400 em JSON, sem página HTML nem pilha do erro', async () => {
-      const res = await request(app).post('/api/auth/login').set('Content-Type', 'application/json').send('{"email": ');
+      const res = await request(app).post('/api/accounts').set('Content-Type', 'application/json').send('{"name": ');
       expect(res.status).toBe(400);
       expect(res.headers['content-type']).toMatch(/application\/json/);
       expect(res.body).toEqual({ error: 'O corpo da requisição não é um JSON válido.' });
     });
 
     it('corpo acima do limite padrão numa rota comum: 413 em JSON', async () => {
-      const res = await request(app).post('/api/auth/login').send({ email: 'a@b.c', password: 'x'.repeat(150 * 1024) });
+      const res = await request(app).post('/api/accounts').send({ name: 'x'.repeat(150 * 1024) });
       expect(res.status).toBe(413);
       expect(res.body).toEqual({ error: 'Os dados enviados passam do tamanho máximo aceito.' });
     });

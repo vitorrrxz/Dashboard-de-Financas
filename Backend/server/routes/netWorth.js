@@ -1,6 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
 import { netWorthSnapshotSchema } from '../lib/schemas.js';
 import { todayISO } from '../lib/dates.js';
@@ -11,7 +11,7 @@ export const router = express.Router();
 // Um retrato por mês. Esta rota sempre grava no mês corrente do relógio do SERVIDOR — nunca um mês
 // que o cliente informe —, então os meses anteriores nunca são reescritos por ela; é assim, e não
 // com uma checagem extra, que "só o mês corrente muda" fica garantido.
-router.post('/snapshot', authenticateToken, async (req, res) => {
+router.post('/snapshot', requireAuth, async (req, res) => {
   const validation = validateBody(netWorthSnapshotSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   const userId = req.user.userId;
@@ -28,7 +28,7 @@ router.post('/snapshot', authenticateToken, async (req, res) => {
   }
 });
 
-router.get('/history', authenticateToken, async (req, res) => {
+router.get('/history', requireAuth, async (req, res) => {
   try {
     const history = await prisma.netWorthSnapshot.findMany({
       where: { userId: req.user.userId },

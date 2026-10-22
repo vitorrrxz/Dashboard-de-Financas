@@ -1,45 +1,34 @@
 import { useEffect, useState } from 'react';
 
-import { apiFetch } from '../services/api';
-import { FormField } from './shared/FormField';
 import {
-  parseRecoveryCodes, parseTwoFactorSetup, parseTwoFactorStatus,
-  type TwoFactorSetup, type TwoFactorStatus,
-} from '../utils/twoFactor';
+  confirmTwoFactorSetup, disableTwoFactor, isTwoFactorEnabled, startTwoFactorSetup,
+} from '../services/auth';
+import { FormField } from './shared/FormField';
+import { twoFactorSetupFromUri, type TwoFactorSetup } from '../utils/twoFactor';
 
-type Phase = 'idle' | 'setup' | 'codes' | 'disable';
+type Phase = 'idle' | 'password' | 'setup' | 'codes' | 'disable';
 
 const UNEXPECTED = 'Resposta inesperada do servidor.';
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
-
-function formatSince(iso: string | null): string | null {
-  if (!iso) return null;
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString('pt-BR');
-}
-
-function remainingText(remaining: number | null): string | null {
-  if (remaining === null) return null;
-  if (remaining === 0) return 'Nenhum código de recuperação restante — desative e ative de novo para gerar outros.';
-  return remaining === 1 ? '1 código de recuperação restante.' : `${remaining} códigos de recuperação restantes.`;
-}
 
 const primaryButton = 'px-4 py-2.5 rounded-xl text-sm text-on-accent font-semibold transition-colors disabled:opacity-50';
 const primaryStyle = { background: 'var(--color-primary)' };
 const secondaryButton = 'px-4 py-2.5 rounded-xl text-sm text-textMuted border border-[var(--line)] hover:bg-white/5 hover:text-white transition-colors disabled:opacity-50';
 
 /**
- * FIN-078 — ativação e desativação da verificação em duas etapas (TOTP). Ativar tem dois passos:
- * gerar o QR code e confirmar com a senha e um código do aplicativo; os códigos de recuperação
- * aparecem em seguida, uma única vez. Desativar pede a senha e um código.
+ * FIN-078/FIN-121 — ativação e desativação da verificação em duas etapas (TOTP), pelo plugin
+ * twoFactor do Better Auth. Ativar tem três passos: a senha gera o QR code, um código do aplicativo
+ * confirma, e os códigos de recuperação aparecem em seguida, uma única vez. Desativar pede a senha.
  */
-export function TwoFactorSettings({ token }: { token: string }) {
-  const [status, setStatus] = useState<TwoFactorStatus | null>(null);
+export function TwoFactorSettings() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
   const [phase, setPhase] = useState<Phase>('idle');
   const [setupData, setSetupData] = useState<TwoFactorSetup | null>(null);
+  // Gerados junto com o segredo, mas só mostrados depois da confirmação com o código.
+  const [pendingCodes, setPendingCodes] = useState<string[]>([]);
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -51,18 +40,16 @@ export function TwoFactorSettings({ token }: { token: string }) {
     let cancelled = false;
     (async () => {
       try {
-        const data = await apiFetch<unknown>('/api/auth/2fa', { token });
+        const active = await isTwoFactorEnabled();
         if (cancelled) return;
-        // Normaliza a resposta: um corpo inesperado vira mensagem de erro, nunca uma exceção na tela.
-        const parsed = parseTwoFactorStatus(data);
-        setStatus(parsed);
-        setLoadError(parsed ? '' : UNEXPECTED);
+        setEnabled(active);
+        setLoadError('');
       } catch (err) {
         if (!cancelled) setLoadError(errorMessage(err));
       }
     })();
     return () => { cancelled = true; };
-  }, [token, reloadKey]);
+  }, [reloadKey]);
 
   const resetForm = () => {
     setPassword('');
@@ -75,18 +62,21 @@ export function TwoFactorSettings({ token }: { token: string }) {
     setReloadKey(k => k + 1);
   };
 
-  const startSetup = async () => {
+  const startSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
     setBusy(true);
     setError('');
-    setNotice('');
     try {
-      const data = parseTwoFactorSetup(await apiFetch<unknown>('/api/auth/2fa/setup', { method: 'POST', token, body: {} }));
-      if (!data) throw new Error(UNEXPECTED);
+      const { totpURI, backupCodes } = await startTwoFactorSetup(password);
+      const data = twoFactorSetupFromUri(totpURI);
+      if (!data || backupCodes.length === 0) throw new Error(UNEXPECTED);
       resetForm();
       setSetupData(data);
+      setPendingCodes(backupCodes);
       setPhase('setup');
     } catch (err) {
       setError(errorMessage(err));
+      setPassword('');
     } finally {
       setBusy(false);
     }
@@ -96,9 +86,8 @@ export function TwoFactorSettings({ token }: { token: string }) {
     e.preventDefault();
     setBusy(true);
     setError('');
-    let response: unknown;
     try {
-      response = await apiFetch<unknown>('/api/auth/2fa/enable', { method: 'POST', token, body: { password, code } });
+      await confirmTwoFactorSetup(code);
     } catch (err) {
       setError(errorMessage(err));
       setCode('');
@@ -108,17 +97,9 @@ export function TwoFactorSettings({ token }: { token: string }) {
     setBusy(false);
     resetForm();
     setSetupData(null);
-    const codes = parseRecoveryCodes(response);
-    if (!codes) {
-      // O servidor ativou, mas os códigos não vieram num formato legível: recarrega o estado
-      // real e explica como obter códigos novos, em vez de fingir que nada aconteceu.
-      setPhase('idle');
-      setError('A verificação foi ativada, mas os códigos de recuperação não puderam ser exibidos. Desative e ative de novo para gerar outros.');
-      setReloadKey(k => k + 1);
-      return;
-    }
-    setRecoveryCodes(codes);
-    setStatus(s => s && { ...s, enabled: true, enabledAt: new Date().toISOString(), recoveryCodesRemaining: codes.length });
+    setRecoveryCodes(pendingCodes);
+    setPendingCodes([]);
+    setEnabled(true);
     setPhase('codes');
   };
 
@@ -142,14 +123,14 @@ export function TwoFactorSettings({ token }: { token: string }) {
     setBusy(true);
     setError('');
     try {
-      await apiFetch('/api/auth/2fa/disable', { method: 'POST', token, body: { password, code } });
+      await disableTwoFactor(password);
       resetForm();
-      setStatus(s => s && { ...s, enabled: false, enabledAt: null, recoveryCodesRemaining: null });
+      setEnabled(false);
       setPhase('idle');
       setNotice('Verificação em duas etapas desativada.');
     } catch (err) {
       setError(errorMessage(err));
-      setCode('');
+      setPassword('');
     } finally {
       setBusy(false);
     }
@@ -158,6 +139,7 @@ export function TwoFactorSettings({ token }: { token: string }) {
   const cancel = () => {
     resetForm();
     setSetupData(null);
+    setPendingCodes([]);
     setPhase('idle');
   };
 
@@ -170,7 +152,7 @@ export function TwoFactorSettings({ token }: { token: string }) {
         </div>
       );
     }
-    if (!status) return <p className="text-sm text-textMuted">Carregando…</p>;
+    if (enabled === null) return <p className="text-sm text-textMuted">Carregando…</p>;
 
     if (phase === 'codes') {
       return (
@@ -206,13 +188,9 @@ export function TwoFactorSettings({ token }: { token: string }) {
               <li>
                 Sem câmera? Digite a chave <code className="text-white font-mono break-all">{grouped}</code>
               </li>
-              <li>Confirme com a sua senha e o código de 6 dígitos que o aplicativo mostrar.</li>
+              <li>Confirme com o código de 6 dígitos que o aplicativo mostrar.</li>
             </ol>
             <form onSubmit={confirmEnable} className="space-y-3">
-              <FormField label="Sua senha" htmlFor="twofa-enable-password">
-                <input id="twofa-enable-password" type="password" required autoComplete="current-password"
-                  value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
-              </FormField>
               <FormField label="Código do aplicativo" htmlFor="twofa-enable-code">
                 <input id="twofa-enable-code" type="text" required inputMode="numeric" autoComplete="one-time-code" maxLength={7}
                   value={code} onChange={e => setCode(e.target.value)} className="input-field tracking-widest" placeholder="123456" />
@@ -229,31 +207,17 @@ export function TwoFactorSettings({ token }: { token: string }) {
       );
     }
 
-    if (status.enabled) {
-      const since = formatSince(status.enabledAt);
-      const remaining = remainingText(status.recoveryCodesRemaining);
-      const fewLeft = status.recoveryCodesRemaining !== null && status.recoveryCodesRemaining <= 2;
+    if (enabled) {
       return (
         <div>
           <p className="flex flex-wrap items-center gap-2 text-sm">
             <span className="px-2.5 py-1 rounded-full text-xs font-semibold border border-teal-500/30 bg-teal-500/10 text-teal-400">Ativa</span>
-            {since && <span className="text-textMuted">desde {since}</span>}
           </p>
-          {remaining && <p className={`text-sm mt-2 ${fewLeft ? 'text-amber-300' : 'text-textMuted'}`}>{remaining}</p>}
-          {!status.available && (
-            <p className="text-sm text-amber-300 mt-2">
-              A chave de cifragem não está disponível no servidor: até ela voltar, o login só aceita os códigos de recuperação.
-            </p>
-          )}
           {phase === 'disable' ? (
             <form onSubmit={confirmDisable} className="space-y-3 mt-4">
               <FormField label="Sua senha" htmlFor="twofa-disable-password">
                 <input id="twofa-disable-password" type="password" required autoComplete="current-password"
                   value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
-              </FormField>
-              <FormField label="Código do aplicativo ou de recuperação" htmlFor="twofa-disable-code">
-                <input id="twofa-disable-code" type="text" required autoComplete="one-time-code" maxLength={16}
-                  value={code} onChange={e => setCode(e.target.value)} className="input-field tracking-widest" />
               </FormField>
               <div className="flex flex-wrap gap-3 pt-1">
                 <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>
@@ -272,18 +236,26 @@ export function TwoFactorSettings({ token }: { token: string }) {
       );
     }
 
-    if (!status.available) {
+    if (phase === 'password') {
       return (
-        <p className="text-sm text-textMuted">
-          O servidor ainda não está configurado para a verificação em duas etapas: falta a variável
-          <code className="mx-1 text-white">TWO_FACTOR_ENCRYPTION_KEY</code>no arquivo <code className="text-white">.env</code> (veja o <code className="text-white">.env.example</code>).
-        </p>
+        <form onSubmit={startSetup} className="space-y-3 max-w-sm">
+          <FormField label="Sua senha" htmlFor="twofa-enable-password">
+            <input id="twofa-enable-password" type="password" required autoComplete="current-password" autoFocus
+              value={password} onChange={e => setPassword(e.target.value)} className="input-field" />
+          </FormField>
+          <div className="flex flex-wrap gap-3 pt-1">
+            <button type="button" onClick={cancel} className={secondaryButton}>Cancelar</button>
+            <button type="submit" disabled={busy} className={primaryButton} style={primaryStyle}>
+              {busy ? 'Gerando QR code…' : 'Continuar'}
+            </button>
+          </div>
+        </form>
       );
     }
 
     return (
-      <button type="button" onClick={startSetup} disabled={busy} className={primaryButton} style={primaryStyle}>
-        {busy ? 'Gerando QR code…' : 'Ativar verificação em duas etapas'}
+      <button type="button" onClick={() => { resetForm(); setNotice(''); setPhase('password'); }} className={primaryButton} style={primaryStyle}>
+        Ativar verificação em duas etapas
       </button>
     );
   };

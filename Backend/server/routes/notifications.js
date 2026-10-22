@@ -1,6 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError } from '../lib/http.js';
 import { shiftMonthKey, todayISO } from '../lib/dates.js';
 import { BASE_CURRENCY } from '../lib/money.js';
@@ -20,7 +20,7 @@ const NOTIFICATIONS_PAGE_SIZE = 50;
 // alertas de gasto incomum também, porque são informativos e valem para o mês inteiro.
 const RECONCILED_NOTIFICATION_TYPES = ['debt_due', 'debt_overdue'];
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   try {
     const [notifications, unreadCount] = await Promise.all([
@@ -47,7 +47,7 @@ router.get('/', authenticateToken, async (req, res) => {
  * `(userId, dedupeKey)`, e o upsert atualiza só título e mensagem — nunca `read`, para que um
  * aviso já lido não volte a acender o sino. Tudo numa transação, junto da reconciliação.
  */
-router.post('/generate', authenticateToken, async (req, res) => {
+router.post('/generate', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   try {
     const today = todayISO();
@@ -105,7 +105,7 @@ router.post('/generate', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/read-all', authenticateToken, async (req, res) => {
+router.put('/read-all', requireAuth, async (req, res) => {
   try {
     const result = await prisma.notification.updateMany({
       where: { userId: req.user.userId, read: false },
@@ -117,7 +117,7 @@ router.put('/read-all', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id/read', authenticateToken, async (req, res) => {
+router.put('/:id/read', requireAuth, async (req, res) => {
   try {
     // `userId` no filtro: a notificação de outro usuário simplesmente não é encontrada, e a
     // resposta é a mesma de um id inexistente — não revela que o id existe (ver FIN-032).

@@ -22,7 +22,7 @@ describe('/api/auth/local-session', () => {
   });
 
   it('com a chave ligada, entra na conta do primeiro usuário', async () => {
-    const reg = await request(app).post('/api/auth/register')
+    const reg = await request(app).post('/api/auth/sign-up/email')
       .send({ name: 'Dono', email: 'dono@local-session.test', password: 'senha123' });
     expect(reg.status).toBe(200);
 
@@ -31,8 +31,11 @@ describe('/api/auth/local-session', () => {
     expect(res.status).toBe(200);
     expect(res.body.user.email).toBe('dono@local-session.test');
 
-    const me = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${res.body.token}`);
-    expect(me.status).toBe(200);
+    // A sessão vale pelo cookie (o navegador) e pelo token (clientes da API).
+    expect(res.headers['set-cookie']?.join(';')).toMatch(/finflow\.session_token=/);
+    const me = await request(app).get('/api/auth/get-session').set('Authorization', `Bearer ${res.body.token}`);
+    expect(me.body.user.email).toBe('dono@local-session.test');
+    expect((await request(app).get('/api/accounts').set('Cookie', res.headers['set-cookie'])).status).toBe(200);
   });
 
   it('continua desligada em produção', async () => {

@@ -21,14 +21,14 @@ describe('/api/net-worth', () => {
     ({ app, cleanup } = await createTestApp('networth'));
     ({ prisma } = await import('./server.js'));
 
-    const regA = await request(app).post('/api/auth/register')
+    const regA = await request(app).post('/api/auth/sign-up/email')
       .send({ name: 'Usuario A', email: 'usera@networth.test', password: 'senha123' });
     expect(regA.status).toBe(200);
     tokenA = regA.body.token;
     userA = regA.body.user.id;
     expect(userA).toEqual(expect.any(String));
 
-    const regB = await request(app).post('/api/auth/register')
+    const regB = await request(app).post('/api/auth/sign-up/email')
       .send({ name: 'Usuario B', email: 'userb@networth.test', password: 'senha123' });
     expect(regB.status).toBe(200);
     tokenB = regB.body.token;

@@ -1,48 +1,31 @@
-// FIN-078 — respostas da verificação em duas etapas, normalizadas antes de chegarem à tela (um
-// corpo fora do formato esperado vira `null`, nunca uma exceção no meio da renderização), e o
-// aviso mostrado depois de entrar com um código de recuperação.
+// FIN-078/FIN-121 — apoio à verificação em duas etapas: o QR code e a chave para digitar, tirados da
+// URI `otpauth://` que o Better Auth devolve ao iniciar a ativação, e o aviso mostrado depois de
+// entrar com um código de recuperação.
+import qrcode from 'qrcode-generator';
 
-/** Estado da verificação em duas etapas (`GET /api/auth/2fa`). */
-export interface TwoFactorStatus {
-  /** O servidor tem a chave de cifragem — sem ela não dá para ativar. */
-  available: boolean;
-  enabled: boolean;
-  enabledAt: string | null;
-  recoveryCodesRemaining: number | null;
-}
-
-/** Resposta de `POST /api/auth/2fa/setup`: segredo, URI `otpauth://` e QR code. */
+/** O que a tela mostra para configurar o aplicativo autenticador. */
 export interface TwoFactorSetup {
+  /** Chave em base32, para quem não pode escanear o QR code. */
   secret: string;
-  otpauthUrl: string;
+  /** QR code da URI, como imagem embutida (`data:image/...`) — o `src` nunca aponta para fora do app. */
   qrCode: string;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-export function parseTwoFactorStatus(body: unknown): TwoFactorStatus | null {
-  if (!isRecord(body) || typeof body.available !== 'boolean' || typeof body.enabled !== 'boolean') return null;
-  return {
-    available: body.available,
-    enabled: body.enabled,
-    enabledAt: typeof body.enabledAt === 'string' ? body.enabledAt : null,
-    recoveryCodesRemaining: typeof body.recoveryCodesRemaining === 'number' ? body.recoveryCodesRemaining : null,
-  };
-}
-
-export function parseTwoFactorSetup(body: unknown): TwoFactorSetup | null {
-  if (!isRecord(body) || typeof body.secret !== 'string' || typeof body.otpauthUrl !== 'string') return null;
-  // Só imagem embutida: o `src` do QR code nunca aponta para fora do app.
-  if (typeof body.qrCode !== 'string' || !body.qrCode.startsWith('data:image/')) return null;
-  return { secret: body.secret, otpauthUrl: body.otpauthUrl, qrCode: body.qrCode };
-}
-
-/** Códigos de recuperação da resposta de ativação; `null` se faltarem ou vierem com tipo errado. */
-export function parseRecoveryCodes(body: unknown): string[] | null {
-  if (!isRecord(body)) return null;
-  const codes = body.recoveryCodes;
-  return Array.isArray(codes) && codes.length > 0 && codes.every(c => typeof c === 'string') ? codes : null;
+/** QR code e chave da URI `otpauth://totp/...`; `null` se a URI não for uma de TOTP com segredo. */
+export function twoFactorSetupFromUri(totpURI: string): TwoFactorSetup | null {
+  let url: URL;
+  try {
+    url = new URL(totpURI);
+  } catch {
+    return null;
+  }
+  const secret = url.searchParams.get('secret');
+  if (url.protocol !== 'otpauth:' || !secret) return null;
+  // Mesmos parâmetros do QR code que o servidor gerava antes (correção de erro M, módulos de 4 px).
+  const qr = qrcode(0, 'M');
+  qr.addData(totpURI);
+  qr.make();
+  return { secret, qrCode: qr.createDataURL(4, 4) };
 }
 
 /** Aviso depois de entrar com um código de recuperação — ele deixou de valer. */

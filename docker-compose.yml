@@ -7,7 +7,7 @@ services:
     ports:
       # Só este computador. Para usar pelo celular sem expor os dados na rede, ver FIN-109 (Tailscale).
       - "127.0.0.1:3001:3001"
-    # Segredos e ajustes do .env (JWT_SECRET, Pluggy, 2FA...), lidos a cada subida, fora da imagem.
+    # Segredos e ajustes do .env (BETTER_AUTH_SECRET, Pluggy...), lidos a cada subida, fora da imagem.
     env_file: .env
     environment:
       # Valem mais que os do .env, que apontam para caminhos do desenvolvimento.

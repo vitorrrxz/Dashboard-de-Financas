@@ -1,9 +1,9 @@
 import express from 'express';
-import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken, authLimiter } from '../lib/auth.js';
+import { requireAuth, authLimiter } from '../lib/auth.js';
+import { verifyUserPassword } from '../lib/betterAuth.js';
 import { sendInternalError } from '../lib/http.js';
 import { BASE_CURRENCY, CURRENCY_CODE_PATTERN } from '../lib/money.js';
 import { todayISO } from '../lib/dates.js';
@@ -82,7 +82,7 @@ async function buildBackup(userId) {
   };
 }
 
-router.get('/export', authenticateToken, async (req, res) => {
+router.get('/export', requireAuth, async (req, res) => {
   try {
     const backup = await buildBackup(req.user.userId);
     if (!backup) return res.status(404).json({ error: 'Usuário não encontrado.' });
@@ -318,7 +318,7 @@ const backupImportJsonBody = express.json({ limit: BACKUP_BODY_LIMIT });
 // — ou tudo é trocado, ou nada muda. Por ser destrutiva, pede a senha, e o arquivo inteiro é
 // validado antes de qualquer exclusão. O corpo só é lido depois da autenticação, com limite
 // próprio (o parser global pula esta rota — ver `isBackupImportPath`).
-router.post('/import', authLimiter, authenticateToken, backupImportJsonBody, async (req, res) => {
+router.post('/import', authLimiter, requireAuth, backupImportJsonBody, async (req, res) => {
   const userId = req.user.userId;
   const { password, backup } = req.body ?? {};
   if (typeof password !== 'string' || !password) {
@@ -329,9 +329,7 @@ router.post('/import', authLimiter, authenticateToken, backupImportJsonBody, asy
   }
 
   try {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { passwordHash: true } });
-    if (!user) return res.status(404).json({ error: 'Usuário não encontrado.' });
-    if (!(await bcrypt.compare(password, user.passwordHash))) return res.status(400).json({ error: 'Senha incorreta.' });
+    if (!(await verifyUserPassword(userId, password))) return res.status(400).json({ error: 'Senha incorreta.' });
 
     const parsed = backupSchema.safeParse(backup);
     if (!parsed.success) return res.status(400).json({ error: backupIssueMessage(parsed.error.issues) });

@@ -28,7 +28,6 @@ declare global {
 }
 
 interface PluggyConnectButtonProps {
-  token: string;
   onSyncComplete: () => void;
 }
 
@@ -56,7 +55,7 @@ function lastSyncLabel(item: PluggyItemInfo): string {
   return when ? `Última sincronização: ${when}` : 'Ainda não sincronizado';
 }
 
-export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButtonProps) {
+export function PluggyConnectButton({ onSyncComplete }: PluggyConnectButtonProps) {
   const [items, setItems] = useState<PluggyItemInfo[]>([]);
   const [connecting, setConnecting] = useState(false);
   // FIN-107: a sincronização automática sai assim que o componente monta.
@@ -69,8 +68,8 @@ export function PluggyConnectButton({ token, onSyncComplete }: PluggyConnectButt
 
   const fetchAPI = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (endpoint: string, method = 'POST', body?: unknown): Promise<any> => apiFetch(endpoint, { method, body, token }),
-    [token]
+    (endpoint: string, method = 'POST', body?: unknown): Promise<any> => apiFetch(endpoint, { method, body }),
+    []
   );
 
   // FIN-107: pede ao servidor a sincronização das conexões paradas há mais de 6 h — a regra, e a

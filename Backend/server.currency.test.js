@@ -29,7 +29,7 @@ describe('moedas no servidor (FIN-074/FIN-075)', () => {
   const auth = token => ({ Authorization: `Bearer ${token}` });
 
   async function register(name, email) {
-    const res = await request(app).post('/api/auth/register').send({ name, email, password: 'senha123' });
+    const res = await request(app).post('/api/auth/sign-up/email').send({ name, email, password: 'senha123' });
     expect(res.status).toBe(200);
     expect(res.body.token).toBeDefined();
     return res.body.token;

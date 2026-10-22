@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { BASE_CURRENCY, CURRENCY_CODE_PATTERN } from '../lib/money.js';
 import { getExchangeRates } from '../lib/exchangeRates.js';
 
@@ -12,7 +12,7 @@ export const router = express.Router();
 // atualização falhou. Autenticada para não virar um proxy aberto do provedor.
 const MAX_EXCHANGE_SYMBOLS = 20;
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   const raw = typeof req.query.symbols === 'string' ? req.query.symbols : '';
   const symbols = [...new Set(raw.split(',').map(code => code.trim().toUpperCase()).filter(Boolean))];
   if (symbols.length === 0 || symbols.length > MAX_EXCHANGE_SYMBOLS || !symbols.every(code => CURRENCY_CODE_PATTERN.test(code))) {

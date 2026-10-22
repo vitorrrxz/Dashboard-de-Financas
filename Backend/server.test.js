@@ -15,15 +15,15 @@ describe('server.js — smoke test', () => {
 
   afterAll(() => cleanup());
 
-  it('GET /api/auth/me sem token retorna 401', async () => {
-    const res = await request(app).get('/api/auth/me');
+  it('rota protegida sem sessão retorna 401', async () => {
+    const res = await request(app).get('/api/accounts');
     expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/token/i);
+    expect(res.body.error).toMatch(/login/i);
   });
 
-  it('GET /api/auth/me com token inválido retorna 403', async () => {
-    const res = await request(app).get('/api/auth/me').set('Authorization', 'Bearer token-invalido');
-    expect(res.status).toBe(403);
+  it('rota protegida com token de sessão inválido retorna 401', async () => {
+    const res = await request(app).get('/api/accounts').set('Authorization', 'Bearer token-invalido');
+    expect(res.status).toBe(401);
   });
 
   it('sem FRONTEND_DIR, a API não serve o frontend — no desenvolvimento, é o Vite (FIN-108)', async () => {

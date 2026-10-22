@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
 import { recurringSchema, recurringUpdateSchema } from '../lib/schemas.js';
 import { accountOwnershipError } from '../lib/accountAccess.js';
@@ -28,7 +28,7 @@ function recurringOccurrenceHash(userId, recurringId, occurrenceDate) {
 const MAX_OCCURRENCES_PER_RUN = 120;
 
 // --- RECURRING TRANSACTIONS (FIN-054) ---
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
     const recurring = await prisma.recurringTransaction.findMany({ where: { userId: req.user.userId } });
     res.json(recurring);
@@ -37,7 +37,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const validation = validateBody(recurringSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
@@ -62,7 +62,7 @@ router.post('/', authenticateToken, async (req, res) => {
  * então nunca fica uma transação lançada sem o ponteiro correspondente ter avançado, nem o
  * contrário.
  */
-router.post('/process', authenticateToken, async (req, res) => {
+router.post('/process', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   try {
     const today = todayISO();
@@ -122,7 +122,7 @@ router.post('/process', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const validation = validateBody(recurringUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
@@ -138,7 +138,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     await prisma.recurringTransaction.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
     res.json({ success: true });

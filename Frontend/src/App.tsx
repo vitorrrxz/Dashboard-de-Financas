@@ -27,6 +27,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ defa
 const PluggyConnectButton = lazy(() => import('./components/PluggyConnectButton').then(m => ({ default: m.PluggyConnectButton })));
 import { formatBRL as fmt, toCents, toReais } from './utils/money';
 import { apiFetch, ApiError } from './services/api';
+import { getSessionUser, signOut, type AuthUser } from './services/auth';
 import { accountIdsOf, inAccounts } from './utils/accountGroups';
 
 import { useFinancialStats } from './hooks/useFinancialStats';
@@ -227,7 +228,7 @@ function netWorthSnapshotToApi(nw: NetWorth) {
 }
 
 /**
- * Componente raiz do FinFlow — gerencia sessão (login/token), carrega contas, transações,
+ * Componente raiz do FinFlow — gerencia sessão (login), carrega contas, transações,
  * dívidas e orçamentos do usuário autenticado, deriva as estatísticas do Dashboard e
  * renderiza a navegação e as abas (Dashboard, Transações, Contas, Dívidas, Orçamento).
  *
@@ -235,9 +236,13 @@ function netWorthSnapshotToApi(nw: NetWorth) {
  * sessão, a carga/mutação de dados e a navegação (barra lateral, cabeçalho, troca de aba).
  */
 export default function App() {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('finflow_token'));
-  const [user, setUser]   = useState<{ id: string; name: string; email: string } | null>(null);
-  const [loading, setLoading] = useState(!!token);
+  // FIN-121 — a sessão é o cookie httpOnly do Better Auth: o app só sabe QUEM está logado, perguntado
+  // ao servidor ao abrir (`sessionChecked`). `userId` é o que os efeitos de carga observam.
+  const [user, setUser]   = useState<AuthUser | null>(null);
+  const userId = user?.id ?? null;
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [sessionVersion, setSessionVersion] = useState(0);
+  const [loading, setLoading] = useState(false);
 
   const [activeTab, setActiveTab]     = useState<Tab>(tabFromHash);
   const [showImport, setShowImport]   = useState(false);
@@ -308,13 +313,14 @@ export default function App() {
   // Wrapper fino sobre o `apiFetch` compartilhado (ver FIN-025/FIN-027 em
   // docs/BACKLOG_DETAIL.md) — mantém a assinatura posicional e o retorno `any` já usados
   // em ~20 call sites deste arquivo (sem tipagem de resposta por endpoint; isso fica para
-  // FIN-026, `strict` mode), só injetando o `token` do estado local.
+  // FIN-026, `strict` mode). A sessão vai no cookie (FIN-121).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fetchAPI = (endpoint: string, method = 'GET', body?: unknown): Promise<any> =>
-    apiFetch(endpoint, { method, body, token });
+    apiFetch(endpoint, { method, body });
 
-  const handleLogout = () => {
-    setToken(null);
+  /** Limpa a tela; `endSession` também encerra a sessão no servidor (o botão Sair). */
+  const handleLogout = (endSession = true) => {
+    if (endSession) signOut().catch(err => console.error('Falha ao encerrar a sessão no servidor:', err));
     setUser(null);
     setAccounts([]);
     setNotifications([]);
@@ -331,11 +337,26 @@ export default function App() {
     setRatesFailed(false);
     setSettingsNotice('');
     setLoadError('');
-    localStorage.removeItem('finflow_token');
   };
 
+  // FIN-121 — ao abrir: há sessão neste navegador? Sem conexão, a tela de "sem conexão" (FIN-082)
+  // oferece tentar de novo, em vez de mandar para o login quem já estava logado.
   useEffect(() => {
-    if (token) {
+    // O JWT do localStorage, de antes do Better Auth, não vale mais: só é apagado.
+    try { localStorage.removeItem('finflow_token'); } catch { /* armazenamento indisponível */ }
+    let cancelled = false;
+    getSessionUser()
+      .then(sessionUser => { if (!cancelled) { setUser(sessionUser); setLoadError(''); } })
+      .catch(err => {
+        console.error('Falha ao verificar a sessão:', err);
+        if (!cancelled) setLoadError('Não foi possível falar com o servidor. Verifique a conexão com a internet e tente de novo.');
+      })
+      .finally(() => { if (!cancelled) setSessionChecked(true); });
+    return () => { cancelled = true; };
+  }, [sessionVersion]);
+
+  useEffect(() => {
+    if (userId) {
       setLoading(true);
       // FIN-055: lança as ocorrências vencidas das recorrências ANTES de buscar as
       // transações, para que as geradas já apareçam nesta carga. O erro é tratado aqui
@@ -344,7 +365,6 @@ export default function App() {
       fetchAPI('/api/recurring-transactions/process', 'POST')
         .catch(err => { console.error('Falha ao processar recorrências pendentes:', err); })
         .then(() => Promise.all([
-          fetchAPI('/api/auth/me'),
           fetchAPI('/api/accounts'),
           fetchAPI('/api/transactions'),
           fetchAPI('/api/debts'),
@@ -353,9 +373,8 @@ export default function App() {
           fetchAPI('/api/recurring-transactions'),
           fetchAPI('/api/investments'),
           fetchAPI('/api/net-worth/history'),
-          fetchAPI('/api/auth/salary'),
-        ])).then(([meData, accsData, txsData, debtsData, budgetsData, goalsData, recurringData, investmentsData, netWorthHistoryData, salaryData]) => {
-        setUser(meData.user);
+          fetchAPI('/api/profile/salary'),
+        ])).then(([accsData, txsData, debtsData, budgetsData, goalsData, recurringData, investmentsData, netWorthHistoryData, salaryData]) => {
         setAccounts((accsData as Account[]).map(accountFromApi));
         setTxs((txsData as Transaction[]).map(txFromApi));
         setTxHasMore((txsData as Transaction[]).length >= 2000);
@@ -368,12 +387,12 @@ export default function App() {
         setSalary({ amount: toReais(salaryData.salaryCents), frequency: salaryData.salaryFrequency, payDay: salaryData.salaryPayDay ?? 15,
           bonus: toReais(salaryData.bonusCents ?? 0), bonusHalf: salaryData.bonusHalf === 2 ? 2 : 1, bonusMonth: salaryData.bonusMonth ?? null });
       }).catch(err => {
-        // FIN-082: só um token recusado (401/403) encerra a sessão. Sem conexão — o app instalado
+        // FIN-082: só uma sessão recusada (401/403) volta para o login. Sem conexão — o app instalado
         // aberto offline — ou com o servidor fora do ar, a sessão continua e a tela oferece tentar
         // de novo; antes, qualquer falha aqui deslogava.
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
           console.error('Sessão expirada:', err);
-          handleLogout();
+          handleLogout(false);
         } else {
           console.error('Falha ao carregar os dados:', err);
           setLoadError('Não foi possível carregar os seus dados. Verifique a conexão com a internet e tente de novo.');
@@ -382,8 +401,7 @@ export default function App() {
         setLoading(false);
       });
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, dataVersion]);
+  }, [userId, dataVersion]);
 
   // FIN-066/FIN-067: gera as notificações automáticas e recarrega a central na carga inicial
   // e sempre que os dados que as originam mudam (pagamento de parcela, importação, edição de
@@ -391,12 +409,12 @@ export default function App() {
   // nada; `cancelled` descarta a resposta de uma rodada que já foi superada por outra.
   // Uma falha aqui não derruba a sessão — o sino só fica desatualizado.
   useEffect(() => {
-    if (!token || loading) return;
+    if (!userId || loading) return;
     let cancelled = false;
     (async () => {
       try {
-        await apiFetch('/api/notifications/generate', { method: 'POST', token });
-        const data = await apiFetch<Partial<NotificationsResponse> | null>('/api/notifications', { token });
+        await apiFetch('/api/notifications/generate', { method: 'POST' });
+        const data = await apiFetch<Partial<NotificationsResponse> | null>('/api/notifications');
         if (cancelled) return;
         // Normaliza a resposta: um corpo inesperado não pode quebrar o header inteiro.
         setNotifications(Array.isArray(data?.notifications) ? data.notifications : []);
@@ -406,7 +424,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, loading, debts, accounts, transactions]);
+  }, [userId, loading, debts, accounts, transactions]);
 
   // FIN-075: moedas estrangeiras em uso — as cotações que o app precisa. Quem só usa real não
   // faz requisição nenhuma ao câmbio. A chave em texto evita buscar de novo quando as listas
@@ -417,11 +435,11 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!token || !foreignKey) return;
+    if (!userId || !foreignKey) return;
     let cancelled = false;
     (async () => {
       try {
-        const data = await apiFetch<unknown>(`/api/exchange-rates?symbols=${encodeURIComponent(foreignKey)}`, { token });
+        const data = await apiFetch<unknown>(`/api/exchange-rates?symbols=${encodeURIComponent(foreignKey)}`);
         if (cancelled) return;
         // Normaliza a resposta: um corpo inesperado vira "sem cotação", nunca uma exceção na tela.
         const parsed = parseExchangeRates(data);
@@ -434,7 +452,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, foreignKey]);
+  }, [userId, foreignKey]);
 
   /** FIN-107: depois que o widget da Pluggy sincroniza, recarrega contas e transações. */
   const handlePluggySyncComplete = async () => {
@@ -455,25 +473,30 @@ export default function App() {
     setTxHasMore(false);
   };
 
-  const handleLogin = (newToken: string, newUser: { id: string; name: string; email: string }) => {
-    localStorage.setItem('finflow_token', newToken);
-    setToken(newToken);
+  /** O cookie de sessão já veio na resposta do login; aqui só entra quem está logado. */
+  const handleLogin = (newUser: AuthUser) => {
     setUser(newUser);
   };
 
-  // Login desativado temporariamente (VITE_AUTH_DISABLED=true): sem token, abre a sessão local
+  // Login desativado temporariamente (VITE_AUTH_DISABLED=true): sem sessão, abre a sessão local
   // em vez de mostrar a tela de login. Se a rota falhar, a tela de login volta a aparecer.
   const [localSessionFailed, setLocalSessionFailed] = useState(false);
   useEffect(() => {
-    if (!AUTH_DISABLED || token || localSessionFailed) return;
-    apiFetch<{ token: string; user: { id: string; name: string; email: string } }>('/api/auth/local-session', { method: 'POST' })
-      .then(data => handleLogin(data.token, data.user))
+    if (!AUTH_DISABLED || !sessionChecked || userId || localSessionFailed || loadError) return;
+    apiFetch<{ user: AuthUser }>('/api/auth/local-session', { method: 'POST' })
+      .then(data => handleLogin(data.user))
       .catch(err => { console.error('Falha ao abrir a sessão local:', err); setLocalSessionFailed(true); });
-  }, [token, localSessionFailed]);
+  }, [sessionChecked, userId, localSessionFailed, loadError]);
 
   /** FIN-082: nova tentativa depois de uma carga que falhou sem conexão. */
   const retryLoad = () => {
     setLoadError('');
+    // Sem conexão já ao abrir, a sessão nem foi conferida: confere de novo antes de carregar.
+    if (!userId) {
+      setSessionChecked(false);
+      setSessionVersion(v => v + 1);
+      return;
+    }
     setDataVersion(v => v + 1);
   };
 
@@ -797,7 +820,7 @@ export default function App() {
   // servidor (upsert no mês corrente), então repetir não duplica nada. Sem contas nem dívidas
   // ainda (conta recém-criada), não há o que registrar.
   useEffect(() => {
-    if (!token || loading || (accountsBase.items.length === 0 && debts.length === 0)) return;
+    if (!userId || loading || (accountsBase.items.length === 0 && debts.length === 0)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -810,8 +833,7 @@ export default function App() {
       }
     })();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, loading, accountsBase.items, investmentsBase.items, debts]);
+  }, [userId, loading, accountsBase.items, investmentsBase.items, debts]);
 
   // FIN-113: mantém `currentAmount` das metas ligadas a conta/investimento em dia — o progresso
   // anda sozinho, sem digitar (quem edita manualmente é GoalsManager, para uma meta sem vínculo).
@@ -821,7 +843,7 @@ export default function App() {
   // dependência deste efeito, e um `setGoals` a cada iteração de um `for` reiniciaria o efeito no
   // meio do próprio laço.
   useEffect(() => {
-    if (!token || loading) return;
+    if (!userId || loading) return;
     const pending = goals
       .map(goal => ({ id: goal.id, name: goal.name, amount: linkedGoalAmount(goal, accountsBase.items, investmentsBase.items) }))
       .filter((p): p is { id: string; name: string; amount: number } => p.amount !== null)
@@ -840,8 +862,7 @@ export default function App() {
       });
     })();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, loading, goals, accountsBase.items, investmentsBase.items]);
+  }, [userId, loading, goals, accountsBase.items, investmentsBase.items]);
 
   const missingCurrencies = useMemo(
     () => foreignCurrencies(accountsBase.missing, transactionsBase.missing, investmentsBase.missing),
@@ -1054,7 +1075,8 @@ export default function App() {
 
   const go = (tab: Tab) => { setActiveTab(tab); setMobileNavOpen(false); };
 
-  if (!token) {
+  if (!sessionChecked) return <div role="status" className="h-screen w-full flex items-center justify-center bg-background text-textMuted">Carregando…</div>;
+  if (!userId && !loadError) {
     return AUTH_DISABLED && !localSessionFailed
       ? <div className="h-screen w-full flex items-center justify-center bg-background text-textMuted">Entrando…</div>
       : <AuthForm onLogin={handleLogin} />;
@@ -1071,7 +1093,7 @@ export default function App() {
             className="h-9 px-4 rounded-md text-sm font-medium bg-primary text-on-accent hover:opacity-90 transition-opacity">
             Tentar de novo
           </button>
-          <button type="button" onClick={handleLogout}
+          <button type="button" onClick={() => handleLogout()}
             className="h-9 px-4 rounded-md text-sm text-white bg-white/[0.06] hover:bg-white/10 transition-colors">
             Sair
           </button>
@@ -1136,9 +1158,9 @@ export default function App() {
         </nav>
 
         <div className="mt-auto p-3 space-y-3">
-          {token && (
+          {userId && (
             <Suspense fallback={<PluggyButtonLoadingFallback />}>
-              <PluggyConnectButton token={token} onSyncComplete={handlePluggySyncComplete} />
+              <PluggyConnectButton onSyncComplete={handlePluggySyncComplete} />
             </Suspense>
           )}
           <div className="space-y-0.5">
@@ -1148,7 +1170,7 @@ export default function App() {
           </div>
           <div className="flex items-center justify-between gap-2 px-2.5 pt-3 border-t border-white/[0.07]">
             <p className="text-xs text-textMuted truncate">{user?.email}</p>
-            <button type="button" onClick={handleLogout} aria-label="Sair da conta" title="Sair da conta"
+            <button type="button" onClick={() => handleLogout()} aria-label="Sair da conta" title="Sair da conta"
               className="p-1.5 rounded-md text-textMuted hover:text-white hover:bg-white/[0.06] transition-colors">
               <LogOut size={14}/>
             </button>
@@ -1345,7 +1367,6 @@ export default function App() {
                 settingsNotice={settingsNotice}
                 onDismissNotice={() => setSettingsNotice('')}
                 theme={theme}
-                token={token}
                 onRestored={handleRestored}
                 hasTransactions={transactions.length > 0}
                 onClearTransactions={handleClearTransactions}

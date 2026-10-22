@@ -1,6 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
 import { investmentSchema, investmentUpdateSchema } from '../lib/schemas.js';
 import { nonCreditAccountError } from '../lib/accountAccess.js';
@@ -13,7 +13,7 @@ async function investmentAccountError(userId, accountId) {
   return nonCreditAccountError(userId, accountId, 'Um investimento não pode ser vinculado a um cartão de crédito.');
 }
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
     const investments = await prisma.investment.findMany({
       where: { userId: req.user.userId },
@@ -25,7 +25,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const validation = validateBody(investmentSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   const userId = req.user.userId;
@@ -39,7 +39,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const validation = validateBody(investmentUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   const userId = req.user.userId;
@@ -61,7 +61,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     await prisma.investment.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
     res.json({ success: true });

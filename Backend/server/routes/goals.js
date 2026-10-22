@@ -1,6 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
 import { goalSchema, goalUpdateSchema } from '../lib/schemas.js';
 import { nonCreditAccountError } from '../lib/accountAccess.js';
@@ -24,7 +24,7 @@ async function goalLinkError(userId, accountId, investmentId) {
   return (await goalAccountError(userId, accountId)) ?? (await goalInvestmentError(userId, investmentId));
 }
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
     const goals = await prisma.goal.findMany({ where: { userId: req.user.userId } });
     res.json(goals);
@@ -33,7 +33,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const validation = validateBody(goalSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   const userId = req.user.userId;
@@ -51,7 +51,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const validation = validateBody(goalUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   const userId = req.user.userId;
@@ -71,7 +71,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     await prisma.goal.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
     res.json({ success: true });

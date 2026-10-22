@@ -1,13 +1,13 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
-import { authenticateToken } from '../lib/auth.js';
+import { requireAuth } from '../lib/auth.js';
 import { sendInternalError, validateBody } from '../lib/http.js';
 import { debtSchema, debtUpdateSchema } from '../lib/schemas.js';
 import { accountOwnershipError } from '../lib/accountAccess.js';
 
 export const router = express.Router();
 
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
     const debts = await prisma.debt.findMany({
       where: { userId: req.user.userId },
@@ -19,7 +19,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const validation = validateBody(debtSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
@@ -44,7 +44,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   const validation = validateBody(debtUpdateSchema, req.body);
   if (!validation.ok) return res.status(400).json({ error: validation.message });
   try {
@@ -69,7 +69,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
     // Delete subitems first via cascading or manual delete due to sqlite limitations if not setup
     await prisma.debtItem.deleteMany({ where: { debt: { id: req.params.id, userId: req.user.userId } }});

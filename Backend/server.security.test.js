@@ -15,11 +15,11 @@ describe('Isolamento de dados entre usuários', () => {
   beforeAll(async () => {
     ({ app, cleanup } = await createTestApp('isolation'));
 
-    const regA = await request(app).post('/api/auth/register')
+    const regA = await request(app).post('/api/auth/sign-up/email')
       .send({ name: 'Usuario A', email: 'usera@isolation.test', password: 'senha123' });
     tokenA = regA.body.token;
 
-    const regB = await request(app).post('/api/auth/register')
+    const regB = await request(app).post('/api/auth/sign-up/email')
       .send({ name: 'Usuario B', email: 'userb@isolation.test', password: 'senha123' });
     tokenB = regB.body.token;
   });
