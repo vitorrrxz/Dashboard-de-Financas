@@ -216,6 +216,7 @@
 - [ ] Publicar na Vercel com o banco no Turso — acesso de qualquer lugar pelo login (FIN-120)
 - [x] Token de sessao em cookie httpOnly em vez do localStorage (FIN-110, resolvido pela FIN-121)
 - [x] Autenticacao pelo Better Auth — sessao revogavel, 2FA pelo plugin, limite de tentativas no banco (FIN-121)
+- [x] Login com Google, GitHub e Microsoft, e contas conectadas em Configuracoes (FIN-122, depende de FIN-121)
 - [x] Detectar assinaturas nas transacoes e sugerir recorrencias (FIN-111)
 - [x] Historico mensal do patrimonio liquido, com grafico de evolucao (FIN-112, depende de FIN-064, FIN-073)
 - [x] Metas ligadas a uma conta ou investimento, com progresso automatico (FIN-113, depende de FIN-050, FIN-096)

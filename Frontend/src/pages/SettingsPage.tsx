@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { ThemeSettings } from '../components/ThemeSettings';
 import { CategoryRulesSettings } from '../components/CategoryRulesSettings';
+import { ConnectedAccounts } from '../components/ConnectedAccounts';
 import { TwoFactorSettings } from '../components/TwoFactorSettings';
 import { BackupSettings } from '../components/BackupSettings';
 import type { useTheme } from '../hooks/useTheme';
@@ -33,6 +34,7 @@ export function SettingsPage({ settingsNotice, onDismissNotice, theme, onRestore
         )}
         <ThemeSettings preference={theme.preference} onChange={theme.setPreference} />
         <CategoryRulesSettings />
+        <ConnectedAccounts />
         <TwoFactorSettings />
         <BackupSettings onRestored={onRestored} />
         {hasTransactions && (

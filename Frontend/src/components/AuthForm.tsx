@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Mail, Lock, User, ArrowRight, ArrowLeft, ShieldCheck } from 'lucide-react';
-import { signIn, signUp, verifyTwoFactor, type AuthUser } from '../services/auth';
+import {
+  getSocialProviders, signIn, signInSocial, signUp, takeOAuthError, verifyTwoFactor,
+  SOCIAL_PROVIDER_LABELS, type AuthUser, type SocialProvider,
+} from '../services/auth';
 import { recoveryNotice } from '../utils/twoFactor';
 import { FinFlowMark } from './FinFlowMark';
+import { SocialProviderIcon } from './SocialProviderIcon';
 
 interface AuthFormProps {
   /** Chamado já com a sessão aberta: o cookie veio na resposta do login (FIN-121). */
@@ -23,6 +27,33 @@ export function AuthForm({ onLogin }: AuthFormProps) {
   const [twoFactorStep, setTwoFactorStep] = useState(false);
   const [code, setCode] = useState('');
   const [useRecovery, setUseRecovery] = useState(false);
+  // FIN-122 — login com Google, GitHub e Microsoft: só os provedores configurados no servidor.
+  const [providers, setProviders] = useState<SocialProvider[]>([]);
+  const [redirectingTo, setRedirectingTo] = useState<SocialProvider | null>(null);
+
+  useEffect(() => {
+    // Voltou do provedor com erro (?error=): mostra e tira da barra de endereço.
+    const oauthError = takeOAuthError();
+    if (oauthError) setError(oauthError);
+    let cancelled = false;
+    getSocialProviders()
+      .then(list => { if (!cancelled) setProviders(list); })
+      // Sem a lista, a tela fica só com e-mail e senha.
+      .catch(err => console.error('Falha ao carregar os provedores de login:', err));
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Leva à tela do provedor — a página sai daqui, e volta já logada. */
+  const handleSocial = async (provider: SocialProvider) => {
+    setError('');
+    setRedirectingTo(provider);
+    try {
+      await signInSocial(provider);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setRedirectingTo(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -166,6 +197,25 @@ export function AuthForm({ onLogin }: AuthFormProps) {
             {!loading && <ArrowRight size={18} />}
           </button>
         </form>
+
+        {!twoFactorStep && providers.length > 0 && (
+          <div className="mt-6">
+            <div className="flex items-center gap-3 mb-4" aria-hidden="true">
+              <span className="h-px flex-1 bg-[var(--line)]" />
+              <span className="text-xs text-textMuted">ou</span>
+              <span className="h-px flex-1 bg-[var(--line)]" />
+            </div>
+            <div className="space-y-2.5">
+              {providers.map(provider => (
+                <button key={provider} type="button" onClick={() => handleSocial(provider)} disabled={redirectingTo !== null}
+                  className="w-full py-3 rounded-xl border border-[var(--line)] bg-white/5 text-white text-sm font-medium flex items-center justify-center gap-2.5 hover:bg-white/10 transition-colors disabled:opacity-50">
+                  <SocialProviderIcon provider={provider} />
+                  {redirectingTo === provider ? 'Abrindo…' : `Continuar com ${SOCIAL_PROVIDER_LABELS[provider]}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {twoFactorStep ? (
           <div className="mt-6 flex flex-col items-center gap-3 text-sm">
