@@ -177,6 +177,23 @@ O banco (`DATABASE_URL` do `.env`, um arquivo SQLite) e os backups ficam onde es
 
 ---
 
+## ☁️ Publicando na Vercel (FIN-120)
+
+Para abrir o FinFlow de qualquer lugar, só com e-mail e senha. A Vercel não tem disco permanente, então o banco fica no [Turso](https://turso.tech) (SQLite hospedado): mesmo schema e mesmas migrations do `dev.db`.
+
+1. **Banco no Turso** — instale o CLI (`brew install tursodatabase/tap/turso`), entre (`turso auth login`) e suba o banco atual:
+   `sqlite3 dev.db 'PRAGMA journal_mode=WAL;'` e `turso db import dev.db --name finflow`
+   (ou `turso db create finflow` para começar vazio). Anote a URL (`turso db show finflow --url`) e gere um token (`turso db tokens create finflow`).
+2. **Projeto na Vercel** — `npx vercel link` e cadastre as variáveis de produção (`npx vercel env add NOME production`):
+   `DATABASE_URL` (a URL `libsql://` do Turso), `TURSO_AUTH_TOKEN`, `JWT_SECRET`, `PLUGGY_CLIENT_ID`, `PLUGGY_CLIENT_SECRET`, `TWO_FACTOR_ENCRYPTION_KEY` e `FRONTEND_URL` (o endereço do site na Vercel). Não defina `VITE_API_URL`: o build já aponta o frontend para a própria origem.
+3. **Publicar** — `npx vercel deploy --prod`. O build aplica as migrations pendentes no Turso (`Backend/scripts/migrate-turso.mjs`, o `prisma migrate deploy` de lá) e gera o frontend; a API roda como função serverless (`api/index.js`).
+
+* **Segurança:** o site fica aberto na internet e o que protege os dados é o login do app — use uma senha forte e ative a verificação em duas etapas. A senha do banco nunca passa pelo app (fica com a Pluggy), mas as transações e contas sincronizadas ficam no Turso.
+* **Diferenças do servidor local:** o backup diário em `BACKUP_DIR` não roda (o Turso guarda o histórico do banco; a exportação em Configurações continua funcionando), e o limite de tentativas de login vale por instância da função, não para o site inteiro.
+* **Migrations novas:** crie como sempre, com `npx prisma migrate dev` no `dev.db`; o próximo deploy aplica no Turso.
+
+---
+
 ## 🔒 Segurança de Repositório
 
 O arquivo `.gitignore` foi atualizado para garantir que os seguintes arquivos sensíveis/locais não sejam rastreados pelo Git ou enviados ao repositório público no GitHub:

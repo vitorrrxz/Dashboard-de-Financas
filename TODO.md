@@ -213,6 +213,7 @@
 - [x] Sincronizacao automatica com a Pluggy ao abrir o app (FIN-107)
 - [ ] Empacotar o app em Docker — frontend + API + banco em volume (FIN-108)
 - [ ] Acesso privado pelo celular via Tailscale com HTTPS — PWA instalado (FIN-109, depende de FIN-108)
+- [ ] Publicar na Vercel com o banco no Turso — acesso de qualquer lugar pelo login (FIN-120)
 - [ ] Token de sessao em cookie httpOnly em vez do localStorage (FIN-110, depende de FIN-108)
 - [x] Detectar assinaturas nas transacoes e sugerir recorrencias (FIN-111)
 - [x] Historico mensal do patrimonio liquido, com grafico de evolucao (FIN-112, depende de FIN-064, FIN-073)

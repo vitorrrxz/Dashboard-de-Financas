@@ -34,6 +34,9 @@ import { router as backupRouter } from './server/routes/backup.js';
 import { router as pluggyRouter } from './server/routes/pluggy.js';
 
 const app = express();
+// FIN-120 — na Vercel a requisição chega por um proxy: sem isto, `req.ip` é o do proxy e o limite de
+// tentativas (express-rate-limit) contaria todo mundo como um único visitante.
+if (process.env.VERCEL) app.set('trust proxy', 1);
 // FIN-108 — no contêiner, a API serve também o build do frontend (`FRONTEND_DIR`), na mesma origem (ver
 // o fim do arquivo). Sem a variável, como no desenvolvimento, quem serve o frontend é o Vite.
 const FRONTEND_DIR = process.env.FRONTEND_DIR ? path.resolve(process.env.FRONTEND_DIR) : null;
