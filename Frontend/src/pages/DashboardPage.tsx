@@ -280,7 +280,7 @@ export function DashboardPage({
   const bonus = activeBonus(salary, month);
   const monthlySalary = salaryPerMonth(salary) + bonus;
   // Tudo o que se deve no mês é dívida: compras no cartão (à vista e parcelas) + parcelas cadastradas.
-  const monthDebts = stats.monthCardExpense + stats.monthDebtPayments;
+  const monthDebts = stats.monthCardExpense + stats.monthDebtPayments + stats.monthRecurring;
   // Sobra = salário − dívidas do mês. As despesas do mês são só informativas (o total gasto).
   const leftover = monthlySalary - monthDebts;
   const now = new Date();
@@ -322,7 +322,7 @@ export function DashboardPage({
     ? 'Informe o salário para ver quanto sobra depois das dívidas do mês.'
     : leftover < 0
       ? `As dívidas de ${monthName} passam o salário em ${fmt(leftover)}.`
-      : `Sobram ${fmt(leftover)} de ${monthName} depois do cartão e das parcelas.`;
+      : `Sobram ${fmt(leftover)} de ${monthName} depois do cartão, das parcelas e das recorrências.`;
 
   return (
     <>
@@ -428,6 +428,7 @@ export function DashboardPage({
                 <p className="text-sm text-textMuted">Dívidas do mês</p>
                 <p className="text-[22px] leading-8 font-bold text-debt">{fmt(monthDebts)}</p>
                 <PaymentTypeBreakdown values={stats.monthDebtsByType} tone="text-debt" />
+                {stats.monthRecurring > 0 && <p className="text-xs text-textMuted mt-1">Inclui recorrências: {fmt(stats.monthRecurring)}</p>}
               </button>
               <button type="button" onClick={() => { onFilterTransactions('expense'); onNavigate('transactions'); }}
                 className="p-5 md:px-6 text-left hover:bg-white/[0.02] transition-colors">

@@ -2,7 +2,7 @@
 // não dependerem da data em que a suíte roda.
 import { describe, it, expect } from 'vitest';
 import { computeBalanceProjection } from './projection';
-import type { Debt, Salary } from '../types';
+import type { Debt, RecurringTransaction, Salary } from '../types';
 
 function salary(overrides: Partial<Salary> = {}): Salary {
   return { amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null, ...overrides };
@@ -98,5 +98,16 @@ describe('computeBalanceProjection', () => {
   it('saldo negativo é projetado normalmente (não é zerado)', () => {
     const p = computeBalanceProjection(100, NO_SALARY, [debt({ monthlyPayment: 400, totalAmount: 4800 })], { from: FROM, months: 2 });
     expect(p.map(x => x.balance)).toEqual([-300, -700]);
+  });
+
+  it('recorrências: o mês corrente vem pronto; dos seguintes saem as ocorrências não lançadas', () => {
+    const recurring: RecurringTransaction[] = [
+      { id: 'r1', name: 'Aluguel', category: 'Moradia', amount: -1000, frequency: 'monthly', nextOccurrence: '2026-07-05', active: true, createdAt: '2026-01-01' },
+      { id: 'r2', name: 'Freela', category: 'Receita', amount: 500, frequency: 'monthly', nextOccurrence: '2026-07-05', active: true, createdAt: '2026-01-01' },
+      { id: 'r3', name: 'Pausada', category: 'Outros', amount: -200, frequency: 'monthly', nextOccurrence: '2026-07-05', active: false, createdAt: '2026-01-01' },
+    ];
+    const p = computeBalanceProjection(5000, NO_SALARY, [], { from: FROM, months: 3, currentRecurring: 1000, recurring });
+    expect(p.map(x => x.debtDelta)).toEqual([1000, 1000, 1000]);
+    expect(p.map(x => x.balance)).toEqual([4000, 3000, 2000]);
   });
 });

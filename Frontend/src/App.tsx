@@ -48,7 +48,7 @@ import {
 import { isInstallmentTransaction } from './utils/installments';
 import {
   BASE_CURRENCY, accountsInBase, currencyOf, foreignCurrencies,
-  investmentsInBase, parseExchangeRates, transactionsInBase,
+  investmentsInBase, parseExchangeRates, recurringInBase, transactionsInBase,
   type ExchangeRates,
 } from './utils/currency';
 import type {
@@ -827,6 +827,7 @@ export default function App() {
   const accountsBase = useMemo(() => accountsInBase(accounts, rates), [accounts, rates]);
   const transactionsBase = useMemo(() => transactionsInBase(transactions, rates), [transactions, rates]);
   const investmentsBase = useMemo(() => investmentsInBase(investments, rates), [investments, rates]);
+  const recurringBase = useMemo(() => recurringInBase(recurring, accounts, rates), [recurring, accounts, rates]);
 
   // FIN-112: guarda um retrato do patrimônio líquido de hoje, para o gráfico de evolução em
   // Relatórios. Roda de novo sempre que ele muda (contas, dívidas, investimentos ou a cotação que
@@ -885,7 +886,7 @@ export default function App() {
   const usedCurrencies = foreignKey ? foreignKey.split(',') : [];
   const conversionIssue = missingCurrencies.length > 0 || rates?.stale === true;
 
-  const stats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items);
+  const stats = useFinancialStats(transactionsBase.items, accountsBase.items, debts, dashboardAccountId, investmentsBase.items, recurringBase.items);
 
   // FIN-073: o card de Investimentos aparece com conta de investimento OU posição na carteira;
   // a legenda diz de onde vem o total (posições, contas sem posições, ou os dois).
@@ -910,8 +911,9 @@ export default function App() {
   const projection = useMemo(
     () => computeBalanceProjection(stats.realBalance, salary, debts, {
       months: 6, currentBill: stats.monthCardExpense, cardInstallments: stats.cardInstallmentsAhead,
+      currentRecurring: stats.monthRecurring, recurring: recurringBase.items,
     }),
-    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, salary, debts]
+    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, stats.monthRecurring, recurringBase.items, salary, debts]
   );
 
   // Categorias que já aparecem nas transações do usuário, além das curadas em

@@ -5,8 +5,9 @@ import { isOwnTransfer } from '../utils/categories';
 import { groupInstallmentPurchases, parseInstallment } from '../utils/installments';
 import { advanceDays, dateInMonth, shiftMonth } from '../utils/dates';
 import { accountIdsOf, inAccounts } from '../utils/accountGroups';
+import { recurringExpenses, upcomingRecurringOutflows } from '../utils/recurring';
 import type { Outflow } from '../utils/salary';
-import type { Account, Debt, Investment, Transaction } from '../types';
+import type { Account, Debt, Investment, RecurringTransaction, Transaction } from '../types';
 
 // FIN-086 — lógica de cálculo financeiro extraída de dentro de `App.tsx` (onde vivia como
 // um `useMemo` inline de ~70 linhas) para este módulo dedicado. Objetivo duplo: (1)
@@ -30,7 +31,7 @@ export interface FinancialStats {
   monthCardExpense: number;
   /** `monthExpense` dividido pela forma de pagamento: débito/PIX, crédito à vista, crédito parcelado. */
   monthExpenseByType: ByPaymentType;
-  /** `monthCardExpense + monthDebtPayments` divididos do mesmo jeito que `monthExpenseByType`. */
+  /** `monthCardExpense + monthDebtPayments + monthRecurring` divididos do mesmo jeito que `monthExpenseByType`. */
   monthDebtsByType: ByPaymentType;
   realBalance: number;
   investmentBalance: number;
@@ -38,9 +39,14 @@ export interface FinancialStats {
   activeDebts: number;
   /** Soma das parcelas mensais das dívidas ainda não quitadas — o que sai do salário todo mês. */
   monthDebtPayments: number;
+  /**
+   * Recorrências de despesa do mês fora da fatura acima: as já lançadas e as que ainda vão cair (no
+   * cartão, só as que vão cair nesta fatura — as lançadas já estão em `monthCardExpense`).
+   */
+  monthRecurring: number;
   /** Tudo o que se deve: dívidas cadastradas + faturas pendentes + parcelas futuras do cartão. */
   totalOwed: number;
-  /** Dívidas do mês com o dia em que vencem: cartão pelo vencimento da fatura, parcela pelo vencimento. */
+  /** Dívidas do mês com o dia em que vencem: cartão pelo vencimento da fatura, parcela e recorrência pela data. */
   monthOutflows: Outflow[];
   /** Parcelas do cartão com data depois de hoje (ainda não lançadas), para a projeção de saldo. */
   cardInstallmentsAhead: { date: string; amount: number }[];
@@ -64,13 +70,15 @@ export function billPeriod(month: string, closingDay: number, dueDay?: number): 
 // Padrão estável para `investments` ausente: um `[]` literal no parâmetro seria um array novo
 // a cada render e invalidaria o `useMemo` do hook toda vez.
 const NO_INVESTMENTS: Investment[] = [];
+const NO_RECURRING: RecurringTransaction[] = [];
 
 export function computeFinancialStats(
   transactions: Transaction[],
   accounts: Account[],
   debts: Debt[],
   dashboardAccountId: string | null,
-  investments: Pick<Investment, 'accountId' | 'currentValue'>[] = NO_INVESTMENTS
+  investments: Pick<Investment, 'accountId' | 'currentValue'>[] = NO_INVESTMENTS,
+  recurring: RecurringTransaction[] = NO_RECURRING
 ): FinancialStats {
   // FIN-103: transferência entre contas próprias e pagamento de fatura não são receita nem despesa.
   // Seleção do filtro: uma conta ou um banco inteiro (conta corrente + cartão) — ver accountGroups.
@@ -118,7 +126,7 @@ export function computeFinancialStats(
     .filter(a => a.type === 'credit')
     .map(a => [a.id, a.closingDay ? billPeriod(mPrefix, a.closingDay, a.dueDay) : null]));
   const isCard = (t: Transaction) => t.paymentType === 'credit' || (!!t.accountId && periods.has(t.accountId));
-  const inThisBill = (t: Transaction) => {
+  const inThisBill = (t: { accountId?: string; date: string }) => {
     const period = t.accountId ? periods.get(t.accountId) : null;
     return period ? t.date >= period.start && t.date <= period.end : t.date.startsWith(mPrefix);
   };
@@ -152,13 +160,26 @@ export function computeFinancialStats(
     const kind = d.totalInstallments > 1 ? 'installment' : d.category === 'Cartão de Crédito' ? 'credit' : 'debitPix';
     monthDebtsByType[kind] += d.monthlyPayment;
   });
+  // Recorrências de despesa do mês. A lançada é a transação igual (nome, valor, conta) de antes do
+  // ponteiro `nextOccurrence`; no cartão ela já está na fatura, então só conta a que ainda vai cair.
+  const isCardAccount = (accountId?: string) => !!accountId && periods.has(accountId);
+  const activeRecurring = recurringExpenses(recurring).filter(r => inAccounts(ids, r.accountId));
+  const launchedRecurring = new Set(activeRecurring.filter(r => !isCardAccount(r.accountId)).flatMap(r =>
+    expenses.filter(t => t.date.startsWith(mPrefix) && t.date < r.nextOccurrence && t.name === r.name
+      && t.amount === r.amount && (t.accountId ?? null) === (r.accountId ?? null))));
+  const recurringOutflows = [
+    ...[...launchedRecurring].map(t => ({ date: t.date, amount: Math.abs(t.amount), accountId: t.accountId })),
+    ...upcomingRecurringOutflows(activeRecurring, mPrefix).filter(inThisBill),
+  ];
+  const monthRecurring = recurringOutflows.reduce((s, o) => s + o.amount, 0);
+  recurringOutflows.forEach(o => { monthDebtsByType[isCardAccount(o.accountId) ? 'credit' : 'debitPix'] += o.amount; });
   // Parcelas do cartão ainda não lançadas: as já lançadas estão na fatura pendente.
   const purchases = groupInstallmentPurchases(activeTxs, today);
   const futureCardInstallments = purchases.reduce((s, p) => s + p.remainingAmount, 0);
   const cardInstallmentsAhead = purchases.flatMap(p => p.installments.filter(i => i.date > today));
   const totalOwed = totalActiveDebts + pendingBills + futureCardInstallments;
 
-  // As mesmas dívidas de monthCardExpense + monthDebtPayments, com o dia de cada uma — para dividir a
+  // As mesmas dívidas de monthCardExpense + monthDebtPayments + monthRecurring, com o dia de cada uma — para dividir a
   // sobra (salário − dívidas) entre os pagamentos do salário quinzenal.
   const dayOf = (iso: string) => Number(iso.slice(8, 10));
   const dueDays = new Map(accounts.map(a => [a.id, a.dueDay]));
@@ -167,6 +188,9 @@ export function computeFinancialStats(
       .map(t => ({ day: (t.accountId && dueDays.get(t.accountId)) || dayOf(t.date), amount: Math.abs(t.amount) })),
     ...activeDebts.filter(d => d.paidInstallments < d.totalInstallments)
       .map(d => ({ day: dayOf(d.nextDueDate), amount: d.monthlyPayment })),
+    ...recurringOutflows.map(o => ({
+      day: (isCardAccount(o.accountId) && o.accountId && dueDays.get(o.accountId)) || dayOf(o.date), amount: o.amount,
+    })),
   ];
 
   const overdueDebts = activeDebts.filter(isDebtOverdue);
@@ -186,7 +210,7 @@ export function computeFinancialStats(
   return {
     income, expense, importedBalance, balanceByMonth, dailyEvolution,
     expenseByCategory, monthExpense, monthExpenseByType, monthDebtsByType, monthCardExpense, realBalance, investmentBalance, pendingBills,
-    activeDebts: totalActiveDebts, monthDebtPayments, totalOwed, monthOutflows, cardInstallmentsAhead, overdueDebts,
+    activeDebts: totalActiveDebts, monthDebtPayments, monthRecurring, totalOwed, monthOutflows, cardInstallmentsAhead, overdueDebts,
     filteredTxsCount: activeTxs.length,
   };
 }
@@ -196,10 +220,11 @@ export function useFinancialStats(
   accounts: Account[],
   debts: Debt[],
   dashboardAccountId: string | null,
-  investments: Investment[] = NO_INVESTMENTS
+  investments: Investment[] = NO_INVESTMENTS,
+  recurring: RecurringTransaction[] = NO_RECURRING
 ): FinancialStats {
   return useMemo(
-    () => computeFinancialStats(transactions, accounts, debts, dashboardAccountId, investments),
-    [transactions, accounts, debts, dashboardAccountId, investments]
+    () => computeFinancialStats(transactions, accounts, debts, dashboardAccountId, investments, recurring),
+    [transactions, accounts, debts, dashboardAccountId, investments, recurring]
   );
 }
