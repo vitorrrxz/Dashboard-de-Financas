@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { memo, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { Pencil, Upload } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -12,6 +12,8 @@ import type { ByPaymentType, FinancialStats } from '../hooks/useFinancialStats';
 import type { Account, Salary, SalaryFrequency } from '../types';
 import type { Tab } from '../App';
 import { AccountOptions } from '../components/AccountFilter';
+import { MonthNavigator } from '../components/MonthNavigator';
+import { ALL_MONTHS } from '../utils/transactions';
 import { activeBonus, biweeklyLeftovers, salaryPerMonth } from '../utils/salary';
 import { todayISO } from '../utils/debts';
 import { advanceDays, daysInMonth, formatMonthLabel } from '../utils/dates';
@@ -206,6 +208,20 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
     );
   }
 
+  // Sem salário, um botão para inseri-lo; depois, o lápis para editar.
+  if (salaryPerMonth(salary) === 0) {
+    return (
+      <div>
+        <p className="text-sm text-textMuted">Salário do mês</p>
+        <button type="button" onClick={startEdit}
+          className="h-9 px-4 mt-2 rounded-md bg-primary text-on-accent text-sm font-medium hover:opacity-90 transition-opacity">
+          Inserir salário
+        </button>
+        <p className="text-xs text-textMuted mt-2">Informe o salário para calcular a sobra</p>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between gap-2">
@@ -217,8 +233,7 @@ function SalaryCell({ salary, monthly, month, bonus, onSave }: { salary: Salary;
       </div>
       <p className={`text-[22px] leading-8 font-bold ${monthly === 0 ? 'text-textMuted' : 'text-teal-400'}`}>{fmt(monthly)}</p>
       <p className="text-xs text-textMuted mt-1">
-        {salaryPerMonth(salary) === 0 ? 'Informe o salário no lápis para calcular a sobra'
-          : salary.frequency === 'biweekly'
+        {salary.frequency === 'biweekly'
             ? `Quinzenal, dias ${salary.payDay} e ${salary.payDay + 15} · ${salary.amount === salary.secondAmount
               ? `2 × ${fmt(salary.amount)}` : `${fmt(salary.amount)} + ${fmt(salary.secondAmount)}`}`
             : 'Mensal'}
@@ -256,6 +271,8 @@ interface DashboardPageProps {
   onShowImport: () => void;
   salary: Salary;
   onSaveSalary: (salary: Salary) => Promise<void>;
+  /** Botão de conectar banco (Open Finance), o mesmo da lateral — aparece na tela inicial sem contas. */
+  connectBank?: ReactNode;
 }
 
 /**
@@ -267,7 +284,7 @@ export function DashboardPage({
   accounts, dashboardAccountId, onChangeDashboardAccount, stats, overBudget, budgetProgress,
   usedCurrencies, rates, ratesFailed, conversionIssue, missingCurrencies, hasInvestments,
   investmentHoldings, isEmpty, hasAccounts, chartPeriod, onChangeChartPeriod,
-  projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary,
+  projection, onNavigate, onFilterTransactions, onShowImport, salary, onSaveSalary, connectBank,
 }: DashboardPageProps) {
   const chartAnimation = useChartAnimation();
   // Donut de categorias: passar o mouse destaca a fatia; clicar fixa o destaque (clicar de novo solta).
@@ -276,28 +293,31 @@ export function DashboardPage({
   const togglePicked = (name: string) => setPickedCategory(togglingTo(name));
   const today = todayISO();
   const month = today.slice(0, 7);
+  const [categoryMonth, setCategoryMonth] = useState(month);
   const monthName = formatMonthLabel(month).split('/')[0].toLowerCase();
   const bonus = activeBonus(salary, month);
   const monthlySalary = salaryPerMonth(salary) + bonus;
   // Tudo o que se deve no mês é dívida: compras no cartão (à vista e parcelas) + parcelas cadastradas.
   const monthDebts = stats.monthCardExpense + stats.monthDebtPayments + stats.monthRecurring;
-  // Sobra = salário − dívidas do mês. As despesas do mês são só informativas (o total gasto).
-  const leftover = monthlySalary - monthDebts;
+  // Entradas do mês: salário + recorrências de receita (Devedores).
+  const debtorsIncome = stats.monthRecurringIncome;
+  const monthlyIncome = monthlySalary + debtorsIncome;
+  // Sobra = entradas − dívidas do mês. As despesas do mês são só informativas (o total gasto).
+  const leftover = monthlyIncome - monthDebts;
   const now = new Date();
   const monthDays = daysInMonth(now.getFullYear(), now.getMonth() + 1);
 
   // Uma régua por pagamento: no quinzenal, cada metade com as dívidas que vencem até o pagamento seguinte.
   const rulers = useMemo(() => {
     if (salary.frequency !== 'biweekly') {
-      return [{ label: `Salário de ${monthName}`, detail: `Recebe ${fmt(monthlySalary)} · dívidas do mês ${fmt(monthDebts)}`, pay: monthlySalary, owed: monthDebts }];
+      return [{ label: `Salário de ${monthName}`, detail: `Recebe ${fmt(monthlyIncome)} · dívidas do mês ${fmt(monthDebts)}`, pay: monthlyIncome, owed: monthDebts }];
     }
-    const halves = biweeklyLeftovers(salary, stats.monthOutflows, monthDays, bonus);
+    const halves = biweeklyLeftovers(salary, stats.monthOutflows, monthDays, bonus, stats.monthInflows);
     return halves.map((h, i) => {
-      const pay = (i === 0 ? salary.amount : salary.secondAmount) + (salary.bonusHalf === i + 1 ? bonus : 0);
       const until = i === 0 ? `até o dia ${halves[1].day - 1}` : 'até o fim do mês';
-      return { label: `Pagamento do dia ${h.day}`, detail: `Recebe ${fmt(pay)} · dívidas ${until}: ${fmt(pay - h.leftover)}`, pay, owed: pay - h.leftover };
+      return { label: `Pagamento do dia ${h.day}`, detail: `Recebe ${fmt(h.pay)} · dívidas ${until}: ${fmt(h.pay - h.leftover)}`, pay: h.pay, owed: h.pay - h.leftover };
     });
-  }, [salary, stats.monthOutflows, monthDays, bonus, monthName, monthDebts, monthlySalary]);
+  }, [salary, stats.monthOutflows, stats.monthInflows, monthDays, bonus, monthName, monthDebts, monthlyIncome]);
   const rulerScale = Math.max(...rulers.map(r => Math.max(r.pay, r.owed)));
 
   // Fluxo diário: os últimos 31 dias inteiros, com zero nos dias sem lançamento (o eixo é tempo).
@@ -312,16 +332,19 @@ export function DashboardPage({
   const flowTicks = niceTicks(flowData.map(d => d.balance));
   const projectionTicks = niceTicks(projection.map(p => p.balance));
 
-  const categoryTotal = stats.expenseByCategory.reduce((s, c) => s + c.amount, 0);
+  // Filtro mensal do donut (o mesmo seletor de Transações e Dívidas): abre no mês corrente.
+  const categoryMonths = Array.from(new Set([month, ...Object.keys(stats.expenseByCategoryByMonth)])).sort().reverse();
+  const categories = categoryMonth === ALL_MONTHS ? stats.expenseByCategory : stats.expenseByCategoryByMonth[categoryMonth] ?? [];
+  const categoryTotal = categories.reduce((s, c) => s + c.amount, 0);
   const categoryShare = (amount: number) =>
     categoryTotal > 0 ? `${((amount / categoryTotal) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%` : '—';
-  const activeIndex = stats.expenseByCategory.findIndex(c => c.name === (hoveredCategory ?? pickedCategory));
-  const activeCategory = stats.expenseByCategory[activeIndex];
+  const activeIndex = categories.findIndex(c => c.name === (hoveredCategory ?? pickedCategory));
+  const activeCategory = categories[activeIndex];
   const hasProjection = projection.some(p => p.salaryDelta > 0 || p.debtDelta > 0);
-  const finding = monthlySalary === 0
+  const finding = monthlyIncome === 0
     ? 'Informe o salário para ver quanto sobra depois das dívidas do mês.'
     : leftover < 0
-      ? `As dívidas de ${monthName} passam o salário em ${fmt(leftover)}.`
+      ? `As dívidas de ${monthName} passam as entradas em ${fmt(leftover)}.`
       : `Sobram ${fmt(leftover)} de ${monthName} depois do cartão, das parcelas e das recorrências.`;
 
   return (
@@ -385,12 +408,12 @@ export function DashboardPage({
         <section className="panel rounded-2xl p-6">
           <h2 className="text-base font-medium text-white">Comece pelas suas contas</h2>
           <p className="text-sm text-textMuted mt-1 mb-5 max-w-xl">
-            Cadastre a conta corrente e o cartão, depois importe o extrato (CSV ou OFX) ou conecte o banco pelo Open Finance.
+            Conecte o banco pelo Open Finance ou importe o extrato (CSV ou OFX).
             A sobra do mês aparece aqui assim que houver salário e dívidas.
           </p>
+          {/* O mesmo painel "Conectar banco" da lateral. */}
+          {connectBank && <div className="max-w-xs mb-3">{connectBank}</div>}
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => onNavigate('accounts')}
-              className="h-9 px-4 rounded-md bg-primary text-on-accent text-sm font-medium">Adicionar conta</button>
             <button type="button" onClick={onShowImport}
               className="h-9 px-4 rounded-md text-sm text-white bg-white/[0.06] hover:bg-white/10">Importar extrato</button>
           </div>
@@ -402,11 +425,11 @@ export function DashboardPage({
             <div className="p-5 md:p-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-10">
               <div>
                 <h2 id="month-title" className="text-sm text-textMuted">Sobra de {monthName}</h2>
-                <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${monthlySalary === 0 ? 'text-textMuted' : balanceTone(leftover)}`}>
+                <p className={`text-[32px] leading-10 font-bold tracking-tight mt-1 ${monthlyIncome === 0 ? 'text-textMuted' : balanceTone(leftover)}`}>
                   {signed(leftover)}
                 </p>
                 <p className="text-sm text-textMuted mt-1">
-                  Salário {fmt(monthlySalary)} − dívidas do mês {fmt(monthDebts)}
+                  Salário {fmt(monthlySalary)}{debtorsIncome > 0 && <> + devedores {fmt(debtorsIncome)}</>} − dívidas do mês {fmt(monthDebts)}
                 </p>
               </div>
               <div className="space-y-4 lg:pt-1">
@@ -495,15 +518,21 @@ export function DashboardPage({
             </section>
 
             <section aria-labelledby="category-title" className="panel rounded-2xl p-5 md:p-6">
-              <h2 id="category-title" className="text-base font-medium text-white mb-4">Gastos por categoria</h2>
-              {stats.expenseByCategory.length === 0 ? (
-                <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">Nenhum gasto registrado ainda.</p>
+              <h2 id="category-title" className="text-base font-medium text-white mb-3">Gastos por categoria</h2>
+              <div className="mb-4">
+                <MonthNavigator id="category-month" value={categoryMonth} months={categoryMonths} allowAll
+                  onChange={m => { setCategoryMonth(m); setPickedCategory(null); }}/>
+              </div>
+              {categories.length === 0 ? (
+                <p className="text-sm text-textMuted py-3 px-3 rounded-md border border-dashed border-[var(--control)]">
+                  {categoryMonth !== ALL_MONTHS ? 'Nenhum gasto neste mês.' : 'Nenhum gasto registrado ainda.'}
+                </p>
               ) : (
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-5 items-center sm:items-start lg:items-center">
                   <div className="relative w-32 h-32 shrink-0">
                     <style>{activeIndex < 0 ? '' :
                       `.cat-slice:not(.cat-slice-${activeIndex}){opacity:.35}.cat-slice-${activeIndex}{transform:scale(1.08)}`}</style>
-                    <CategoryDonut data={stats.expenseByCategory} animation={chartAnimation}
+                    <CategoryDonut data={categories} animation={chartAnimation}
                       onHover={setHoveredCategory} onPick={setPickedCategory}/>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
                       <span className="text-xs text-textMuted truncate max-w-[84px]">{activeCategory ? activeCategory.name : 'Total'}</span>
@@ -514,7 +543,7 @@ export function DashboardPage({
                   <table className="w-full text-[13px]">
                     <caption className="sr-only">Gastos por categoria</caption>
                     <tbody>
-                      {stats.expenseByCategory.map(c => (
+                      {categories.map(c => (
                         <tr key={c.name} onMouseEnter={() => setHoveredCategory(c.name)} onMouseLeave={() => setHoveredCategory(null)}
                           className={`transition-opacity ${activeCategory && c.name !== activeCategory.name ? 'opacity-40' : ''}`}>
                           <td className="py-1 pr-2 w-3">

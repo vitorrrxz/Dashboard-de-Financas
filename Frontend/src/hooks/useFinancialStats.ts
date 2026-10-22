@@ -5,7 +5,7 @@ import { isOwnTransfer } from '../utils/categories';
 import { groupInstallmentPurchases, parseInstallment } from '../utils/installments';
 import { advanceDays, dateInMonth, shiftMonth } from '../utils/dates';
 import { accountIdsOf, inAccounts } from '../utils/accountGroups';
-import { recurringExpenses, upcomingRecurringOutflows } from '../utils/recurring';
+import { recurringExpenses, recurringIncomes, upcomingRecurringInflows, upcomingRecurringOutflows } from '../utils/recurring';
 import type { Outflow } from '../utils/salary';
 import type { Account, Debt, Investment, RecurringTransaction, Transaction } from '../types';
 
@@ -26,6 +26,8 @@ export interface FinancialStats {
   balanceByMonth: { name: string; balance: number }[];
   dailyEvolution: { name: string; balance: number }[];
   expenseByCategory: { name: string; amount: number }[];
+  /** `expenseByCategory` de cada mês (YYYY-MM) com gastos. */
+  expenseByCategoryByMonth: Record<string, { name: string; amount: number }[]>;
   monthExpense: number;
   /** Compras no cartão da fatura que vence neste mês (ciclo de fechamento; sem fechamento, o mês civil). Contam como dívida. */
   monthCardExpense: number;
@@ -46,6 +48,10 @@ export interface FinancialStats {
   monthRecurring: number;
   /** Recorrências de despesa do mês ainda não lançadas — o que ainda vai sair delas até o fim do mês. */
   monthRecurringAhead: number;
+  /** Recorrências de receita (Devedores) do mês: as já lançadas e as que ainda vão cair. */
+  monthRecurringIncome: number;
+  /** As mesmas receitas de `monthRecurringIncome`, com o dia de cada uma — para a régua quinzenal. */
+  monthInflows: Outflow[];
   /** Tudo o que se deve: dívidas cadastradas + faturas pendentes + parcelas futuras do cartão + `monthRecurringAhead`. */
   totalOwed: number;
   /** Dívidas do mês com o dia em que vencem: cartão pelo vencimento da fatura, parcela e recorrência pela data. */
@@ -110,13 +116,21 @@ export function computeFinancialStats(
       balance: +v.toFixed(2),
     }));
 
-  const catMap: Record<string, number> = {};
-  activeTxs.filter(t => t.amount < 0).forEach(t => {
-    catMap[t.category] = (catMap[t.category] ?? 0) + Math.abs(t.amount);
-  });
-  const expenseByCategory = Object.entries(catMap)
-    .sort(([, a], [, b]) => b - a).slice(0, 6)
-    .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
+  const topCategories = (txs: Transaction[]) => {
+    const catMap: Record<string, number> = {};
+    txs.forEach(t => { catMap[t.category] = (catMap[t.category] ?? 0) + Math.abs(t.amount); });
+    return Object.entries(catMap)
+      .sort(([, a], [, b]) => b - a).slice(0, 6)
+      .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
+  };
+  const allExpenses = activeTxs.filter(t => t.amount < 0);
+  const expenseByCategory = topCategories(allExpenses);
+  // O mesmo, mês a mês (YYYY-MM), para o filtro do donut.
+  const expensesByMonth: Record<string, Transaction[]> = {};
+  allExpenses.forEach(t => { (expensesByMonth[t.date.slice(0, 7)] ??= []).push(t); });
+  const expenseByCategoryByMonth = Object.fromEntries(
+    Object.entries(expensesByMonth).map(([m, txs]) => [m, topCategories(txs)])
+  );
 
   const today = todayISO();
   const mPrefix = today.slice(0, 7);
@@ -176,6 +190,16 @@ export function computeFinancialStats(
   ];
   const monthRecurring = recurringOutflows.reduce((s, o) => s + o.amount, 0);
   recurringOutflows.forEach(o => { monthDebtsByType[isCardAccount(o.accountId) ? 'credit' : 'debitPix'] += o.amount; });
+  // Receitas recorrentes (Devedores) do mês, com a mesma regra de "lançada" das despesas acima.
+  const activeIncomes = recurringIncomes(recurring).filter(r => inAccounts(ids, r.accountId));
+  const launchedIncomes = new Set(activeIncomes.flatMap(r =>
+    activeTxs.filter(t => t.amount > 0 && t.date.startsWith(mPrefix) && t.date < r.nextOccurrence && t.name === r.name
+      && t.amount === r.amount && (t.accountId ?? null) === (r.accountId ?? null))));
+  const recurringInflows = [
+    ...[...launchedIncomes].map(t => ({ date: t.date, amount: t.amount })),
+    ...upcomingRecurringInflows(activeIncomes, mPrefix).filter(o => o.date.startsWith(mPrefix)),
+  ];
+  const monthRecurringIncome = recurringInflows.reduce((s, o) => s + o.amount, 0);
   // Parcelas do cartão ainda não lançadas: as já lançadas estão na fatura pendente.
   const purchases = groupInstallmentPurchases(activeTxs, today);
   const futureCardInstallments = purchases.reduce((s, p) => s + p.remainingAmount, 0);
@@ -201,6 +225,8 @@ export function computeFinancialStats(
     })),
   ];
 
+  const monthInflows: Outflow[] = recurringInflows.map(o => ({ day: dayOf(o.date), amount: o.amount }));
+
   const overdueDebts = activeDebts.filter(isDebtOverdue);
 
   const dailyMap: Record<string, number> = {};
@@ -217,8 +243,8 @@ export function computeFinancialStats(
 
   return {
     income, expense, importedBalance, balanceByMonth, dailyEvolution,
-    expenseByCategory, monthExpense, monthExpenseByType, monthDebtsByType, monthCardExpense, realBalance, investmentBalance, pendingBills,
-    activeDebts: totalActiveDebts, monthDebtPayments, monthRecurring, monthRecurringAhead, totalOwed, monthOutflows, cardInstallmentsAhead, overdueDebts,
+    expenseByCategory, expenseByCategoryByMonth, monthExpense, monthExpenseByType, monthDebtsByType, monthCardExpense, realBalance, investmentBalance, pendingBills,
+    activeDebts: totalActiveDebts, monthDebtPayments, monthRecurring, monthRecurringAhead, monthRecurringIncome, monthInflows, totalOwed, monthOutflows, cardInstallmentsAhead, overdueDebts,
     filteredTxsCount: activeTxs.length,
   };
 }

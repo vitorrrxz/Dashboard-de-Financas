@@ -150,6 +150,23 @@ describe('transferências entre contas e pagamento de fatura (FIN-103)', () => {
   });
 });
 
+describe('computeFinancialStats — gastos por categoria, mês a mês', () => {
+  it('cada mês tem só os próprios gastos; o total soma todos', () => {
+    const txs = [
+      tx({ date: '2026-05-10', amount: -100, category: 'Lazer' }),
+      tx({ date: '2026-06-02', amount: -40, category: 'Lazer' }),
+      tx({ date: '2026-06-03', amount: -60, category: 'Saúde' }),
+      tx({ date: '2026-06-04', amount: 500, category: 'Receita' }),
+    ];
+    const s = computeFinancialStats(txs, [], [], null);
+    expect(s.expenseByCategoryByMonth).toEqual({
+      '2026-05': [{ name: 'Lazer', amount: 100 }],
+      '2026-06': [{ name: 'Saúde', amount: 60 }, { name: 'Lazer', amount: 40 }],
+    });
+    expect(s.expenseByCategory).toEqual([{ name: 'Lazer', amount: 140 }, { name: 'Saúde', amount: 60 }]);
+  });
+});
+
 describe('computeFinancialStats — parcelas do mês', () => {
   it('soma a parcela mensal só das dívidas ainda não quitadas', () => {
     const debts = [
@@ -271,6 +288,25 @@ describe('computeFinancialStats — recorrências nas dívidas do mês', () => {
     ]);
     expect(s.monthRecurring).toBe(0);
     expect(s.monthOutflows).toEqual([]);
+  });
+});
+
+describe('computeFinancialStats — devedores (recorrências de receita) nas entradas do mês', () => {
+  const month = todayISO().slice(0, 7);
+  const nextMonth = shiftMonth(month, 1);
+
+  it('a lançada conta pela transação, a que vai cair pela data; despesa, pausada e de outro mês não entram', () => {
+    const txs = [tx({ accountId: 'chk', name: 'João', amount: 300, date: dateInMonth(month, 1) })];
+    const s = computeFinancialStats(txs, [acc({ id: 'chk' })], [], null, [], [
+      rec({ accountId: 'chk', name: 'João', amount: 300, nextOccurrence: dateInMonth(nextMonth, 1) }),
+      rec({ accountId: 'chk', name: 'Maria', amount: 200, nextOccurrence: dateInMonth(month, 28) }),
+      rec({ accountId: 'chk', name: 'Pausada', amount: 999, active: false, nextOccurrence: dateInMonth(month, 28) }),
+      rec({ accountId: 'chk', name: 'Futura', amount: 999, nextOccurrence: dateInMonth(nextMonth, 5) }),
+      rec({ accountId: 'chk', amount: -1000, nextOccurrence: dateInMonth(month, 28) }),
+    ]);
+    expect(s.monthRecurringIncome).toBe(500);
+    expect(s.monthInflows).toEqual([{ day: 1, amount: 300 }, { day: 28, amount: 200 }]);
+    expect(s.monthRecurring).toBe(1000);
   });
 });
 

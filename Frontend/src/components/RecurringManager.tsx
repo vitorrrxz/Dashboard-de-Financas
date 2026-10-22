@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { X, Plus, Trash2, Edit2, Pause, Play } from 'lucide-react';
 import { formatBRL } from '../utils/money';
 import type { Account, RecurrenceFrequency, RecurringTransaction, Transaction } from '../types';
-import { CATEGORIES, EXPENSE_CATEGORIES, categoryDot } from '../utils/categories';
+import { CATEGORIES, EXPENSE_CATEGORIES, OWN_TRANSFER_CATEGORIES, categoryDot } from '../utils/categories';
 import { todayISO } from '../utils/debts';
 import { formatDateBR } from '../utils/dates';
 import { bankGroupOf, groupByBank, primaryAccountOf } from '../utils/accountGroups';
@@ -22,7 +22,7 @@ const FREQUENCY_LABELS: Record<RecurrenceFrequency, string> = {
 };
 
 const EMPTY_RECURRING: RecurringFormData = {
-  name: '', category: EXPENSE_CATEGORIES[0], amount: 0,
+  name: '', category: '', amount: 0,
   frequency: 'monthly', nextOccurrence: '', active: true,
 };
 
@@ -36,14 +36,21 @@ interface RecurringManagerProps {
   transactionCategories: string[];
   /** Histórico completo, para a detecção de assinaturas (FIN-111) — não só o mês em exibição em Transações. */
   transactions: Transaction[];
+  /** Despesas Recorrentes só lista e cria despesas; Devedores, só receitas. */
+  kind: 'expense' | 'income';
 }
 
 /**
- * Aba "Recorrências" (FIN-056) — cadastro das transações que se repetem (salário, aluguel,
- * assinaturas). Não lança nada por conta própria: quem gera as `Transaction` reais é o
+ * Abas "Despesas Recorrentes" e "Devedores" (FIN-056) — cadastro das transações que se repetem,
+ * uma aba por tipo (o sinal de `amount`). Não lança nada por conta própria: quem gera as `Transaction` reais é o
  * endpoint `/api/recurring-transactions/process`, disparado no carregamento do app (FIN-055).
  */
-export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelete, transactionCategories, transactions }: RecurringManagerProps) {
+export function RecurringManager({ recurring: allRecurring, accounts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind }: RecurringManagerProps) {
+  const isExpense = kind === 'expense';
+  const recurring = useMemo(
+    () => allRecurring.filter(r => (r.amount < 0) === isExpense),
+    [allRecurring, isExpense]
+  );
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<RecurringFormData>(EMPTY_RECURRING);
@@ -52,10 +59,11 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
   const bankGroups = useMemo(() => groupByBank(accounts), [accounts]);
 
   // FIN-111 — sugestões de assinatura, descartadas só neste navegador (ver utils/subscriptions.ts).
+  // Assinatura é despesa: em Devedores não há sugestões.
   const [dismissed, setDismissed] = useState<Set<string>>(() => readDismissedSubscriptions());
   const suggestions = useMemo(
-    () => detectSubscriptions(transactions, recurring, dismissed),
-    [transactions, recurring, dismissed]
+    () => isExpense ? detectSubscriptions(transactions, allRecurring, dismissed) : [],
+    [isExpense, transactions, allRecurring, dismissed]
   );
   const suggestionsMonthlyTotal = useMemo(
     () => suggestions.reduce((sum, s) => sum + monthlySubscriptionCost(s), 0),
@@ -80,27 +88,23 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
     setDismissed(prev => new Set(prev).add(key));
   };
 
-  // O valor é digitado sempre positivo; o sinal vem deste seletor (mesma convenção de
-  // `Transaction.amount`: negativo = despesa). Sem isso, o usuário teria que digitar "-350".
-  const [kind, setKind] = useState<'expense' | 'income'>('expense');
-
-  // Ao contrário do orçamento (só despesas), uma recorrência pode ser receita — por isso a
-  // lista usa TODAS as categorias conhecidas, e não `EXPENSE_CATEGORIES`: sem "Receita"
-  // disponível, não daria para categorizar um salário recorrente.
-  const categories = Array.from(new Set([...CATEGORIES, ...transactionCategories]));
+  // O valor é digitado sempre positivo; o sinal vem da aba (mesma convenção de
+  // `Transaction.amount`: negativo = despesa). Despesa não usa "Receita" nem as transferências;
+  // receita parte de "Receita", mas aceita as demais.
+  const categories = isExpense
+    ? Array.from(new Set([...EXPENSE_CATEGORIES, ...transactionCategories.filter(c => c !== 'Receita' && !OWN_TRANSFER_CATEGORIES.includes(c))]))
+    : Array.from(new Set([...CATEGORIES, ...transactionCategories]));
 
   /** Abre o modal em modo "criar", com a próxima ocorrência sugerida para hoje. */
   const openAdd = () => {
     setEditingId(null);
-    setKind('expense');
-    setForm({ ...EMPTY_RECURRING, nextOccurrence: todayISO() });
+    setForm({ ...EMPTY_RECURRING, category: isExpense ? EXPENSE_CATEGORIES[0] : 'Receita', nextOccurrence: todayISO() });
     setShowForm(true);
   };
 
   /** Abre o modal em modo "editar", pré-preenchido com os dados da recorrência. */
   const openEdit = (rec: RecurringTransaction) => {
     setEditingId(rec.id);
-    setKind(rec.amount < 0 ? 'expense' : 'income');
     setForm({
       name: rec.name,
       category: rec.category,
@@ -113,7 +117,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
     setShowForm(true);
   };
 
-  /** Envia o formulário, aplicando o sinal do valor conforme despesa/receita. */
+  /** Envia o formulário, aplicando o sinal do valor conforme a aba. */
   const handleSave = async () => {
     if (!form.name.trim() || form.amount <= 0 || !form.nextOccurrence) return;
     const bank = bankGroupOf(bankGroups, form.accountId);
@@ -121,7 +125,7 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
       ...form,
       // Recorrência antiga ligada ao cartão passa para a conta do banco ao ser salva.
       accountId: bank ? primaryAccountOf(bank).id : form.accountId,
-      amount: kind === 'expense' ? -Math.abs(form.amount) : Math.abs(form.amount),
+      amount: isExpense ? -Math.abs(form.amount) : Math.abs(form.amount),
     };
     try {
       if (editingId) {
@@ -190,7 +194,11 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
 
       <div className="space-y-3 mb-4">
         {recurring.length === 0 && (
-          <p className="text-sm text-textMuted">Nenhuma recorrência ainda. Cadastre aluguel e assinaturas para lançá-los sozinhos na data.</p>
+          <p className="text-sm text-textMuted">
+            {isExpense
+              ? 'Nenhuma despesa recorrente ainda. Cadastre aluguel e assinaturas para lançá-los sozinhos na data.'
+              : 'Nenhum devedor ainda. Cadastre quem te paga todo mês para lançar a receita sozinha na data.'}
+          </p>
         )}
 
         {recurring.map(rec => {
@@ -243,14 +251,16 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
 
       <button onClick={openAdd}
         className="w-full h-12 rounded-xl border border-dashed border-[var(--control)] text-sm text-textMuted hover:text-white hover:border-[var(--color-textMuted)] flex items-center justify-center gap-2 transition-colors">
-        <Plus size={15} /> Adicionar recorrência
+        <Plus size={15} /> {isExpense ? 'Adicionar despesa recorrente' : 'Adicionar devedor'}
       </button>
 
       {showForm && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" onClick={() => setShowForm(false)}>
           <div className="w-full max-w-md panel rounded-2xl p-6" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-base font-medium text-white">{editingId ? 'Editar Recorrência' : 'Nova Recorrência'}</h3>
+              <h3 className="text-base font-medium text-white">{isExpense
+                ? (editingId ? 'Editar Despesa Recorrente' : 'Nova Despesa Recorrente')
+                : (editingId ? 'Editar Devedor' : 'Novo Devedor')}</h3>
               <button onClick={() => setShowForm(false)} className="p-2 hover:bg-white/10 rounded-lg text-textMuted hover:text-white">
                 <X size={18} />
               </button>
@@ -259,22 +269,14 @@ export function RecurringManager({ recurring, accounts, onAdd, onUpdate, onDelet
             <div className="space-y-4">
               <FormField label="Nome" htmlFor="recurring-name">
                 <input id="recurring-name" value={form.name} onChange={e => set('name', e.target.value)}
-                  placeholder="Ex: Aluguel" className="input-field" />
+                  placeholder={isExpense ? 'Ex: Aluguel' : 'Ex: João (empréstimo)'} className="input-field" />
               </FormField>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <FormField label="Tipo" htmlFor="recurring-kind">
-                  <select id="recurring-kind" value={kind} onChange={e => setKind(e.target.value as 'expense' | 'income')} className="input-field">
-                    <option value="expense">Despesa</option>
-                    <option value="income">Receita</option>
-                  </select>
-                </FormField>
-                <FormField label="Valor (R$)" htmlFor="recurring-amount">
-                  <input id="recurring-amount" type="number" step="0.01" min="0.01" value={form.amount || ''}
-                    onChange={e => set('amount', parseFloat(e.target.value) || 0)}
-                    placeholder="350.00" className="input-field" />
-                </FormField>
-              </div>
+              <FormField label="Valor (R$)" htmlFor="recurring-amount">
+                <input id="recurring-amount" type="number" step="0.01" min="0.01" value={form.amount || ''}
+                  onChange={e => set('amount', parseFloat(e.target.value) || 0)}
+                  placeholder="350.00" className="input-field" />
+              </FormField>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <FormField label="Categoria" htmlFor="recurring-category">

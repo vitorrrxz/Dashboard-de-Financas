@@ -100,14 +100,15 @@ describe('computeBalanceProjection', () => {
     expect(p.map(x => x.balance)).toEqual([-300, -700]);
   });
 
-  it('recorrências: o mês corrente vem pronto; dos seguintes saem as ocorrências não lançadas', () => {
+  it('recorrências: o mês corrente vem pronto; dos seguintes saem as despesas e entram as receitas não lançadas', () => {
     const recurring: RecurringTransaction[] = [
       { id: 'r1', name: 'Aluguel', category: 'Moradia', amount: -1000, frequency: 'monthly', nextOccurrence: '2026-07-05', active: true, createdAt: '2026-01-01' },
       { id: 'r2', name: 'Freela', category: 'Receita', amount: 500, frequency: 'monthly', nextOccurrence: '2026-07-05', active: true, createdAt: '2026-01-01' },
       { id: 'r3', name: 'Pausada', category: 'Outros', amount: -200, frequency: 'monthly', nextOccurrence: '2026-07-05', active: false, createdAt: '2026-01-01' },
     ];
-    const p = computeBalanceProjection(5000, NO_SALARY, [], { from: FROM, months: 3, currentRecurring: 1000, recurring });
+    const p = computeBalanceProjection(5000, NO_SALARY, [], { from: FROM, months: 3, currentRecurring: 1000, currentRecurringIncome: 200, recurring });
     expect(p.map(x => x.debtDelta)).toEqual([1000, 1000, 1000]);
-    expect(p.map(x => x.balance)).toEqual([4000, 3000, 2000]);
+    expect(p.map(x => x.salaryDelta)).toEqual([200, 500, 500]);
+    expect(p.map(x => x.balance)).toEqual([4200, 3700, 3200]);
   });
 });

@@ -1,8 +1,9 @@
-// Recorrências de despesa no planejamento do mês (sobra, régua, projeção). Valores em reais.
+// Recorrências no planejamento do mês (sobra, régua, projeção): as de despesa (Despesas Recorrentes)
+// saem, as de receita (Devedores) entram. Valores em reais.
 import { advanceOccurrence } from './dates';
 import type { RecurringTransaction } from '../types';
 
-/** Uma ocorrência de recorrência: a data em que cai e o valor que sai (positivo). */
+/** Uma ocorrência de recorrência: a data em que cai e o valor (positivo, entrada ou saída). */
 export interface RecurringOutflow {
   date: string;
   amount: number;
@@ -17,13 +18,27 @@ export function recurringExpenses(recurring: RecurringTransaction[]): RecurringT
   return recurring.filter(r => r.active && r.amount < 0);
 }
 
+/** Recorrências de receita ativas (Devedores): entram na sobra e na projeção. */
+export function recurringIncomes(recurring: RecurringTransaction[]): RecurringTransaction[] {
+  return recurring.filter(r => r.active && r.amount > 0);
+}
+
 /**
  * Ocorrências ainda não lançadas das recorrências de despesa ativas, de `nextOccurrence` (o ponteiro
  * do que já virou transação) até o fim de `untilMonth` (YYYY-MM), em ordem de data por recorrência.
  */
 export function upcomingRecurringOutflows(recurring: RecurringTransaction[], untilMonth: string): RecurringOutflow[] {
+  return upcomingOccurrences(recurringExpenses(recurring), untilMonth);
+}
+
+/** O mesmo de `upcomingRecurringOutflows`, para as recorrências de receita. */
+export function upcomingRecurringInflows(recurring: RecurringTransaction[], untilMonth: string): RecurringOutflow[] {
+  return upcomingOccurrences(recurringIncomes(recurring), untilMonth);
+}
+
+function upcomingOccurrences(recurring: RecurringTransaction[], untilMonth: string): RecurringOutflow[] {
   const out: RecurringOutflow[] = [];
-  for (const r of recurringExpenses(recurring)) {
+  for (const r of recurring) {
     let occurrence = r.nextOccurrence;
     for (let i = 0; i < MAX_OCCURRENCES && occurrence.slice(0, 7) <= untilMonth; i++) {
       out.push({ date: occurrence, amount: Math.abs(r.amount), accountId: r.accountId });

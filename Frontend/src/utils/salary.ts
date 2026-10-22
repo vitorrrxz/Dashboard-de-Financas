@@ -25,15 +25,23 @@ export function payDays(salary: Salary, monthDays: number): [number, number] {
 /**
  * Sobra de cada quinzena: o pagamento dela (mais o bônus, na quinzena escolhida) menos as dívidas que
  * vencem até o pagamento seguinte. Do 1º ao dia anterior ao 2º pagamento é a 1ª quinzena; o resto do
- * mês (inclusive antes do 1º) é a 2ª. As duas somadas dão a sobra do mês.
+ * mês (inclusive antes do 1º) é a 2ª. As duas somadas dão a sobra do mês. `inflows` (Devedores)
+ * entram na quinzena do dia em que caem, somados ao `pay` dela.
  */
-export function biweeklyLeftovers(salary: Salary, outflows: Outflow[], monthDays: number, bonus = 0) {
+export function biweeklyLeftovers(salary: Salary, outflows: Outflow[], monthDays: number, bonus = 0, inflows: Outflow[] = []) {
   const [first, second] = payDays(salary, monthDays);
-  let firstLeft = salary.amount + (salary.bonusHalf === 1 ? bonus : 0);
-  let secondLeft = salary.secondAmount + (salary.bonusHalf === 2 ? bonus : 0);
+  const inFirst = (day: number) => day >= first && day < second;
+  let firstPay = salary.amount + (salary.bonusHalf === 1 ? bonus : 0);
+  let secondPay = salary.secondAmount + (salary.bonusHalf === 2 ? bonus : 0);
+  for (const i of inflows) {
+    if (inFirst(i.day)) firstPay += i.amount;
+    else secondPay += i.amount;
+  }
+  let firstLeft = firstPay;
+  let secondLeft = secondPay;
   for (const o of outflows) {
-    if (o.day >= first && o.day < second) firstLeft -= o.amount;
+    if (inFirst(o.day)) firstLeft -= o.amount;
     else secondLeft -= o.amount;
   }
-  return [{ day: first, leftover: firstLeft }, { day: second, leftover: secondLeft }];
+  return [{ day: first, pay: firstPay, leftover: firstLeft }, { day: second, pay: secondPay, leftover: secondLeft }];
 }
