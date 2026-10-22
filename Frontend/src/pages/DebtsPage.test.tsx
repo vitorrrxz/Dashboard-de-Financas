@@ -19,7 +19,7 @@ const debts = [debt('d1', 'Fatura Nubank', 'a'), debt('d2', 'Fatura Inter', 'b')
 function renderPage(accountId: string | null, pageAccounts = accounts) {
   const onChangeAccount = vi.fn();
   render(<DebtsPage transactionsBase={[]} debts={debts} accounts={pageAccounts} accountId={accountId}
-    onChangeAccount={onChangeAccount} onAdd={vi.fn()} onUpdate={vi.fn()} onDelete={vi.fn()}/>);
+    onChangeAccount={onChangeAccount} onAdd={vi.fn()} onUpdate={vi.fn()} onDelete={vi.fn()} onPaySplit={vi.fn()}/>);
   return onChangeAccount;
 }
 

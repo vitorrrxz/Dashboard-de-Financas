@@ -32,6 +32,21 @@ export function groupByBank(accounts: Account[]): BankGroup[] {
 }
 
 /**
+ * Conta que representa o banco onde o vínculo é com o banco, não com conta e cartão separados (recorrências):
+ * a conta corrente; sem ela, outra que não seja cartão; só cartão, o cartão.
+ */
+export function primaryAccountOf(group: BankGroup): Account {
+  return group.accounts.find(a => a.type === 'checking')
+    ?? group.accounts.find(a => a.type !== 'credit')
+    ?? group.accounts[0];
+}
+
+/** Banco de uma conta, entre os grupos de `groupByBank`. */
+export function bankGroupOf(groups: BankGroup[], accountId: string | null | undefined): BankGroup | undefined {
+  return accountId ? groups.find(g => g.accounts.some(a => a.id === accountId)) : undefined;
+}
+
+/**
  * Contas de uma seleção do filtro: uma conta, um banco inteiro, ou `null` = todas. Uma seleção
  * que não casa com mais nada (conta excluída) também vale "todas", para não esvaziar as listas.
  */

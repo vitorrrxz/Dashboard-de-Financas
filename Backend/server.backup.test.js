@@ -54,11 +54,14 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
     ] });
     expect(batch.count).toBe(4);
     await call(user, 'post', '/api/transactions', { name: 'Dinheiro', category: 'Outros', date: '2026-09-09', amount: -1000 });
-    await call(user, 'post', '/api/debts', {
+    const debt = await call(user, 'post', '/api/debts', {
       name: 'Empréstimo', category: 'Empréstimo', totalAmount: 1000000, paidAmount: 200000, monthlyPayment: 100000,
       totalInstallments: 10, paidInstallments: 2, nextDueDate: '2026-10-10', interestRate: 1.5, accountId: checking.id,
       subItems: [{ name: 'Parcela 1', amount: 100000, date: '2026-08-10' }, { name: 'Parcela 2', amount: 100000, date: '2026-09-10' }],
+      splits: [{ day: 10, amount: 60000 }, { day: 25, amount: 40000 }],
     });
+    // Uma parte já paga no mês: o backup leva o `paid` da parcela corrente.
+    await call(user, 'post', `/api/debts/${debt.id}/splits/${debt.splits[0].id}/pay`);
     await call(user, 'post', '/api/budgets', { category: 'Alimentação', monthlyLimit: 150000 });
     await call(user, 'post', '/api/category-rules', { match: 'Uber', category: 'Transporte' });
     await call(user, 'post', '/api/goals', { name: 'Viagem', targetAmount: 1000000, currentAmount: 250000, targetDate: '2027-06-30' });
@@ -123,6 +126,8 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
         { name: 'Parcela 1', amount: 100000, date: '2026-08-10' },
         { name: 'Parcela 2', amount: 100000, date: '2026-09-10' },
       ]);
+      expect(backup.data.debts[0].splits).toEqual([{ day: 10, amount: 60000, paid: true }, { day: 25, amount: 40000, paid: false }]);
+      expect(backup.data.debts[0].paidAmount).toBe(260000);
 
       const text = JSON.stringify(backup);
       for (const forbidden of [user.id, 'userId', 'passwordHash', 'password', 'segredo', 'recoveryCodes', 'dedupeKey', 'Vence logo']) {
@@ -173,6 +178,16 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       const res = await restore(user, backup);
       expect(res.status).toBe(200);
       expect(res.body.restored.categoryRules).toBe(0);
+    });
+
+    it('backup de antes da divisão do pagamento, sem `splits`, restaura a dívida sem partes', async () => {
+      const user = await newUser();
+      await seed(user);
+      const backup = await exportOf(user);
+      for (const debt of backup.data.debts) delete debt.splits;
+      const res = await restore(user, backup);
+      expect(res.status).toBe(200);
+      expect((await exportOf(user)).data.debts[0].splits).toEqual([]);
     });
 
     it('senha errada: recusa e não muda nada', async () => {

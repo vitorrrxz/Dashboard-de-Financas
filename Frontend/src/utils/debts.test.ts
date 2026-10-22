@@ -1,6 +1,6 @@
 // FIN-034 (parte 1/2) — regras de negócio de dívidas: vencimento, avanço de parcela.
 import { describe, it, expect } from 'vitest';
-import { isDebtPaid, isDebtOverdue, computeNextInstallment, remainingDebtSchedule } from './debts';
+import { isDebtPaid, isDebtOverdue, computeNextInstallment, remainingDebtSchedule, defaultSplits, splitsMatchPayment, splitsTotal } from './debts';
 import type { Debt } from '../types';
 
 function makeDebt(overrides: Partial<Debt> = {}): Debt {
@@ -105,5 +105,24 @@ describe('remainingDebtSchedule (FIN-094)', () => {
   it('vira o ano mantendo o dia de vencimento', () => {
     const r = remainingDebtSchedule({ ...base, nextDueDate: '2026-11-30', totalInstallments: 3, totalAmount: 750 });
     expect(r.map(i => i.dueDate)).toEqual(['2026-11-30', '2026-12-30', '2027-01-30']);
+  });
+});
+
+describe('dividir pagamento', () => {
+  it('sugere duas metades: no vencimento e 15 dias depois (ou antes, depois do dia 15)', () => {
+    expect(defaultSplits(1000, '2026-06-10')).toEqual([{ day: 10, amount: 500 }, { day: 25, amount: 500 }]);
+    expect(defaultSplits(1000, '2026-06-20')).toEqual([{ day: 5, amount: 500 }, { day: 20, amount: 500 }]);
+  });
+
+  it('o centavo ímpar vai para a segunda parte', () => {
+    expect(defaultSplits(100.01, '2026-06-01')).toEqual([{ day: 1, amount: 50 }, { day: 16, amount: 50.01 }]);
+  });
+
+  it('confere a soma ao centavo, sem ruído de ponto flutuante; sem partes, nada a conferir', () => {
+    const parts = [{ amount: 0.1 }, { amount: 0.2 }];
+    expect(splitsTotal(parts)).toBe(0.3);
+    expect(splitsMatchPayment(parts, 0.3)).toBe(true);
+    expect(splitsMatchPayment(parts, 0.31)).toBe(false);
+    expect(splitsMatchPayment([], 123)).toBe(true);
   });
 });

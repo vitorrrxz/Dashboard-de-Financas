@@ -273,3 +273,33 @@ describe('computeFinancialStats — recorrências nas dívidas do mês', () => {
     expect(s.monthOutflows).toEqual([]);
   });
 });
+
+describe('computeFinancialStats — pagamento dividido', () => {
+  it('cada parte entra no seu dia, somando a parcela', () => {
+    const debts = [debt({
+      monthlyPayment: 1000, totalInstallments: 3, nextDueDate: '2099-01-10',
+      splits: [{ id: 's1', day: 10, amount: 600, paid: true }, { id: 's2', day: 25, amount: 400, paid: false }],
+    })];
+    const s = computeFinancialStats([], [], debts, null);
+    expect(s.monthOutflows).toEqual([{ day: 10, amount: 600 }, { day: 25, amount: 400 }]);
+    expect(s.monthDebtPayments).toBe(1000);
+  });
+});
+
+describe('computeFinancialStats — recorrências no total em dívidas', () => {
+  const month = todayISO().slice(0, 7);
+
+  it('entram as do mês ainda não lançadas; a lançada, a de outro mês e a receita não', () => {
+    const card = acc({ id: 'card', type: 'credit', pendingBill: 0 });
+    const launched = tx({ accountId: 'chk', name: 'Aluguel', amount: -1000, date: dateInMonth(month, 1) });
+    const s = computeFinancialStats([launched], [acc({ id: 'chk' }), card], [], null, [], [
+      rec({ accountId: 'chk', name: 'Aluguel', amount: -1000, nextOccurrence: dateInMonth(shiftMonth(month, 1), 1) }),
+      rec({ accountId: 'chk', name: 'Internet', amount: -120, nextOccurrence: dateInMonth(month, 28) }),
+      rec({ accountId: 'card', name: 'Streaming', amount: -40, nextOccurrence: dateInMonth(month, 28) }),
+      rec({ accountId: 'chk', name: 'Freela', amount: 900, nextOccurrence: dateInMonth(month, 28) }),
+    ]);
+    expect(s.monthRecurringAhead).toBe(160);
+    expect(s.totalOwed).toBe(160);
+  });
+});
+

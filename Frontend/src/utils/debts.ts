@@ -1,5 +1,5 @@
 import { advanceMonth } from './dates';
-import type { Debt } from '../types';
+import type { Debt, DebtSplit } from '../types';
 
 /**
  * Data de hoje no fuso horário local do usuário, como string ISO (YYYY-MM-DD).
@@ -111,4 +111,32 @@ export function remainingDebtSchedule(
     dueDate = advanceMonth(dueDate);
   }
   return schedule;
+}
+
+/** Valor em reais como centavos inteiros, para somar e comparar sem ruído de ponto flutuante. */
+const cents = (reais: number) => Math.round(reais * 100);
+
+/**
+ * Divisão sugerida ao ligar "Dividir pagamento": duas metades, no dia do vencimento e 15 dias
+ * depois (ou antes, se o vencimento é depois do dia 15). A segunda leva o centavo que sobra.
+ */
+export function defaultSplits(monthlyPayment: number, nextDueDate: string): DebtSplit[] {
+  const day = Number(nextDueDate.slice(8, 10)) || 1;
+  const other = day <= 15 ? day + 15 : day - 15;
+  const half = Math.floor(cents(monthlyPayment) / 2);
+  const [firstDay, secondDay] = day < other ? [day, other] : [other, day];
+  return [
+    { day: firstDay, amount: half / 100 },
+    { day: secondDay, amount: (cents(monthlyPayment) - half) / 100 },
+  ];
+}
+
+/** Soma das partes, em reais, arredondada ao centavo. */
+export function splitsTotal(splits: Pick<DebtSplit, 'amount'>[]): number {
+  return splits.reduce((s, part) => s + cents(part.amount), 0) / 100;
+}
+
+/** As partes fecham a parcela mensal (ao centavo)? Sem partes, não há o que conferir. */
+export function splitsMatchPayment(splits: Pick<DebtSplit, 'amount'>[], monthlyPayment: number): boolean {
+  return splits.length === 0 || cents(splitsTotal(splits)) === cents(monthlyPayment);
 }

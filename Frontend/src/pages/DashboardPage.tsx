@@ -456,7 +456,8 @@ export function DashboardPage({
             <button type="button" onClick={() => onNavigate('debts')} className="px-5 md:px-6 py-4 text-left hover:bg-white/[0.02] transition-colors">
               <p className="text-sm text-textMuted">Total em dívidas</p>
               <p className={`text-[22px] leading-8 font-bold ${stats.totalOwed === 0 ? 'text-textMuted' : 'text-debt'}`}>{fmt(stats.totalOwed)}</p>
-              <p className="text-xs text-textMuted">Cartão, parcelas futuras e dívidas cadastradas</p>
+              <p className="text-xs text-textMuted">Cartão, parcelas futuras, dívidas cadastradas e recorrências do mês</p>
+              {stats.monthRecurringAhead > 0 && <p className="text-xs text-textMuted">Inclui recorrências a lançar: {fmt(stats.monthRecurringAhead)}</p>}
             </button>
           </section>
 
