@@ -32,9 +32,15 @@ describe('salário quinzenal', () => {
       { day: 2, amount: 25 },   // antes do 1º pagamento: ainda é a 2ª quinzena
     ];
     const [first, second] = biweeklyLeftovers(salary, outflows, 31);
-    expect(first).toEqual({ day: 5, leftover: 850 });
-    expect(second).toEqual({ day: 20, leftover: 675 });
+    expect(first).toEqual({ day: 5, pay: 1000, leftover: 850 });
+    expect(second).toEqual({ day: 20, pay: 1000, leftover: 675 });
     expect(first.leftover + second.leftover).toBe(2000 - 475);
+  });
+
+  it('o que os devedores pagam entra na quinzena do dia em que cai', () => {
+    const [first, second] = biweeklyLeftovers(salary, [{ day: 10, amount: 100 }], 31, 0, [{ day: 12, amount: 300 }, { day: 2, amount: 50 }]);
+    expect(first).toEqual({ day: 5, pay: 1300, leftover: 1200 });
+    expect(second).toEqual({ day: 20, pay: 1050, leftover: 1050 });
   });
 });
 

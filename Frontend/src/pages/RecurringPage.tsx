@@ -9,16 +9,19 @@ interface RecurringPageProps {
   onDelete: (id: string) => Promise<void>;
   transactionCategories: string[];
   transactions: Transaction[];
+  kind: 'expense' | 'income';
 }
 
 export function RecurringPage({
-  recurring, accounts, onAdd, onUpdate, onDelete, transactionCategories, transactions,
+  recurring, accounts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind,
 }: RecurringPageProps) {
   return (
     <>
       <div className="mb-6">
-        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">Recorrências</h1>
-        <p className="text-textMuted text-sm">Lançamentos que se repetem — salário, aluguel, assinaturas</p>
+        <h1 className="text-2xl font-medium tracking-tight text-white mb-1">{kind === 'expense' ? 'Despesas Recorrentes' : 'Devedores'}</h1>
+        <p className="text-textMuted text-sm">
+          {kind === 'expense' ? 'Despesas que se repetem — aluguel, assinaturas, contas' : 'Receitas que se repetem — quem te paga todo mês'}
+        </p>
       </div>
       <RecurringManager
         recurring={recurring}
@@ -28,6 +31,7 @@ export function RecurringPage({
         onDelete={onDelete}
         transactionCategories={transactionCategories}
         transactions={transactions}
+        kind={kind}
       />
     </>
   );

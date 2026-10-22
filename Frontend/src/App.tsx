@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import {
   LayoutDashboard, Wallet, Upload,
   Search, TrendingUp, Loader2,
-  LogOut, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, BarChart3, Settings
+  LogOut, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, HandCoins, BarChart3, Settings
 } from 'lucide-react';
 import { ImportModal } from './components/ImportModal';
 import { NavItem } from './components/NavItem';
@@ -56,7 +56,7 @@ import type {
   NotificationType, RecurringTransaction, Salary, Transaction, PaymentType,
 } from './types';
 
-const TABS = ['dashboard', 'transactions', 'accounts', 'debts', 'budgets', 'goals', 'investments', 'recurring', 'reports', 'settings'] as const;
+const TABS = ['dashboard', 'transactions', 'accounts', 'debts', 'budgets', 'goals', 'investments', 'recurring', 'debtors', 'reports', 'settings'] as const;
 export type Tab = (typeof TABS)[number];
 
 /** A aba vive no endereço (#contas…): voltar, recarregar e abrir em outra aba mantêm a tela. */
@@ -921,9 +921,9 @@ export default function App() {
   const projection = useMemo(
     () => computeBalanceProjection(stats.realBalance, salary, debts, {
       months: 6, currentBill: stats.monthCardExpense, cardInstallments: stats.cardInstallmentsAhead,
-      currentRecurring: stats.monthRecurring, recurring: recurringBase.items,
+      currentRecurring: stats.monthRecurring, currentRecurringIncome: stats.monthRecurringIncome, recurring: recurringBase.items,
     }),
-    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, stats.monthRecurring, recurringBase.items, salary, debts]
+    [stats.realBalance, stats.monthCardExpense, stats.cardInstallmentsAhead, stats.monthRecurring, stats.monthRecurringIncome, recurringBase.items, salary, debts]
   );
 
   // Categorias que já aparecem nas transações do usuário, além das curadas em
@@ -1174,14 +1174,15 @@ export default function App() {
               <NavItem icon={null} label="Dívidas" active={activeTab==='debts'} onClick={() => go('debts')} isSubItem badge={debtsBadge} />
             </>
           )}
+          {/* FIN-056 */}
+          <NavItem icon={<Repeat size={16} strokeWidth={1.75}/>} label="Despesas Recorrentes" active={activeTab==='recurring'} onClick={() => go('recurring')} />
+          <NavItem icon={<HandCoins size={16} strokeWidth={1.75}/>} label="Devedores" active={activeTab==='debtors'} onClick={() => go('debtors')} />
           {/* FIN-045 */}
           <NavItem icon={<PiggyBank size={16} strokeWidth={1.75}/>} label="Orçamento" active={activeTab==='budgets'} onClick={() => go('budgets')} badge={budgetsBadge} />
           {/* FIN-051 */}
           <NavItem icon={<Target size={16} strokeWidth={1.75}/>} label="Metas" active={activeTab==='goals'} onClick={() => go('goals')} />
           {/* FIN-072 */}
           <NavItem icon={<TrendingUp size={16} strokeWidth={1.75}/>} label="Investimentos" active={activeTab==='investments'} onClick={() => go('investments')} />
-          {/* FIN-056 */}
-          <NavItem icon={<Repeat size={16} strokeWidth={1.75}/>} label="Recorrências" active={activeTab==='recurring'} onClick={() => go('recurring')} />
           {/* FIN-062/FIN-063/FIN-064 */}
           <NavItem icon={<BarChart3 size={16} strokeWidth={1.75}/>} label="Relatórios" active={activeTab==='reports'} onClick={() => go('reports')} />
         </nav>
@@ -1271,6 +1272,11 @@ export default function App() {
               onShowImport={() => setShowImport(true)}
               salary={salary}
               onSaveSalary={saveSalary}
+              connectBank={userId && (
+                <Suspense fallback={<PluggyButtonLoadingFallback />}>
+                  <PluggyConnectButton onSyncComplete={handlePluggySyncComplete} />
+                </Suspense>
+              )}
             />
           )}
 
@@ -1367,8 +1373,10 @@ export default function App() {
             </Suspense>
           )}
 
-          {activeTab === 'recurring' && (
+          {(activeTab === 'recurring' || activeTab === 'debtors') && (
             <RecurringPage
+              key={activeTab}
+              kind={activeTab === 'recurring' ? 'expense' : 'income'}
               recurring={recurring}
               accounts={accounts}
               onAdd={addRecurring}
