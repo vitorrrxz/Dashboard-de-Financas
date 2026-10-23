@@ -232,7 +232,7 @@ export function GoalsManager({ goals, accounts, investments, onAdd, onUpdate, on
                   <FormField label="Já Acumulado (R$)" htmlFor="goal-current-preview">
                     <div id="goal-current-preview" className="input-field flex items-center text-textMuted" aria-readonly="true">
                       {previewAmount !== null
-                        ? `R$ ${previewAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
+                        ? formatBRL(previewAmount)
                         : 'selecione acima'}
                     </div>
                   </FormField>

@@ -18,6 +18,7 @@ import { MonthNavigator } from '../components/MonthNavigator';
 import { biweeklyLeftovers, extrasInMonth, salaryPerMonth, sumExtras } from '../utils/salary';
 import { dateInMonth, daysInMonth, formatMonthLabel } from '../utils/dates';
 import { balanceTone, formatBRL } from '../utils/money';
+import { HIDDEN_VALUE, valuesHidden } from '../utils/privacy';
 import { categoryColor, categoryDot } from '../utils/categories';
 import { niceTicks } from '../utils/chart';
 import { useChartAnimation } from '../hooks/useMediaQuery';
@@ -27,7 +28,7 @@ const fmt = (v: number) => formatBRL(v).replace(' ', ' ');
 /** Valor com sinal: "−R$ 12,00" quando negativo — o sinal mora no texto, não só na cor. */
 const signed = (v: number) => `${v < 0 ? '−' : ''}${fmt(v)}`;
 /** Eixo em milhares: "2 mil", "−1,5 mil". */
-const axisMoney = (v: number) => (v === 0 ? '0' : `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`);
+const axisMoney = (v: number) => (v === 0 ? '0' : valuesHidden() ? HIDDEN_VALUE : `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`);
 
 /** Atualização de estado que escolhe `name`, ou desfaz a escolha se ele já estava escolhido. */
 const togglingTo = (name: string) => (current: string | null) => (current === name ? null : name);
@@ -405,14 +406,15 @@ export function DashboardPage({
   const monthDays = daysInMonth(Number(month.slice(0, 4)), Number(month.slice(5, 7)));
 
   // Uma régua por pagamento: no quinzenal, cada metade com as dívidas que vencem até o pagamento seguinte.
+  // O texto de cada uma (`detail`) é montado na hora de desenhar, para seguir o "esconder valores".
   const rulers = useMemo(() => {
     if (salary.frequency !== 'biweekly') {
-      return [{ label: `Salário de ${monthName}`, detail: `Recebe ${fmt(monthlyIncome)} · dívidas do mês ${fmt(monthDebts)}`, pay: monthlyIncome, owed: monthDebts }];
+      return [{ label: `Salário de ${monthName}`, owedLabel: 'dívidas do mês', pay: monthlyIncome, owed: monthDebts }];
     }
     const halves = biweeklyLeftovers(salary, stats.monthOutflows, monthDays, monthExtras, stats.monthInflows);
     return halves.map((h, i) => {
       const until = i === 0 ? `até o dia ${halves[1].day - 1}` : 'até o fim do mês';
-      return { label: `Pagamento do dia ${h.day}`, detail: `Recebe ${fmt(h.pay)} · dívidas ${until}: ${fmt(h.pay - h.leftover)}`, pay: h.pay, owed: h.pay - h.leftover };
+      return { label: `Pagamento do dia ${h.day}`, owedLabel: `dívidas ${until}:`, pay: h.pay, owed: h.pay - h.leftover };
     });
   }, [salary, stats.monthOutflows, stats.monthInflows, monthDays, monthExtras, monthName, monthDebts, monthlyIncome]);
   const rulerScale = Math.max(...rulers.map(r => Math.max(r.pay, r.owed)));
@@ -532,7 +534,9 @@ export function DashboardPage({
                 </p>
               </div>
               <div className="space-y-4 lg:pt-1">
-                {rulers.map(r => <PayRuler key={r.label} {...r} scale={rulerScale} />)}
+                {rulers.map(({ owedLabel, ...r }) => (
+                  <PayRuler key={r.label} {...r} detail={`Recebe ${fmt(r.pay)} · ${owedLabel} ${fmt(r.owed)}`} scale={rulerScale} />
+                ))}
                 <p className="text-xs text-textMuted flex items-center gap-x-4 gap-y-1 flex-wrap">
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--color-debt)' }}/>Comprometido com dívidas</span>
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: 'var(--ruler-free)' }}/>Livre</span>

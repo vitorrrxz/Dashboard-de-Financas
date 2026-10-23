@@ -11,6 +11,8 @@
  * legível para exibição) sem herdar o problema de ponto flutuante na persistência.
  */
 
+import { HIDDEN_VALUE, valuesHidden } from './privacy';
+
 /** Converte um valor em reais (ex. 150.5) para centavos inteiros (ex. 15050). */
 export function toCents(reais: number): number {
   return Math.round(reais * 100);
@@ -25,9 +27,10 @@ export function toReais(cents: number): number {
  * Formata um valor em reais para exibição ("R$ 1.234,56"), sempre em módulo — o sinal,
  * quando importa, fica a cargo de quem exibe (ver `MonthTotal`). Limita a duas casas: sem
  * `maximumFractionDigits`, o padrão do `toLocaleString` é três, e um resíduo de ponto
- * flutuante apareceria como "R$ 0,300".
+ * flutuante apareceria como "R$ 0,300". Com os valores escondidos, "R$ ••••".
  */
 export function formatBRL(value: number): string {
+  if (valuesHidden()) return `R$ ${HIDDEN_VALUE}`;
   return `R$ ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 

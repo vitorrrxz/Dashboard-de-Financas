@@ -477,7 +477,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, onPaySplit, acco
                           <tr key={idx} className="border-t border-white/5">
                             <td className="py-2 text-white font-medium max-w-[150px] truncate">{item.name}</td>
                             <td className={`py-2 text-right font-bold ${item.amount < 0 ? 'text-accent' : 'text-white'}`}>
-                              R$ {Math.abs(item.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              {formatBRL(item.amount)}
                               {item.amount < 0 && <span className="ml-1 text-xs opacity-70">(Estorno)</span>}
                             </td>
                           </tr>
@@ -487,7 +487,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, onPaySplit, acco
                   </div>
                   <div className="mt-4 pt-3 border-t border-[var(--line)] flex justify-between items-center">
                     <span className="text-xs text-textMuted">Total da fatura importada</span>
-                    <span className="text-sm font-bold text-debt">R$ {debt.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    <span className="text-sm font-bold text-debt">{formatBRL(debt.totalAmount)}</span>
                   </div>
                 </div>
               )}
@@ -618,7 +618,7 @@ export function DebtManager({ debts, onAdd, onUpdate, onDelete, onPaySplit, acco
             
             <p className="text-xs text-textMuted mb-5 leading-relaxed">
               Consolidando <span className="text-white font-bold">{pendingGroup.items.length} itens</span> do arquivo.<br/>
-              Total líquido: <span className="text-accent font-bold">R$ {pendingGroup.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+              Total líquido: <span className="text-accent font-bold">{pendingGroup.total < 0 && '−'}{formatBRL(pendingGroup.total)}</span>
             </p>
 
             <div className="space-y-4">

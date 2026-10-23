@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import {
   LayoutDashboard, Wallet, Upload,
   Search, TrendingUp, Loader2,
-  LogOut, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, HandCoins, BarChart3, Settings
+  LogOut, X, Menu, WifiOff, Sun, Moon, PiggyBank, Target, Repeat, HandCoins, BarChart3, Settings, Eye, EyeOff
 } from 'lucide-react';
 import { ImportModal } from './components/ImportModal';
 import { NavItem } from './components/NavItem';
@@ -34,6 +34,7 @@ import { accountIdsOf, inAccounts } from './utils/accountGroups';
 import { useFinancialStats } from './hooks/useFinancialStats';
 import { useMobileDrawer } from './hooks/useMobileDrawer';
 import { useTheme } from './hooks/useTheme';
+import { useHideValues } from './hooks/useHideValues';
 import { computeBudgetProgress } from './utils/budget';
 import { computeBalanceProjection } from './utils/projection';
 import { computeInvestmentHoldings } from './utils/investments';
@@ -292,6 +293,7 @@ export default function App() {
   }, []);
   // FIN-083: tema claro/escuro — aplicado ao documento também na tela de login.
   const theme = useTheme();
+  const [hideValues, setHideValues] = useHideValues();
   const [notifications, setNotifications] = useState<AppNotification[]>([]); // FIN-066
   const [unreadCount, setUnreadCount] = useState(0);
   const [exportingPDF, setExportingPDF] = useState(false); // FIN-061
@@ -1266,6 +1268,13 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-1 relative">
+            {/* Esconder valores: todo valor em dinheiro vira "R$ ••••" (ver utils/privacy.ts). */}
+            <button type="button" onClick={() => setHideValues(!hideValues)} aria-pressed={hideValues}
+              aria-label={hideValues ? 'Mostrar valores' : 'Esconder valores'}
+              title={hideValues ? 'Mostrar valores' : 'Esconder valores'}
+              className="p-2 rounded-md hover:bg-white/[0.06] transition-colors text-textMuted hover:text-white">
+              {hideValues ? <EyeOff size={16} aria-hidden="true"/> : <Eye size={16} aria-hidden="true"/>}
+            </button>
             {/* FIN-083: atalho entre claro e escuro — a escolha completa, com "igual ao sistema", fica em Configurações. */}
             <button type="button" onClick={() => theme.setPreference(theme.resolved === 'dark' ? 'light' : 'dark')}
               aria-label={theme.resolved === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
