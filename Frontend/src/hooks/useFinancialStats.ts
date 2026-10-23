@@ -3,7 +3,9 @@ import { isDebtOverdue, remainingDebtSchedule, todayISO } from '../utils/debts';
 import { computeInvestmentHoldings } from '../utils/investments';
 import { isOwnTransfer } from '../utils/categories';
 import { groupInstallmentPurchases, parseInstallment } from '../utils/installments';
-import { advanceDays, dateInMonth, shiftMonth } from '../utils/dates';
+import { billPeriod } from '../utils/dates';
+
+export { billPeriod };
 import { accountIdsOf, inAccounts } from '../utils/accountGroups';
 import { recurringExpenses, recurringIncomes, upcomingRecurringInflows, upcomingRecurringOutflows } from '../utils/recurring';
 import type { Outflow } from '../utils/salary';
@@ -61,18 +63,6 @@ export interface FinancialStats {
   filteredTxsCount: number;
 }
 
-/**
- * Período de compras (início e fim, inclusive) da fatura que vence em `month` (YYYY-MM). Vencimento
- * até o dia do fechamento = a fatura fechou no mês anterior (fecha 28, vence 5). Sem `dueDay`, a
- * fatura fecha no próprio mês.
- */
-export function billPeriod(month: string, closingDay: number, dueDay?: number): { start: string; end: string } {
-  const closingMonth = dueDay && dueDay <= closingDay ? shiftMonth(month, -1) : month;
-  return {
-    start: advanceDays(dateInMonth(shiftMonth(closingMonth, -1), closingDay), 1),
-    end: dateInMonth(closingMonth, closingDay),
-  };
-}
 
 // Padrão estável para `investments` ausente: um `[]` literal no parâmetro seria um array novo
 // a cada render e invalidaria o `useMemo` do hook toda vez.
@@ -195,11 +185,12 @@ export function computeFinancialStats(
   ];
   const monthRecurring = recurringOutflows.reduce((s, o) => s + o.amount, 0);
   recurringOutflows.forEach(o => { monthDebtsByType[isCardAccount(o.accountId) ? 'credit' : 'debitPix'] += o.amount; });
-  // Receitas recorrentes (Devedores) do mês, com a mesma regra de "lançada" das despesas acima.
+  // Receitas recorrentes (Devedores) do mês, com a mesma regra de "lançada" das despesas acima — ou o PIX
+  // que pagou o devedor (`recurringId`, a baixa automática do servidor).
   const activeIncomes = recurringIncomes(recurring).filter(r => inAccounts(ids, r.accountId));
   const launchedIncomes = new Set(activeIncomes.flatMap(r =>
-    activeTxs.filter(t => t.amount > 0 && t.date.startsWith(mPrefix) && t.date < r.nextOccurrence && t.name === r.name
-      && t.amount === r.amount && (t.accountId ?? null) === (r.accountId ?? null))));
+    activeTxs.filter(t => t.amount > 0 && t.date.startsWith(mPrefix) && (t.recurringId === r.id || (t.date < r.nextOccurrence
+      && t.name === r.name && t.amount === r.amount && (t.accountId ?? null) === (r.accountId ?? null))))));
   const recurringInflows = [
     ...[...launchedIncomes].map(t => ({ date: t.date, amount: t.amount })),
     ...upcomingRecurringInflows(activeIncomes, mPrefix, debts).filter(o => o.date.startsWith(mPrefix)),

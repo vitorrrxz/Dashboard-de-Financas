@@ -173,6 +173,117 @@ describe('/api/recurring-transactions', () => {
       expect(lista.body.find(r => r.name === 'Paga a aberta').debtId).toBeNull();
     });
 
+    it('devedor de uma cobrança: lança só os pagamentos que faltam e para no último', async () => {
+      // 4 ocorrências vencidas (meses -3 a 0), mas faltam só 3 pagamentos.
+      const rec = await criarRecorrencia({
+        name: 'Maria (cartão)', category: 'Receita', amount: 15000, nextOccurrence: firstOfMonthsAgo(3),
+        remainingPayments: 3, chargeName: 'Loja X · 3x',
+      });
+      expect(rec.chargeName).toBe('Loja X · 3x');
+
+      await request(app).post('/api/recurring-transactions/process').set(auth(tokenA));
+      expect(await transacoesPorNome('Maria (cartão)')).toHaveLength(3);
+      expect((await recorrencia(rec.id)).remainingPayments).toBe(0);
+
+      // Pagou tudo: processar de novo não lança mais nada.
+      await request(app).post('/api/recurring-transactions/process').set(auth(tokenA));
+      expect(await transacoesPorNome('Maria (cartão)')).toHaveLength(3);
+
+      // Sem limite (null), lança todas as vencidas.
+      await criarRecorrencia({ name: 'Sem limite', category: 'Receita', amount: 15000, nextOccurrence: firstOfMonthsAgo(3), remainingPayments: null });
+      await request(app).post('/api/recurring-transactions/process').set(auth(tokenA));
+      expect(await transacoesPorNome('Sem limite')).toHaveLength(4);
+    });
+
+    describe('Confirmar pagamento: o PIX recebido é o pagamento do devedor', () => {
+      let conta;
+      let cartao;
+
+      beforeAll(async () => {
+        conta = (await request(app).post('/api/accounts').set(auth(tokenA))
+          .send({ name: 'Corrente PIX', bank: 'Banco P', type: 'checking', balance: 0, color: '#fff' })).body;
+        cartao = (await request(app).post('/api/accounts').set(auth(tokenA))
+          .send({ name: 'Cartão PIX', bank: 'Banco P', type: 'credit', balance: 0, color: '#fff' })).body;
+      });
+
+      /** PIX recebido (ou outra entrada) na conta corrente, salvo indicação. */
+      async function receberPix(amount, date, extra = {}) {
+        const res = await request(app).post('/api/transactions').set(auth(tokenA))
+          .send({ name: 'PIX recebido', category: 'Transferências', date, amount, accountId: conta.id, ...extra });
+        expect(res.status).toBe(200);
+        return res.body;
+      }
+
+      async function transacao(id) {
+        const res = await request(app).get('/api/transactions').set(auth(tokenA));
+        return res.body.find(t => t.id === id);
+      }
+
+      const processar = () => request(app).post('/api/recurring-transactions/process').set(auth(tokenA));
+      const confirmar = (recId, transactionId, token = tokenA) => request(app)
+        .post(`/api/recurring-transactions/${recId}/confirm-payment`).set(auth(token)).send({ transactionId });
+
+      it('sem confirmar, o PIX não dá baixa sozinho', async () => {
+        const rec = await criarRecorrencia({ name: 'Sem confirmar', category: 'Receita', amount: 31600, nextOccurrence: daysFromToday(3) });
+        const pix = await receberPix(31600, todayISO());
+        await processar();
+        expect((await transacao(pix.id)).recurringId).toBeNull();
+        expect((await recorrencia(rec.id)).nextOccurrence).toBe(daysFromToday(3));
+      });
+
+      it('pago adiantado: marca o PIX, avança o vencimento e conta um pagamento', async () => {
+        const rec = await criarRecorrencia({ name: 'Adiantado', category: 'Receita', amount: 31700, nextOccurrence: daysFromToday(5), remainingPayments: 3 });
+        const pix = await receberPix(31700, todayISO());
+
+        expect((await confirmar(rec.id, pix.id)).status).toBe(200);
+        expect((await transacao(pix.id)).recurringId).toBe(rec.id);
+        const atualizada = await recorrencia(rec.id);
+        expect(atualizada.nextOccurrence > daysFromToday(5)).toBe(true);
+        expect(atualizada.remainingPayments).toBe(2);
+        expect(await transacoesPorNome('Adiantado')).toHaveLength(0);
+      });
+
+      it('receita prevista já lançada: ela sai e fica o PIX, sem avançar de novo o vencimento', async () => {
+        const rec = await criarRecorrencia({ name: 'Já lançada', category: 'Receita', amount: 31900, nextOccurrence: daysFromToday(-3) });
+        await processar();
+        expect(await transacoesPorNome('Já lançada')).toHaveLength(1);
+        const vencimento = (await recorrencia(rec.id)).nextOccurrence;
+
+        const pix = await receberPix(31900, todayISO());
+        expect((await confirmar(rec.id, pix.id)).status).toBe(200);
+        expect(await transacoesPorNome('Já lançada')).toHaveLength(0);
+        expect((await transacao(pix.id)).recurringId).toBe(rec.id);
+        expect((await recorrencia(rec.id)).nextOccurrence).toBe(vencimento);
+      });
+
+      it('recusa: outro valor, transferência própria, estorno no cartão, PIX já usado, devedor de outro usuário', async () => {
+        const rec = await criarRecorrencia({ name: 'Recusa', category: 'Receita', amount: 32000, nextOccurrence: todayISO() });
+        const outroValor = await receberPix(32001, todayISO());
+        const propria = await receberPix(32000, todayISO(), { category: 'Transferência entre contas' });
+        const estorno = await receberPix(32000, todayISO(), { accountId: cartao.id });
+        for (const t of [outroValor, propria, estorno]) expect((await confirmar(rec.id, t.id)).status).toBe(400);
+
+        const pix = await receberPix(32000, todayISO());
+        expect((await confirmar(rec.id, pix.id, tokenB)).status).toBe(404);
+        expect((await confirmar(rec.id, pix.id)).status).toBe(200);
+        expect((await confirmar(rec.id, pix.id)).status).toBe(400);
+      });
+
+      it('excluir o devedor só desfaz o vínculo do PIX', async () => {
+        const rec = await criarRecorrencia({ name: 'Excluído', category: 'Receita', amount: 32100, nextOccurrence: todayISO() });
+        const pix = await receberPix(32100, todayISO());
+        await confirmar(rec.id, pix.id);
+        await request(app).delete(`/api/recurring-transactions/${rec.id}`).set(auth(tokenA));
+        expect((await transacao(pix.id)).recurringId).toBeNull();
+      });
+    });
+
+    it('rejeita número de pagamentos negativo', async () => {
+      const res = await request(app).post('/api/recurring-transactions').set(auth(tokenA))
+        .send({ name: 'Negativo', category: 'Receita', amount: 100, frequency: 'monthly', nextOccurrence: todayISO(), remainingPayments: -1 });
+      expect(res.status).toBe(400);
+    });
+
     it('recupera todas as ocorrências atrasadas de uma vez (usuário ficou meses sem abrir o app)', async () => {
       // Dia 1 de 3 meses atrás → ocorrências dos meses -3, -2, -1 e do mês corrente = 4.
       const rec = await criarRecorrencia({ name: 'Aluguel atrasado', category: 'Moradia', amount: -120000, nextOccurrence: firstOfMonthsAgo(3) });

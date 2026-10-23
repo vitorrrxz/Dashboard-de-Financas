@@ -205,3 +205,43 @@ export function formatRelativeTime(timestamp: string, now: Date = new Date()): s
   if (days < 7) return `há ${days} dias`;
   return then.toLocaleDateString('pt-BR');
 }
+
+/**
+ * Período de compras (início e fim, inclusive) da fatura que vence em `month` (YYYY-MM). Vencimento
+ * até o dia do fechamento = a fatura fechou no mês anterior (fecha 28, vence 5). Sem `dueDay`, a
+ * fatura fecha no próprio mês.
+ */
+export function billPeriod(month: string, closingDay: number, dueDay?: number): { start: string; end: string } {
+  const closingMonth = dueDay && dueDay <= closingDay ? shiftMonth(month, -1) : month;
+  return {
+    start: advanceDays(dateInMonth(shiftMonth(closingMonth, -1), closingDay), 1),
+    end: dateInMonth(closingMonth, closingDay),
+  };
+}
+
+// Sem o dia de fechamento cadastrado (a sincronização do banco não traz), a fatura fecha 7 dias antes
+// do vencimento — o prazo mais comum nos cartões.
+const DAYS_FROM_CLOSING_TO_DUE = 7;
+
+/**
+ * Vencimento da fatura em que cai uma compra feita em `date`: a fatura cujo período (`billPeriod`) a
+ * contém. Sem dia de fechamento, ele é estimado em `DAYS_FROM_CLOSING_TO_DUE` dias antes do vencimento.
+ */
+export function billDueDate(date: string, dueDay: number, closingDay?: number): string {
+  const closing = closingDay
+    ?? (dueDay > DAYS_FROM_CLOSING_TO_DUE ? dueDay - DAYS_FROM_CLOSING_TO_DUE : dueDay + 31 - DAYS_FROM_CLOSING_TO_DUE);
+  const month = date.slice(0, 7);
+  for (let i = 0; i <= 2; i++) {
+    const due = shiftMonth(month, i);
+    const { start, end } = billPeriod(due, closing, dueDay);
+    if (date >= start && date <= end) return dateInMonth(due, dueDay);
+  }
+  return dateInMonth(shiftMonth(month, 1), dueDay);
+}
+
+/** Primeiro vencimento do cartão (dia `dueDay`) em `date` ou depois. */
+export function nextDueOnOrAfter(date: string, dueDay: number): string {
+  const month = date.slice(0, 7);
+  const due = dateInMonth(month, dueDay);
+  return due >= date ? due : dateInMonth(shiftMonth(month, 1), dueDay);
+}

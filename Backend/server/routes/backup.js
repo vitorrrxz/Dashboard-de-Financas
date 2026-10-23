@@ -123,6 +123,7 @@ const backupTransactionSchema = transactionSchema.omit({ externalId: true }).ext
   accountId: backupAccountRef,
   pluggyId: backupExternalKey,
   importHash: backupExternalKey,
+  recurringId: backupAccountRef, // devedor que o PIX pagou
   name: z.string().max(500),
   createdAt: backupDateField,
 });
@@ -290,6 +291,9 @@ function buildRestoreRows(userId, data, reuseIds) {
   // O vínculo do devedor com a dívida que ele paga, refeito pelo mesmo mapa.
   const debtIds = new Map(data.debts.map(debt => [debt.id, newId(debt.id)]));
   const debtRef = debtId => (debtId ? debtIds.get(debtId) : null);
+  // O PIX que pagou um devedor; devedor fora do arquivo só perde o vínculo (o campo não tem chave estrangeira).
+  const recurringIds = new Map(data.recurring.map(rec => [rec.id, newId(rec.id)]));
+  const recurringRef = recurringId => (recurringId ? recurringIds.get(recurringId) ?? null : null);
 
   const debtItems = [];
   const debtSplits = [];
@@ -297,12 +301,13 @@ function buildRestoreRows(userId, data, reuseIds) {
     accounts: data.accounts.map(({ id, ...account }) => ({
       ...account, id: accountIds.get(id), userId, currency: account.currency ?? BASE_CURRENCY,
     })),
-    transactions: data.transactions.map(({ id, accountId, ...tx }) => ({
+    transactions: data.transactions.map(({ id, accountId, recurringId, ...tx }) => ({
       paymentType: 'debit',
       ...tx,
       id: newId(id),
       userId,
       accountId: accountRef(accountId),
+      recurringId: recurringRef(recurringId),
       currency: accountId ? accountCurrency.get(accountId) : BASE_CURRENCY,
     })),
     debts: data.debts.map(({ id, accountId, subItems, splits, ...debt }) => {
@@ -321,7 +326,7 @@ function buildRestoreRows(userId, data, reuseIds) {
       currentAmount: 0, ...goal, id: newId(id), userId, accountId: accountRef(accountId), investmentId: investmentRef(investmentId),
     })),
     recurring: data.recurring.map(({ id, accountId, debtId, ...rec }) => ({
-      active: true, ...rec, id: newId(id), userId, accountId: accountRef(accountId), debtId: debtRef(debtId),
+      active: true, ...rec, id: recurringIds.get(id), userId, accountId: accountRef(accountId), debtId: debtRef(debtId),
     })),
     investments: data.investments.map(({ id, accountId, ...investment }) => ({
       ...investment, id: investmentIds.get(id), userId, accountId: accountRef(accountId), currency: investment.currency ?? BASE_CURRENCY,

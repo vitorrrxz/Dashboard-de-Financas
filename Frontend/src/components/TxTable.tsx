@@ -27,8 +27,10 @@ const suggestRuleMatch = (name: string) => name.replace(/[\d\s*#./-]+$/, '').tri
 // FIN-022: edição/exclusão individual de transação. `rows` continua sendo o recorte já
 // filtrado/paginado calculado pelo componente pai — este componente só adiciona a UI de
 // ação por linha e o modal de edição. Exportado para o teste das ações (FIN-099).
-export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule, categoryFilter, typeFilter, categories = CATEGORIES }: {
+export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule, categoryFilter, typeFilter, categories = CATEGORIES, debtorNames }: {
   rows: Transaction[];
+  /** Nome de cada devedor, para marcar o PIX que pagou um deles (`recurringId`). */
+  debtorNames?: Map<string, string>;
   /** Opções do campo Categoria na edição (padrão: as categorias curadas). */
   categories?: string[];
   /** Filtros nos cabeçalhos de Categoria e Tipo (opcionais). */
@@ -103,6 +105,11 @@ export function TxTable({ rows, accounts, onUpdate, onDelete, onCreateRule, cate
                 <td className="py-3 pr-3 text-textMuted whitespace-nowrap hidden sm:table-cell">{formatDateBR(t.date)}</td>
                 <td className="py-3 pr-3 text-white">
                   {t.name}
+                  {t.recurringId && debtorNames?.get(t.recurringId) && (
+                    <span className="ml-2 text-xs px-2 py-0.5 rounded-full text-teal-400 whitespace-nowrap" style={{ backgroundColor: 'var(--fg-5)' }}>
+                      Pagamento de {debtorNames.get(t.recurringId)}
+                    </span>
+                  )}
                   {/* No celular, data, categoria e tipo descem para uma segunda linha em vez de sumir. */}
                   <span className="block sm:hidden text-xs text-textMuted mt-0.5">
                     {formatDateBR(t.date)} · <span className="whitespace-nowrap"><span className="inline-block w-1.5 h-1.5 mr-1 rounded-full align-middle" style={categoryDot(t.category)} aria-hidden="true"/>{t.category}</span> · {pt.label}

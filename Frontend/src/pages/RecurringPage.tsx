@@ -8,13 +8,15 @@ interface RecurringPageProps {
   onAdd: (rec: Omit<RecurringTransaction, 'id' | 'createdAt'>) => Promise<void>;
   onUpdate: (id: string, rec: Partial<Omit<RecurringTransaction, 'id' | 'createdAt'>>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** Devedores: o PIX recebido é o pagamento dele. */
+  onConfirmPayment: (id: string, transactionId: string) => Promise<void>;
   transactionCategories: string[];
   transactions: Transaction[];
   kind: 'expense' | 'income';
 }
 
 export function RecurringPage({
-  recurring, accounts, debts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind,
+  recurring, accounts, debts, onAdd, onUpdate, onDelete, onConfirmPayment, transactionCategories, transactions, kind,
 }: RecurringPageProps) {
   return (
     <>
@@ -31,6 +33,7 @@ export function RecurringPage({
         onAdd={onAdd}
         onUpdate={onUpdate}
         onDelete={onDelete}
+        onConfirmPayment={onConfirmPayment}
         transactionCategories={transactionCategories}
         transactions={transactions}
         kind={kind}

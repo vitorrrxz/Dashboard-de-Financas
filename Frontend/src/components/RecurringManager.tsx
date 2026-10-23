@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { X, Plus, Trash2, Edit2, Pause, Play } from 'lucide-react';
+import { X, Plus, Trash2, Edit2, Pause, Play, CheckCircle2, RotateCcw } from 'lucide-react';
 import { formatBRL } from '../utils/money';
 import type { Account, Debt, RecurrenceFrequency, RecurringTransaction, Transaction } from '../types';
 import { CATEGORIES, EXPENSE_CATEGORIES, OWN_TRANSFER_CATEGORIES, categoryDot } from '../utils/categories';
 import { isDebtPaid, todayISO } from '../utils/debts';
-import { formatDateBR } from '../utils/dates';
+import { billDueDate, formatDateBR, nextDueOnOrAfter } from '../utils/dates';
 import { bankGroupOf, groupByBank, primaryAccountOf } from '../utils/accountGroups';
+import { debtorCharges, pendingPixPayment } from '../utils/recurring';
 import {
   detectSubscriptions, monthlySubscriptionCost, readDismissedSubscriptions, dismissSubscription,
   type DetectedSubscription,
@@ -13,6 +14,8 @@ import {
 import { FormField } from './shared/FormField';
 
 type RecurringFormData = Omit<RecurringTransaction, 'id' | 'createdAt'>;
+
+const maxDate = (a: string, b: string) => (a > b ? a : b);
 
 /** Rótulos em português das frequências suportadas (ver `RecurrenceFrequency` em utils/dates.ts). */
 const FREQUENCY_LABELS: Record<RecurrenceFrequency, string> = {
@@ -29,11 +32,13 @@ const EMPTY_RECURRING: RecurringFormData = {
 interface RecurringManagerProps {
   recurring: RecurringTransaction[];
   accounts: Account[];
-  /** Dívidas que um devedor pode pagar (vínculo `debtId`, só na aba Devedores). */
+  /** Dívidas que um devedor pode pagar (vínculo `debtId`, só na aba Devedores); as compras do cartão saem de `transactions`. */
   debts: Debt[];
   onAdd: (recurring: RecurringFormData) => Promise<void>;
   onUpdate: (id: string, recurring: Partial<RecurringFormData>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** Devedores: confirma que o PIX recebido (`transactionId`) é o pagamento dele. */
+  onConfirmPayment?: (id: string, transactionId: string) => Promise<void>;
   /** Categorias vindas das transações reais, além das curadas — mesmo motivo de BudgetManager. */
   transactionCategories: string[];
   /** Histórico completo, para a detecção de assinaturas (FIN-111) — não só o mês em exibição em Transações. */
@@ -47,7 +52,7 @@ interface RecurringManagerProps {
  * uma aba por tipo (o sinal de `amount`). Não lança nada por conta própria: quem gera as `Transaction` reais é o
  * endpoint `/api/recurring-transactions/process`, disparado no carregamento do app (FIN-055).
  */
-export function RecurringManager({ recurring: allRecurring, accounts, debts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind }: RecurringManagerProps) {
+export function RecurringManager({ recurring: allRecurring, accounts, debts, onAdd, onUpdate, onDelete, onConfirmPayment, transactionCategories, transactions, kind }: RecurringManagerProps) {
   const isExpense = kind === 'expense';
   const recurring = useMemo(
     () => allRecurring.filter(r => (r.amount < 0) === isExpense),
@@ -56,6 +61,8 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<RecurringFormData>(EMPTY_RECURRING);
+  // Cobrança do cartão escolhida no formulário; numa edição, a já gravada aparece pelo nome (`chargeName`).
+  const [chargeKey, setChargeKey] = useState('');
   // O vínculo é com o banco: conta corrente e cartão do mesmo banco aparecem uma vez só, e grava a
   // conta que representa o banco (`primaryAccountOf`).
   const bankGroups = useMemo(() => groupByBank(accounts), [accounts]);
@@ -101,6 +108,7 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_RECURRING, category: isExpense ? EXPENSE_CATEGORIES[0] : 'Receita', nextOccurrence: todayISO() });
+    setChargeKey('');
     setShowForm(true);
   };
 
@@ -116,16 +124,64 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
       active: rec.active,
       accountId: rec.accountId,
       debtId: rec.debtId ?? null,
+      remainingPayments: rec.remainingPayments ?? null,
+      chargeName: rec.chargeName ?? null,
     });
+    setChargeKey('');
     setShowForm(true);
   };
 
   // Dívidas que dá para vincular: as em aberto, mais a já vinculada (mesmo quitada, para não sumir do select).
   const linkableDebts = debts.filter(d => !isDebtPaid(d) || d.id === form.debtId);
-  /** Vincula o devedor a uma dívida; sem valor digitado, sugere a parcela dela. */
-  const linkDebt = (debtId: string) => {
-    const debt = debts.find(d => d.id === debtId);
-    setForm(f => ({ ...f, debtId: debt ? debt.id : null, amount: f.amount || debt?.monthlyPayment || 0 }));
+  // Cobranças do cartão que não são dívida cadastrada (alguém usou o seu cartão).
+  const charges = useMemo(() => isExpense ? [] : debtorCharges(transactions, accounts, todayISO()), [isExpense, transactions, accounts]);
+  // As opções do "O que ele paga" separadas por banco: as dívidas e depois as compras do cartão de cada um,
+  // em ordem alfabética.
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' });
+  const linkOptions = (() => {
+    const groups = [...bankGroups.map(g => ({ key: g.key, label: g.bank })), { key: '', label: 'Sem banco' }]
+      .map(g => ({ ...g, options: [] as { value: string; label: string }[] }));
+    const groupOf = (accountId?: string) => groups.find(g => g.key === (bankGroupOf(bankGroups, accountId)?.key ?? ''))!;
+    for (const d of [...linkableDebts].sort(byName)) {
+      groupOf(d.accountId).options.push({ value: `debt:${d.id}`, label: `Dívida · ${d.name} · ${formatBRL(d.monthlyPayment)}/mês` });
+    }
+    for (const c of [...charges].sort(byName)) {
+      groupOf(c.accountId).options.push({ value: c.key, label: `Cartão · ${c.name} · ${formatDateBR(c.date)} · ${formatBRL(c.amount)}` });
+    }
+    return groups.filter(g => g.options.length > 0);
+  })();
+  const linkValue = form.debtId ? `debt:${form.debtId}` : chargeKey || (form.chargeName ? 'saved' : '');
+  /**
+   * Vincula o devedor ao que ele paga: uma dívida cadastrada (a receita para quando ela é quitada) ou
+   * uma cobrança do cartão (para depois dos pagamentos dela). Sem valor digitado, sugere a parcela.
+   * A conta passa a ser a do banco da dívida ou do cartão (a sem banco mantém a escolhida), e a próxima
+   * ocorrência, o vencimento: o da dívida, ou o da fatura do cartão em que cai a primeira parcela — e,
+   * se essa fatura já venceu, o próximo vencimento do cartão.
+   */
+  const linkTo = (value: string) => {
+    if (value === 'saved') return;
+    const debt = value.startsWith('debt:') ? debts.find(d => `debt:${d.id}` === value) : undefined;
+    const charge = charges.find(c => c.key === value);
+    setChargeKey(charge ? charge.key : '');
+    const bank = bankGroupOf(bankGroups, debt?.accountId ?? charge?.accountId);
+    const accountId = (current?: string) => bank ? primaryAccountOf(bank).id : current;
+    if (debt) {
+      setForm(f => ({
+        ...f, debtId: debt.id, chargeName: null, remainingPayments: null, amount: f.amount || debt.monthlyPayment,
+        accountId: accountId(f.accountId), nextOccurrence: debt.nextDueDate,
+      }));
+    } else if (charge) {
+      const card = accounts.find(a => a.id === charge.accountId);
+      const due = card?.dueDay
+        ? nextDueOnOrAfter(maxDate(billDueDate(charge.firstDate, card.dueDay, card.closingDay), todayISO()), card.dueDay)
+        : undefined;
+      setForm(f => ({
+        ...f, debtId: null, chargeName: charge.name, remainingPayments: charge.payments, amount: f.amount || charge.amount,
+        accountId: accountId(f.accountId), nextOccurrence: due ?? f.nextOccurrence,
+      }));
+    } else {
+      setForm(f => ({ ...f, debtId: null, chargeName: null }));
+    }
   };
 
   /** Envia o formulário, aplicando o sinal do valor conforme a aba. */
@@ -137,6 +193,8 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
       // Recorrência antiga ligada ao cartão passa para a conta do banco ao ser salva.
       accountId: bank ? primaryAccountOf(bank).id : form.accountId,
       amount: isExpense ? -Math.abs(form.amount) : Math.abs(form.amount),
+      // Devedor de dívida cadastrada para quando ela é quitada, não por contagem.
+      ...(form.debtId ? { chargeName: null, remainingPayments: null } : {}),
     };
     try {
       if (editingId) {
@@ -156,6 +214,30 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
       await onUpdate(rec.id, { active: !rec.active });
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  /** Finaliza o devedor (ele não te deve mais): sai da sobra e da projeção. Dá para reativar depois. */
+  const handleFinish = async (rec: RecurringTransaction) => {
+    if (!confirm(`Finalizar ${rec.name}? Ele deixa de entrar na sobra do mês e na projeção.`)) return;
+    try {
+      await onUpdate(rec.id, { active: false });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const [confirming, setConfirming] = useState<string | null>(null);
+  /** O PIX recebido é o pagamento do devedor — só com o clique, nada é dado como pago sozinho. */
+  const handleConfirmPayment = async (rec: RecurringTransaction, pix: Transaction) => {
+    if (!onConfirmPayment) return;
+    setConfirming(rec.id);
+    try {
+      await onConfirmPayment(rec.id, pix.id);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setConfirming(null);
     }
   };
 
@@ -215,6 +297,10 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
         {recurring.map(rec => {
           const bank = bankGroupOf(bankGroups, rec.accountId);
           const linkedDebt = rec.debtId ? debts.find(d => d.id === rec.debtId) : undefined;
+          // Último PIX confirmado como pagamento deste devedor (`recurringId`), e o que parece ser o próximo.
+          const lastPix = isExpense ? undefined : transactions
+            .filter(t => t.recurringId === rec.id).reduce<Transaction | undefined>((a, t) => (!a || t.date > a.date ? t : a), undefined);
+          const pendingPix = isExpense ? undefined : pendingPixPayment(rec, transactions, accounts, allRecurring);
           return (
             <div key={rec.id} className={`panel rounded-xl p-4 flex items-center gap-4 ${rec.active ? '' : 'opacity-60'}`}>
               <div className="flex-1 min-w-0">
@@ -225,7 +311,7 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
                   </span>
                   {!rec.active && (
                     <span className="text-xs px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: 'var(--fg-6)', color: 'var(--color-textMain)' }}>
-                      Pausada
+                      {isExpense ? 'Pausada' : 'Finalizado'}
                     </span>
                   )}
                 </div>
@@ -240,6 +326,29 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
                     {isDebtPaid(linkedDebt) ? 'quitada, não entra mais' : `parcela ${linkedDebt.paidInstallments + 1} de ${linkedDebt.totalInstallments}`}
                   </p>
                 )}
+                {!linkedDebt && (rec.chargeName || rec.remainingPayments != null) && (
+                  <p className="text-xs text-textMuted mt-0.5">
+                    {rec.chargeName && <>Paga a cobrança <span className="text-white">{rec.chargeName}</span>{rec.remainingPayments != null && ' · '}</>}
+                    {rec.remainingPayments === 0 ? 'pagou tudo, não entra mais'
+                      : rec.remainingPayments === 1 ? 'falta 1 pagamento'
+                      : rec.remainingPayments != null ? `faltam ${rec.remainingPayments} pagamentos` : ''}
+                  </p>
+                )}
+                {lastPix && (
+                  <p className="text-xs text-teal-400 mt-0.5">PIX de {formatBRL(lastPix.amount)} recebido em {formatDateBR(lastPix.date)}: pagamento confirmado</p>
+                )}
+                {pendingPix && (
+                  <div className="flex items-center gap-2 flex-wrap mt-2">
+                    <span className="text-xs text-textMuted">
+                      PIX de {formatBRL(pendingPix.amount)} recebido em {formatDateBR(pendingPix.date)} ({pendingPix.name})
+                    </span>
+                    <button type="button" onClick={() => handleConfirmPayment(rec, pendingPix)} disabled={confirming === rec.id}
+                      className="h-7 text-xs px-3 rounded-md text-on-accent font-semibold inline-flex items-center gap-1.5 disabled:opacity-60"
+                      style={{ background: 'var(--color-primary)' }}>
+                      <CheckCircle2 size={13} /> {confirming === rec.id ? 'Confirmando...' : 'Confirmar pagamento'}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="text-right shrink-0">
@@ -249,12 +358,24 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
               </div>
 
               <div className="flex gap-1 shrink-0">
-                <button onClick={() => handleToggleActive(rec)}
-                  title={rec.active ? 'Pausar recorrência' : 'Retomar recorrência'}
-                  aria-label={rec.active ? `Pausar ${rec.name}` : `Retomar ${rec.name}`}
-                  className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
-                  {rec.active ? <Pause size={14} /> : <Play size={14} />}
-                </button>
+                {isExpense ? (
+                  <button onClick={() => handleToggleActive(rec)}
+                    title={rec.active ? 'Pausar recorrência' : 'Retomar recorrência'}
+                    aria-label={rec.active ? `Pausar ${rec.name}` : `Retomar ${rec.name}`}
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                    {rec.active ? <Pause size={14} /> : <Play size={14} />}
+                  </button>
+                ) : rec.active ? (
+                  <button type="button" onClick={() => handleFinish(rec)} title="Finalizar devedor" aria-label={`Finalizar ${rec.name}`}
+                    className="h-8 text-xs px-2.5 rounded-lg border border-[var(--control)] text-textMuted hover:text-white hover:border-[var(--color-textMuted)] transition-colors whitespace-nowrap">
+                    Finalizar devedor
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => handleToggleActive(rec)} title="Reativar devedor" aria-label={`Reativar ${rec.name}`}
+                    className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
+                    <RotateCcw size={14} />
+                  </button>
+                )}
                 <button type="button" onClick={() => openEdit(rec)} aria-label={`Editar ${rec.name}`} className="p-2 hover:bg-white/10 rounded-lg transition-colors text-textMuted hover:text-white">
                   <Edit2 size={14} />
                 </button>
@@ -331,14 +452,31 @@ export function RecurringManager({ recurring: allRecurring, accounts, debts, onA
               </FormField>
 
               {!isExpense && (
-                <FormField label="Dívida que ele paga" htmlFor="recurring-debt">
-                  <select id="recurring-debt" value={form.debtId ?? ''} onChange={e => linkDebt(e.target.value)} className="input-field">
-                    <option value="">Nenhuma</option>
-                    {linkableDebts.map(d => (
-                      <option key={d.id} value={d.id}>{d.name} · {formatBRL(d.monthlyPayment)}/mês</option>
+                <FormField label="O que ele paga" htmlFor="recurring-debt">
+                  <select id="recurring-debt" value={linkValue} onChange={e => linkTo(e.target.value)} className="input-field">
+                    <option value="">Nada vinculado</option>
+                    {linkValue === 'saved' && <option value="saved">{form.chargeName}</option>}
+                    {linkOptions.map(group => (
+                      <optgroup key={group.key || 'none'} label={group.label}>
+                        {group.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </optgroup>
                     ))}
                   </select>
-                  <p className="text-xs text-textMuted mt-1.5">A receita para de entrar quando a dívida for quitada.</p>
+                  <p className="text-xs text-textMuted mt-1.5">{form.debtId
+                    ? 'A receita para de entrar quando a dívida for quitada.'
+                    : 'Ex.: alguém usou o seu cartão. Escolha a compra e ele te paga a parcela até acabar.'}</p>
+                </FormField>
+              )}
+
+              {!isExpense && !form.debtId && (
+                <FormField label="Quantas vezes ele paga" htmlFor="recurring-payments">
+                  <input id="recurring-payments" type="number" step="1" min="0" value={form.remainingPayments ?? ''}
+                    onChange={e => {
+                      const n = parseInt(e.target.value, 10);
+                      setForm(f => ({ ...f, remainingPayments: Number.isFinite(n) && n >= 0 ? n : null }));
+                    }}
+                    placeholder="Sem fim" className="input-field" />
+                  <p className="text-xs text-textMuted mt-1.5">Contando a próxima ocorrência. Vazio = todo mês, sem fim.</p>
                 </FormField>
               )}
             </div>
