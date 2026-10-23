@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { TxTable } from './components/TxTable';
+import { setValuesHidden } from './utils/privacy';
 import type { Transaction } from './types';
 
 const uber: Transaction = {
@@ -32,6 +33,17 @@ describe('TxTable — ações de cada transação (FIN-099)', () => {
     render(<TxTable rows={[pix, uber]} accounts={[]} onUpdate={vi.fn()} onDelete={vi.fn()} debtorNames={new Map([['r1', 'Maria']])} />);
     expect(screen.getByText('Pagamento de Maria')).toBeInTheDocument();
     expect(screen.getAllByText(/Pagamento de/)).toHaveLength(1);
+  });
+
+  it('com os valores escondidos, o valor da transação vira "••••"', () => {
+    setValuesHidden(true);
+    try {
+      renderTable();
+      expect(screen.getByText('-••••')).toBeInTheDocument();
+      expect(screen.queryByText(/2\.590/)).not.toBeInTheDocument();
+    } finally {
+      setValuesHidden(false);
+    }
   });
 
   it('as ações aparecem com o foco do teclado e em tela de toque, não só com o mouse', () => {

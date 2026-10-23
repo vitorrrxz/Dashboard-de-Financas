@@ -1,4 +1,5 @@
 import type { Account, Investment, RecurringTransaction, Transaction } from '../types';
+import { HIDDEN_VALUE, valuesHidden } from './privacy';
 
 // FIN-074/FIN-075/FIN-076 — moedas. Cada conta, transação e posição guarda o valor na própria
 // moeda, e a tela mostra cada item assim; só os totais (Dashboard, Relatórios, orçamento,
@@ -59,9 +60,10 @@ export function currencyOptions(current: string): string[] {
 /**
  * Formata um valor na moeda indicada ("US$ 1.234,56"), sempre em módulo — o mesmo contrato de
  * `formatBRL`: o sinal fica com quem exibe. Uma moeda fora da lista (vinda da Pluggy, por
- * exemplo) aparece pelo código ISO ("ARS 1.000,00").
+ * exemplo) aparece pelo código ISO ("ARS 1.000,00"). Com os valores escondidos, "US$ ••••".
  */
 export function formatMoney(value: number, currency: string = BASE_CURRENCY): string {
+  if (valuesHidden()) return `${currencySymbol(currency)} ${HIDDEN_VALUE}`;
   return `${currencySymbol(currency)} ${Math.abs(value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 

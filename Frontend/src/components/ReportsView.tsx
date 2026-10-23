@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { balanceTone, formatBRL as fmt } from '../utils/money';
+import { HIDDEN_VALUE, valuesHidden } from '../utils/privacy';
 import { niceTicks } from '../utils/chart';
 import { useChartAnimation } from '../hooks/useMediaQuery';
 import type { Account, Debt, Investment, NetWorthSnapshot, Transaction } from '../types';
@@ -23,7 +24,7 @@ interface ReportsViewProps {
 }
 
 /** Eixo em milhares: "2 mil", "−1,5 mil". */
-const axisMoney = (v: number) => (v === 0 ? '0' : `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`);
+const axisMoney = (v: number) => (v === 0 ? '0' : valuesHidden() ? HIDDEN_VALUE : `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`);
 
 const tooltipStyle = {
   contentStyle: { backgroundColor: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)', borderRadius: 6, fontSize: 12, padding: '6px 10px' },

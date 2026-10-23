@@ -2,6 +2,7 @@ import { useState, useId } from 'react';
 import { Edit2, Trash2, X } from 'lucide-react';
 import { BASE_CURRENCY, currencyOf, currencySymbol, formatMoney } from '../utils/currency';
 import { formatDateBR } from '../utils/dates';
+import { HIDDEN_VALUE, valuesHidden } from '../utils/privacy';
 import { CATEGORIES, categoryDot } from '../utils/categories';
 import { PAYMENT_TYPE_META, type CategoryRuleDraft } from '../utils/paymentTypes';
 import type { Account, PaymentType, Transaction } from '../types';
@@ -15,6 +16,7 @@ type ColumnFilterConfig = Omit<ColumnFilterProps, 'label' | 'allLabel'>;
  */
 function formatTxAmount(t: Transaction): string {
   const currency = currencyOf(t);
+  if (valuesHidden()) return `${t.amount < 0 ? '-' : '+'}${HIDDEN_VALUE}`;
   if (currency === BASE_CURRENCY) {
     return `${t.amount >= 0 ? '+' : ''}${t.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
   }
