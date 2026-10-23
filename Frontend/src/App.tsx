@@ -806,6 +806,19 @@ export default function App() {
     } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
   };
 
+  /**
+   * "Confirmar pagamento" do devedor: o PIX recebido vira o pagamento dele. O servidor pode avançar o
+   * vencimento ou tirar a receita prevista já lançada, então devedores e transações voltam do servidor.
+   */
+  const confirmDebtorPayment = async (id: string, transactionId: string) => {
+    try {
+      await fetchAPI(`/api/recurring-transactions/${id}/confirm-payment`, 'POST', { transactionId });
+      const recurringData = await fetchAPI('/api/recurring-transactions');
+      setRecurring((recurringData as RecurringTransaction[]).map(recurringFromApi));
+      await reloadTransactions();
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : String(e)); throw e; }
+  };
+
   // CRUD INVESTMENTS (FIN-072)
   /** Cadastra uma posição via `POST /api/investments` e adiciona o resultado (em reais) ao estado. */
   const addInvestment = async (inv: InvestmentInput) => {
@@ -1323,6 +1336,7 @@ export default function App() {
               txPaymentType={txPaymentType}
               onChangeTxPaymentType={setTxPaymentType}
               accounts={accounts}
+              recurring={recurring}
               accountId={listAccount}
               onChangeAccount={setListAccountId}
               onUpdateTransaction={updateTransaction}
@@ -1407,6 +1421,7 @@ export default function App() {
               onAdd={addRecurring}
               onUpdate={updateRecurring}
               onDelete={deleteRecurring}
+              onConfirmPayment={confirmDebtorPayment}
               transactionCategories={transactionCategories}
               transactions={transactions}
             />

@@ -27,6 +27,13 @@ describe('TxTable — ações de cada transação (FIN-099)', () => {
     expect(screen.getByRole('button', { name: 'Excluir Uber' })).toHaveAttribute('type', 'button');
   });
 
+  it('o PIX que pagou um devedor mostra de quem foi o pagamento', () => {
+    const pix: Transaction = { id: 'tx-2', name: 'PIX RECEBIDO', category: 'Transferências', date: '2026-09-10', amount: 150, recurringId: 'r1' };
+    render(<TxTable rows={[pix, uber]} accounts={[]} onUpdate={vi.fn()} onDelete={vi.fn()} debtorNames={new Map([['r1', 'Maria']])} />);
+    expect(screen.getByText('Pagamento de Maria')).toBeInTheDocument();
+    expect(screen.getAllByText(/Pagamento de/)).toHaveLength(1);
+  });
+
   it('as ações aparecem com o foco do teclado e em tela de toque, não só com o mouse', () => {
     renderTable();
     const actions = screen.getByRole('button', { name: 'Editar Uber' }).parentElement;

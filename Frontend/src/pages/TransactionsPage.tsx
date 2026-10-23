@@ -8,7 +8,7 @@ import { PAYMENT_TYPE_META } from '../utils/paymentTypes';
 import { ALL_MONTHS } from '../utils/transactions';
 import type { TransactionTotals } from '../utils/transactions';
 import type { CategoryRuleDraft } from '../utils/paymentTypes';
-import type { Account, Transaction } from '../types';
+import type { Account, RecurringTransaction, Transaction } from '../types';
 
 interface TransactionsPageProps {
   filtered: Transaction[];
@@ -30,6 +30,8 @@ interface TransactionsPageProps {
   /** Categorias com alguma transação — as opções do campo Categoria na edição. */
   categories: string[];
   accounts: Account[];
+  /** Devedores, para marcar na lista o PIX que pagou um deles. */
+  recurring: RecurringTransaction[];
   /** Conta do filtro (null = todas); `filtered` e os totais já chegam recortados por ela. */
   accountId: string | null;
   onChangeAccount: (accountId: string | null) => void;
@@ -56,7 +58,7 @@ const SECONDARY = 'h-9 px-3 flex items-center gap-2 rounded-md text-sm text-whit
 export function TransactionsPage({
   filtered, txMonth, onChangeTxMonth, txMonths, monthTotals, hiddenInstallments, onGoToDebts,
   txFilter, onChangeTxFilter, categoryCounts, txCategory, onChangeTxCategory,
-  paymentTypeCounts, txPaymentType, onChangeTxPaymentType, categories, accounts, accountId, onChangeAccount, onUpdateTransaction, onDeleteTransaction, onCreateRule,
+  paymentTypeCounts, txPaymentType, onChangeTxPaymentType, categories, accounts, recurring, accountId, onChangeAccount, onUpdateTransaction, onDeleteTransaction, onCreateRule,
   txHasMore, txLoadingMore, onLoadMore, onExportCSV, onExportPDF, exportingPDF, onShowImport,
 }: TransactionsPageProps) {
   // O valor escolhido continua na lista mesmo se o novo mês não tiver nenhuma — senão não
@@ -138,6 +140,7 @@ export function TransactionsPage({
           <TxTable
             rows={filtered.slice(0, 200)}
             accounts={accounts}
+            debtorNames={new Map(recurring.map(r => [r.id, r.name]))}
             categories={categories}
             onUpdate={onUpdateTransaction}
             onDelete={onDeleteTransaction}

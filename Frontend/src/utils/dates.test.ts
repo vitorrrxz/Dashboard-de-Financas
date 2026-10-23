@@ -3,6 +3,7 @@
 // a função, quando ela foi extraída para `dates.ts`.
 import { describe, it, expect } from 'vitest';
 import {
+  billDueDate, nextDueOnOrAfter,
   isLeapYear, daysInMonth, advanceMonth, advanceDays, advanceYear, advanceOccurrence, daysBetween,
   shiftMonth, dateInMonth, monthsDescending, formatMonthLabel, formatRelativeTime,
 } from './dates';
@@ -203,5 +204,35 @@ describe('formatRelativeTime', () => {
   });
   it('timestamp inválido devolve texto vazio', () => {
     expect(formatRelativeTime('xyz', now)).toBe('');
+  });
+});
+
+describe('billDueDate — vencimento da fatura de uma compra', () => {
+  it('fecha 3, vence 10: compra até o fechamento vence no mesmo mês; depois, no seguinte', () => {
+    expect(billDueDate('2026-10-02', 10, 3)).toBe('2026-10-10');
+    expect(billDueDate('2026-10-03', 10, 3)).toBe('2026-10-10');
+    expect(billDueDate('2026-10-04', 10, 3)).toBe('2026-11-10');
+  });
+
+  it('fecha 28, vence 5: a fatura fecha no mês anterior ao vencimento', () => {
+    expect(billDueDate('2026-10-20', 5, 28)).toBe('2026-11-05');
+    expect(billDueDate('2026-10-29', 5, 28)).toBe('2026-12-05');
+  });
+
+  it('sem fechamento: a fatura fecha 7 dias antes do vencimento', () => {
+    // Vence 21, fecha 14 (o cartão sincronizado do banco não traz o fechamento).
+    expect(billDueDate('2026-10-14', 21)).toBe('2026-10-21');
+    expect(billDueDate('2026-10-16', 21)).toBe('2026-11-21');
+    // Vence 5, fecha 29 do mês anterior.
+    expect(billDueDate('2026-10-20', 5)).toBe('2026-11-05');
+    expect(billDueDate('2026-10-30', 5)).toBe('2026-12-05');
+  });
+});
+
+describe('nextDueOnOrAfter — próximo vencimento do cartão', () => {
+  it('o do mês, se ainda não passou; senão, o do mês seguinte', () => {
+    expect(nextDueOnOrAfter('2026-10-22', 21)).toBe('2026-11-21');
+    expect(nextDueOnOrAfter('2026-10-21', 21)).toBe('2026-10-21');
+    expect(nextDueOnOrAfter('2026-01-31', 31)).toBe('2026-01-31');
   });
 });

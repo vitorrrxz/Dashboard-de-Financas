@@ -92,6 +92,10 @@ model Transaction {
   // cliente não escolhe. Assim uma transação nunca fica numa moeda diferente da própria conta.
   currency    String   @default("BRL")
   paymentType String   @default("debit")
+  // Devedor (RecurringTransaction) que este PIX recebido pagou — ver a conciliação em
+  // /api/recurring-transactions/process. Sem chave estrangeira: no backup as transações voltam
+  // antes das recorrências, e excluir o devedor só limpa o campo.
+  recurringId String?
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id])
@@ -223,6 +227,10 @@ model RecurringTransaction {
   // Devedor que paga uma dívida sua (ex.: o amigo que paga as parcelas do que você comprou para ele):
   // a receita para quando a dívida é quitada. Excluir a dívida só desfaz o vínculo.
   debtId         String?
+  // Devedor de uma cobrança que não é dívida cadastrada (ex.: alguém usou o seu cartão): quantos
+  // pagamentos ainda faltam (null = sem fim; 0 = já pagou tudo) e o nome da cobrança.
+  remainingPayments Int?
+  chargeName     String?
   createdAt      DateTime @default(now())
 
   user           User     @relation(fields: [userId], references: [id])

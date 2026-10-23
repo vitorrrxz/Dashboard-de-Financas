@@ -153,6 +153,10 @@ export const recurringSchema = z.object({
   accountId: accountIdField,
   active: z.boolean().optional(),
   debtId: accountIdField, // mesmo formato de id opcional ("" = sem vínculo)
+  // Devedor de uma cobrança não cadastrada: pagamentos que faltam (null = sem fim, 0 = pagou tudo).
+  remainingPayments: z.coerce.number().int('Número de pagamentos deve ser inteiro.')
+    .min(0, 'Número de pagamentos não pode ser negativo.').max(600, 'Número de pagamentos muito alto.').nullable().optional(),
+  chargeName: z.string().trim().max(200, 'Nome da cobrança muito longo.').nullable().optional(),
 });
 export const recurringUpdateSchema = recurringSchema.partial();
 

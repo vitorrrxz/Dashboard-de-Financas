@@ -12,6 +12,8 @@ export interface Transaction {
   paymentType?: PaymentType;
   externalId?: string;   // FITID do OFX (identificador estável do banco) — ver computeImportHash em server.js
   currency?: string;     // FIN-074 — ISO 4217; sempre a da conta vinculada (o servidor deriva). Ausente = BRL.
+  /** PIX recebido que pagou este devedor (RecurringTransaction) — a baixa automática do servidor. */
+  recurringId?: string | null;
 }
 
 export type AccountType = 'checking' | 'savings' | 'credit' | 'investment' | 'cash';
@@ -107,6 +109,10 @@ export interface RecurringTransaction {
   accountId?: string;
   /** Devedor que paga uma dívida sua: a receita para quando ela é quitada. */
   debtId?: string | null;
+  /** Devedor de uma cobrança não cadastrada (ex.: alguém usou o seu cartão): pagamentos que faltam (null = sem fim, 0 = pagou tudo). */
+  remainingPayments?: number | null;
+  /** Nome da cobrança que ele paga. */
+  chargeName?: string | null;
   createdAt: string;
 }
 

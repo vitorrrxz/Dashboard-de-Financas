@@ -8,6 +8,7 @@ import { accountOwnershipError } from '../lib/accountAccess.js';
 import { advanceOccurrence, todayISO } from '../lib/dates.js';
 import { BASE_CURRENCY } from '../lib/money.js';
 import { isDebtPaid } from '../lib/notificationsCore.js';
+import { OWN_TRANSFER_CATEGORIES } from '../lib/pluggyHelpers.js';
 
 export const router = express.Router();
 
@@ -27,6 +28,16 @@ function recurringOccurrenceHash(userId, recurringId, occurrenceDate) {
 // chamadas sucessivas (o ponteiro `nextOccurrence` avança a cada uma) e também limita o
 // estrago caso `advanceOccurrence` deixe de avançar por um dado inesperado.
 const MAX_OCCURRENCES_PER_RUN = 120;
+
+// Dias antes ou depois do vencimento em que um PIX recebido do mesmo valor pode ser o pagamento do
+// devedor (o "Confirmar pagamento" — mesma janela em `utils/recurring.ts`). Na semanal, menos que
+// meia semana, para um PIX não servir a duas ocorrências.
+const PAYMENT_WINDOW_DAYS = { weekly: 3, monthly: 10, yearly: 10 };
+
+/** Distância em dias entre duas datas ISO. */
+function daysApart(a, b) {
+  return Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86400000;
+}
 
 /** A dívida vinculada precisa ser do usuário — a chave estrangeira só garante que ela existe. */
 async function recurringLinkError(userId, { accountId, debtId }) {
@@ -91,10 +102,12 @@ router.post('/process', requireAuth, async (req, res) => {
     for (const rec of dueRecurrences) {
       // Devedor de uma dívida já quitada: ele parou de pagar, então não há o que lançar.
       if (rec.debt && isDebtPaid(rec.debt)) continue;
+      // Devedor de uma cobrança: lança só os pagamentos que faltam.
+      const limit = Math.min(rec.remainingPayments ?? MAX_OCCURRENCES_PER_RUN, MAX_OCCURRENCES_PER_RUN);
       const ops = [];
       let occurrence = rec.nextOccurrence;
 
-      while (occurrence <= today && ops.length < MAX_OCCURRENCES_PER_RUN) {
+      while (occurrence <= today && ops.length < limit) {
         const importHash = recurringOccurrenceHash(userId, rec.id, occurrence);
         ops.push(prisma.transaction.upsert({
           where: { userId_importHash: { userId, importHash } },
@@ -120,12 +133,13 @@ router.post('/process', requireAuth, async (req, res) => {
       }
 
       if (ops.length === 0) continue;
+      const posted = ops.length;
       ops.push(prisma.recurringTransaction.update({
         where: { id: rec.id },
-        data: { nextOccurrence: occurrence },
+        data: { nextOccurrence: occurrence, remainingPayments: rec.remainingPayments == null ? null : rec.remainingPayments - posted },
       }));
       await prisma.$transaction(ops);
-      processed += ops.length - 1; // desconta o update do ponteiro
+      processed += posted;
     }
 
     // `processed` conta ocorrências processadas nesta execução. Numa reexecução rara sobre
@@ -134,6 +148,53 @@ router.post('/process', requireAuth, async (req, res) => {
     res.json({ success: true, processed });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao processar recorrências.');
+  }
+});
+
+/*
+ * "Confirmar pagamento" na aba Devedores: o PIX recebido (`transactionId`) é o pagamento do devedor.
+ * Fica marcado (`Transaction.recurringId`). Se a receita prevista daquele vencimento já tinha sido
+ * lançada, ela sai e fica o PIX; senão (pago adiantado), o vencimento avança e conta um pagamento.
+ */
+router.post('/:id/confirm-payment', requireAuth, async (req, res) => {
+  const userId = req.user.userId;
+  const transactionId = typeof req.body?.transactionId === 'string' ? req.body.transactionId : '';
+  try {
+    const rec = await prisma.recurringTransaction.findFirst({ where: { id: req.params.id, userId } });
+    if (!rec || rec.amount <= 0) return res.status(404).json({ error: 'Devedor não encontrado.' });
+    const pix = transactionId
+      ? await prisma.transaction.findFirst({ where: { id: transactionId, userId }, include: { account: { select: { type: true } } } })
+      : null;
+    if (!pix) return res.status(404).json({ error: 'PIX não encontrado.' });
+    if (pix.recurringId) return res.status(400).json({ error: 'Esse PIX já confirmou um pagamento.' });
+    if (pix.amount !== rec.amount || pix.account?.type === 'credit' || OWN_TRANSFER_CATEGORIES.includes(pix.category)) {
+      return res.status(400).json({ error: 'Esse PIX não confere com o pagamento do devedor.' });
+    }
+
+    const window = PAYMENT_WINDOW_DAYS[rec.frequency] ?? PAYMENT_WINDOW_DAYS.monthly;
+    const [posted] = (await prisma.transaction.findMany({
+      where: { userId, name: rec.name, amount: rec.amount, importHash: { not: null } },
+      select: { id: true, date: true, importHash: true },
+    }))
+      .filter(t => t.importHash === recurringOccurrenceHash(userId, rec.id, t.date) && daysApart(t.date, pix.date) <= window)
+      .sort((a, b) => daysApart(a.date, pix.date) - daysApart(b.date, pix.date));
+
+    const ops = [prisma.transaction.update({ where: { id: pix.id }, data: { recurringId: rec.id } })];
+    if (posted) {
+      ops.push(prisma.transaction.delete({ where: { id: posted.id } }));
+    } else if (rec.remainingPayments !== 0) {
+      ops.push(prisma.recurringTransaction.update({
+        where: { id: rec.id },
+        data: {
+          nextOccurrence: advanceOccurrence(rec.nextOccurrence, rec.frequency),
+          remainingPayments: rec.remainingPayments == null ? null : rec.remainingPayments - 1,
+        },
+      }));
+    }
+    await prisma.$transaction(ops);
+    res.json({ success: true });
+  } catch (err) {
+    sendInternalError(res, err, 'Erro ao confirmar o pagamento.');
   }
 });
 
@@ -155,7 +216,9 @@ router.put('/:id', requireAuth, async (req, res) => {
 
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    await prisma.recurringTransaction.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    const { count } = await prisma.recurringTransaction.deleteMany({ where: { id: req.params.id, userId: req.user.userId } });
+    // Os PIX que ele pagou continuam; só perdem o vínculo.
+    if (count > 0) await prisma.transaction.updateMany({ where: { userId: req.user.userId, recurringId: req.params.id }, data: { recurringId: null } });
     res.json({ success: true });
   } catch (err) {
     sendInternalError(res, err, 'Erro ao excluir recorrência.');

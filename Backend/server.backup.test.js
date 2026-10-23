@@ -297,6 +297,27 @@ describe('Backup e restauração (FIN-079/FIN-080)', () => {
       expect(received.goals.find(g => g.name === 'Aposentadoria')).toMatchObject({ investmentId: newInvestment.id, accountId: null });
     });
 
+    it('o PIX que pagou um devedor continua ligado a ele depois de restaurar em outra conta', async () => {
+      const owner = await newUser();
+      const conta = await call(owner, 'post', '/api/accounts', { name: 'Corrente', bank: 'Banco A', type: 'checking', balance: 0, color: '#fff' });
+      const today = new Date().toLocaleDateString('sv-SE');
+      const devedor = await call(owner, 'post', '/api/recurring-transactions', {
+        name: 'Amigo', category: 'Receita', amount: 45600, frequency: 'monthly', nextOccurrence: today,
+      });
+      const pix = await call(owner, 'post', '/api/transactions', { name: 'PIX Amigo', category: 'Transferências', date: today, amount: 45600, accountId: conta.id });
+      await call(owner, 'post', `/api/recurring-transactions/${devedor.id}/confirm-payment`, { transactionId: pix.id });
+
+      const backup = await exportOf(owner);
+      expect(backup.data.transactions.find(t => t.name === 'PIX Amigo').recurringId).toBe(devedor.id);
+
+      const receiver = await newUser();
+      expect((await restore(receiver, backup)).status).toBe(200);
+      const received = (await exportOf(receiver)).data;
+      const novoDevedor = received.recurring.find(r => r.name === 'Amigo');
+      expect(novoDevedor.id).not.toBe(devedor.id);
+      expect(received.transactions.find(t => t.name === 'PIX Amigo').recurringId).toBe(novoDevedor.id);
+    });
+
     it('a moeda da transação vem da conta, não do arquivo', async () => {
       const user = await newUser();
       await seed(user);
