@@ -2,7 +2,7 @@ import type { Debt, RecurringTransaction, Salary } from '../types';
 import { advanceMonth } from './dates';
 import { remainingDebtSchedule, todayISO } from './debts';
 import { upcomingRecurringInflows, upcomingRecurringOutflows } from './recurring';
-import { activeBonus, salaryPerMonth } from './salary';
+import { extrasInMonth, salaryPerMonth, sumExtras } from './salary';
 
 // FIN-058 — projeção de saldo futuro: saldo atual + salário − dívidas do mês, mês a mês. Função
 // pura, calculada no frontend a partir dos dados já carregados e testável sem renderizar
@@ -17,7 +17,7 @@ export interface ProjectionPoint {
   month: string;
   /** Saldo projetado ao fim do mês (acumulado desde o saldo atual). */
   balance: number;
-  /** Entradas do mês: salário, bônus (no mês dele) e recorrências de receita (Devedores). */
+  /** Entradas do mês: salário, receitas extras (PLR, 13º...) e recorrências de receita (Devedores). */
   salaryDelta: number;
   /** Dívidas do mês: fatura do cartão, parcelas do cartão, parcelas das dívidas e recorrências de despesa (positivo, é saída). */
   debtDelta: number;
@@ -53,7 +53,7 @@ function monthLabel(month: string): string {
 }
 
 /**
- * Projeta o saldo dos próximos meses: a cada mês entra o salário (e o bônus, no mês dele) e saem
+ * Projeta o saldo dos próximos meses: a cada mês entra o salário (e as receitas extras, no mês delas) e saem
  * as dívidas — a fatura atual do cartão no primeiro mês, as parcelas do cartão, as parcelas ainda
  * não pagas das dívidas cadastradas no mês em que vencem e as recorrências de despesa.
  *
@@ -99,14 +99,14 @@ export function computeBalanceProjection(
     if (monthKey(occurrence.date) > firstMonth) addDebt(occurrence.date, occurrence.amount);
   }
   const incomeByMonth: Record<string, number> = { [firstMonth]: options.currentRecurringIncome ?? 0 };
-  for (const occurrence of upcomingRecurringInflows(options.recurring ?? [], lastMonth)) {
+  for (const occurrence of upcomingRecurringInflows(options.recurring ?? [], lastMonth, debts)) {
     const key = monthKey(occurrence.date);
     if (key > firstMonth) incomeByMonth[key] = (incomeByMonth[key] ?? 0) + occurrence.amount;
   }
 
   let running = currentBalance;
   return monthKeys.map(month => {
-    const salaryDelta = salaryPerMonth(salary) + activeBonus(salary, month) + (incomeByMonth[month] ?? 0);
+    const salaryDelta = salaryPerMonth(salary) + sumExtras(extrasInMonth(salary, month)) + (incomeByMonth[month] ?? 0);
     const debtDelta = debtByMonth[month] ?? 0;
     running = running + salaryDelta - debtDelta;
     return {

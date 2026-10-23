@@ -8,8 +8,9 @@ import { salarySchema } from '../lib/schemas.js';
 // Better Auth (cadastro, login, sessão, 2FA — ver server/lib/betterAuth.js).
 export const router = express.Router();
 
-// Salário informado manualmente (em centavos; no quinzenal, um valor por pagamento) e periodicidade.
-const SALARY_SELECT = { salaryCents: true, salarySecondCents: true, salaryFrequency: true, salaryPayDay: true, bonusCents: true, bonusHalf: true, bonusMonth: true };
+// Salário informado manualmente (em centavos; no quinzenal, um valor por pagamento), periodicidade e
+// receitas extras previstas (PLR, 13º...).
+const SALARY_SELECT = { salaryCents: true, salarySecondCents: true, salaryFrequency: true, salaryPayDay: true, extraIncomes: true };
 
 router.get('/salary', requireAuth, async (req, res) => {
   try {

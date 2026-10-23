@@ -105,6 +105,8 @@ export interface RecurringTransaction {
   nextOccurrence: string; // ISO date — ponteiro de até onde já foi lançado
   active: boolean;
   accountId?: string;
+  /** Devedor que paga uma dívida sua: a receita para quando ela é quitada. */
+  debtId?: string | null;
   createdAt: string;
 }
 
@@ -161,8 +163,16 @@ export interface Salary {
   frequency: SalaryFrequency;
   /** Quinzenal: dia do 1º pagamento (1 a 15); o 2º é 15 dias depois. */
   payDay: number;
-  /** Bônus de um mês só (`bonusMonth`, YYYY-MM), somado à quinzena `bonusHalf`. Em reais. */
-  bonus: number;
-  bonusHalf: 1 | 2;
-  bonusMonth: string | null;
+  /** Receitas extras previstas (PLR, 13º, férias...). */
+  extras: ExtraIncome[];
+}
+
+/** Entrada prevista fora do salário, em reais. `month` é YYYY-MM; `half` é a quinzena em que entra. */
+export interface ExtraIncome {
+  name: string;
+  amount: number;
+  month: string;
+  half: 1 | 2;
+  /** Repete todo ano no mesmo mês (13º, PLR); falso = só uma vez. */
+  yearly: boolean;
 }

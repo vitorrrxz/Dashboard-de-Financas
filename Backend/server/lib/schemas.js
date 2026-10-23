@@ -103,10 +103,16 @@ export const salarySchema = z.object({
   salarySecondCents: z.coerce.number().int('Salário deve ser um inteiro em centavos.').min(0, 'Salário não pode ser negativo.').optional(),
   // Quinzenal: dia do 1º pagamento; o 2º é 15 dias depois. Opcional para quem só manda valor e periodicidade.
   salaryPayDay: z.coerce.number().int().min(1, 'Dia de pagamento entre 1 e 15.').max(15, 'Dia de pagamento entre 1 e 15.').optional(),
-  // Bônus de um mês só, somado à 1ª ou à 2ª quinzena.
-  bonusCents: z.coerce.number().int('Bônus deve ser um inteiro em centavos.').min(0, 'Bônus não pode ser negativo.').optional(),
-  bonusHalf: z.union([z.literal(1), z.literal(2)], { message: 'Quinzena do bônus deve ser 1 ou 2.' }).optional(),
-  bonusMonth: z.string().regex(/^\d{4}-\d{2}$/, 'Mês do bônus deve ser AAAA-MM.').nullable().optional(),
+  // Receitas extras previstas (PLR, 13º...): substitui a lista inteira. Opcional para quem só manda o salário.
+  extraIncomes: z.array(z.object({
+    name: z.string().trim().min(1, 'Informe o nome da receita extra.').max(60, 'Nome da receita extra com até 60 caracteres.'),
+    amountCents: z.coerce.number().int('Receita extra deve ser um inteiro em centavos.').positive('Receita extra deve ser maior que zero.'),
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Mês da receita extra deve ser AAAA-MM.'),
+    // Quinzena em que entra (só importa no quinzenal).
+    half: z.union([z.literal(1), z.literal(2)], { message: 'Quinzena da receita extra deve ser 1 ou 2.' }),
+    // Repete todo ano no mesmo mês (13º, PLR); falso = só uma vez.
+    yearly: z.boolean(),
+  })).max(50, 'No máximo 50 receitas extras.').optional(),
 });
 // FIN-105 — regra de categoria. Pelo menos 2 caracteres: uma letra só casaria com quase toda descrição.
 export const categoryRuleSchema = z.object({
@@ -146,6 +152,7 @@ export const recurringSchema = z.object({
   nextOccurrence: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Próxima ocorrência deve estar no formato YYYY-MM-DD.'),
   accountId: accountIdField,
   active: z.boolean().optional(),
+  debtId: accountIdField, // mesmo formato de id opcional ("" = sem vínculo)
 });
 export const recurringUpdateSchema = recurringSchema.partial();
 

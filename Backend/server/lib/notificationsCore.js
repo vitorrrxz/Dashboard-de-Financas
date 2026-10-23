@@ -41,7 +41,7 @@ export const NOTIFICATION_SETTINGS = {
 const MIN_BASELINE_MONTHS = 2;
 
 /** Mesma regra de `isDebtPaid` em src/utils/debts.ts: quitada pelo valor OU pelas parcelas. */
-function isDebtPaid(debt) {
+export function isDebtPaid(debt) {
   return debt.paidAmount >= debt.totalAmount || debt.paidInstallments >= debt.totalInstallments;
 }
 

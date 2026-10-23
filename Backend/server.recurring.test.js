@@ -146,6 +146,33 @@ describe('/api/recurring-transactions', () => {
       expect(atualizada.nextOccurrence > todayISO()).toBe(true);
     });
 
+    it('devedor vinculado a uma dívida: a dívida tem que ser do usuário, e quitada ele não é mais lançado', async () => {
+      const conta = await request(app).post('/api/accounts').set(auth(tokenA))
+        .send({ name: 'Conta', bank: 'Banco D', type: 'checking', balance: 0, color: '#fff' });
+      const novaDivida = extra => request(app).post('/api/debts').set(auth(tokenA)).send({
+        name: 'Alternador', category: 'Pessoal', totalAmount: 20000, monthlyPayment: 10000, totalInstallments: 2,
+        nextDueDate: todayISO(), accountId: conta.body.id, ...extra,
+      });
+      const aberta = await novaDivida({});
+      const quitada = await novaDivida({ name: 'Quitada', paidAmount: 20000, paidInstallments: 2 });
+      expect([aberta.status, quitada.status]).toEqual([200, 200]);
+
+      const deOutro = await request(app).post('/api/recurring-transactions').set(auth(tokenB))
+        .send({ name: 'Intruso', category: 'Receita', amount: 10000, frequency: 'monthly', nextOccurrence: todayISO(), debtId: aberta.body.id });
+      expect(deOutro.status).toBe(400);
+
+      await criarRecorrencia({ name: 'Paga a aberta', category: 'Receita', amount: 10000, debtId: aberta.body.id });
+      await criarRecorrencia({ name: 'Paga a quitada', category: 'Receita', amount: 10000, debtId: quitada.body.id });
+      await request(app).post('/api/recurring-transactions/process').set(auth(tokenA));
+      expect(await transacoesPorNome('Paga a aberta')).toHaveLength(1);
+      expect(await transacoesPorNome('Paga a quitada')).toHaveLength(0);
+
+      // Excluir a dívida só desfaz o vínculo.
+      await request(app).delete(`/api/debts/${aberta.body.id}`).set(auth(tokenA));
+      const lista = await request(app).get('/api/recurring-transactions').set(auth(tokenA));
+      expect(lista.body.find(r => r.name === 'Paga a aberta').debtId).toBeNull();
+    });
+
     it('recupera todas as ocorrências atrasadas de uma vez (usuário ficou meses sem abrir o app)', async () => {
       // Dia 1 de 3 meses atrás → ocorrências dos meses -3, -2, -1 e do mês corrente = 4.
       const rec = await criarRecorrencia({ name: 'Aluguel atrasado', category: 'Moradia', amount: -120000, nextOccurrence: firstOfMonthsAgo(3) });

@@ -5,7 +5,7 @@ import { computeBalanceProjection } from './projection';
 import type { Debt, RecurringTransaction, Salary } from '../types';
 
 function salary(overrides: Partial<Salary> = {}): Salary {
-  return { amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, bonus: 0, bonusHalf: 1, bonusMonth: null, ...overrides };
+  return { amount: 0, secondAmount: 0, frequency: 'monthly', payDay: 15, extras: [], ...overrides };
 }
 
 function debt(overrides: Partial<Debt> = {}): Debt {
@@ -35,9 +35,13 @@ describe('computeBalanceProjection', () => {
       .toEqual([1000, 2000]);
   });
 
-  it('o bônus entra só no mês em que foi lançado', () => {
-    const p = computeBalanceProjection(0, salary({ amount: 1000, bonus: 300, bonusMonth: '2026-06' }), [], { from: FROM, months: 2 });
-    expect(p.map(x => x.salaryDelta)).toEqual([1300, 1000]);
+  it('as receitas extras entram no mês delas', () => {
+    const extras = [
+      { name: 'PLR', amount: 300, month: '2026-06', half: 1 as const, yearly: false },
+      { name: '13º', amount: 500, month: '2026-07', half: 2 as const, yearly: true },
+    ];
+    const p = computeBalanceProjection(0, salary({ amount: 1000, extras }), [], { from: FROM, months: 3 });
+    expect(p.map(x => x.salaryDelta)).toEqual([1300, 1500, 1000]);
   });
 
   it('a fatura atual do cartão sai no primeiro mês e as parcelas futuras no mês delas', () => {
@@ -110,5 +114,17 @@ describe('computeBalanceProjection', () => {
     expect(p.map(x => x.debtDelta)).toEqual([1000, 1000, 1000]);
     expect(p.map(x => x.salaryDelta)).toEqual([200, 500, 500]);
     expect(p.map(x => x.balance)).toEqual([4200, 3700, 3200]);
+  });
+
+  it('devedor vinculado a uma dívida só entra até a última parcela dela; de dívida quitada, nunca', () => {
+    // Faltam 2 parcelas (jun e jul): o devedor paga em jul e não mais em ago.
+    const alternador = debt({ id: 'd1', totalAmount: 1000, paidAmount: 800, totalInstallments: 10, paidInstallments: 8, nextDueDate: '2026-06-15' });
+    const quitada = debt({ id: 'd2', totalAmount: 100, paidAmount: 100, totalInstallments: 1, paidInstallments: 1 });
+    const recurring: RecurringTransaction[] = [
+      { id: 'r1', name: 'Amigo', category: 'Receita', amount: 100, frequency: 'monthly', nextOccurrence: '2026-07-15', active: true, debtId: 'd1', createdAt: '2026-01-01' },
+      { id: 'r2', name: 'Outro', category: 'Receita', amount: 50, frequency: 'monthly', nextOccurrence: '2026-07-15', active: true, debtId: 'd2', createdAt: '2026-01-01' },
+    ];
+    const p = computeBalanceProjection(0, NO_SALARY, [alternador, quitada], { from: FROM, months: 3, recurring });
+    expect(p.map(x => x.salaryDelta)).toEqual([0, 100, 0]);
   });
 });

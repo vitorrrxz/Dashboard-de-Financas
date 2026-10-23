@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { isDebtOverdue, todayISO } from '../utils/debts';
+import { isDebtOverdue, remainingDebtSchedule, todayISO } from '../utils/debts';
 import { computeInvestmentHoldings } from '../utils/investments';
 import { isOwnTransfer } from '../utils/categories';
 import { groupInstallmentPurchases, parseInstallment } from '../utils/installments';
@@ -25,8 +25,7 @@ export interface FinancialStats {
   importedBalance: number;
   balanceByMonth: { name: string; balance: number }[];
   dailyEvolution: { name: string; balance: number }[];
-  expenseByCategory: { name: string; amount: number }[];
-  /** `expenseByCategory` de cada mês (YYYY-MM) com gastos. */
+  /** As 6 categorias com mais gasto de cada mês (YYYY-MM) com gastos. */
   expenseByCategoryByMonth: Record<string, { name: string; amount: number }[]>;
   monthExpense: number;
   /** Compras no cartão da fatura que vence neste mês (ciclo de fechamento; sem fechamento, o mês civil). Contam como dívida. */
@@ -86,7 +85,9 @@ export function computeFinancialStats(
   debts: Debt[],
   dashboardAccountId: string | null,
   investments: Pick<Investment, 'accountId' | 'currentValue'>[] = NO_INVESTMENTS,
-  recurring: RecurringTransaction[] = NO_RECURRING
+  recurring: RecurringTransaction[] = NO_RECURRING,
+  /** Mês (YYYY-MM) do Dashboard: os números "do mês" são deste mês. Saldos e totais são sempre os de hoje. */
+  month = todayISO().slice(0, 7)
 ): FinancialStats {
   // FIN-103: transferência entre contas próprias e pagamento de fatura não são receita nem despesa.
   // Seleção do filtro: uma conta ou um banco inteiro (conta corrente + cartão) — ver accountGroups.
@@ -110,7 +111,7 @@ export function computeFinancialStats(
     monthMap[m] = (monthMap[m] ?? 0) + tx.amount;
   });
   const balanceByMonth = Object.entries(monthMap)
-    .sort(([a], [b]) => a.localeCompare(b)).slice(-7)
+    .filter(([k]) => k <= month).sort(([a], [b]) => a.localeCompare(b)).slice(-7)
     .map(([k, v]) => ({
       name: new Date(k + '-15').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
       balance: +v.toFixed(2),
@@ -124,8 +125,7 @@ export function computeFinancialStats(
       .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }));
   };
   const allExpenses = activeTxs.filter(t => t.amount < 0);
-  const expenseByCategory = topCategories(allExpenses);
-  // O mesmo, mês a mês (YYYY-MM), para o filtro do donut.
+  // Mês a mês (YYYY-MM), para o donut do mês do Dashboard.
   const expensesByMonth: Record<string, Transaction[]> = {};
   allExpenses.forEach(t => { (expensesByMonth[t.date.slice(0, 7)] ??= []).push(t); });
   const expenseByCategoryByMonth = Object.fromEntries(
@@ -133,7 +133,7 @@ export function computeFinancialStats(
   );
 
   const today = todayISO();
-  const mPrefix = today.slice(0, 7);
+  const mPrefix = month;
   const monthExpense = activeTxs.filter(t => t.amount < 0 && t.date.startsWith(mPrefix)).reduce((s, t) => s + Math.abs(t.amount), 0);
   // Compra no cartão = transação de conta de crédito ou importada como crédito. Ela é dívida, e
   // entra no mês da fatura em que cai: cartão com dia de fechamento usa o ciclo da fatura que
@@ -165,16 +165,21 @@ export function computeFinancialStats(
   const investmentBalance = computeInvestmentHoldings(activeAccs, activeInvestments).total;
   const pendingBills = activeAccs.filter(a => a.type === 'credit').reduce((s, a) => s + (a.pendingBill ?? 0), 0);
   const totalActiveDebts = activeDebts.reduce((s, d) => s + (d.totalAmount - d.paidAmount), 0);
-  const monthDebtPayments = activeDebts
-    .filter(d => d.paidInstallments < d.totalInstallments)
-    .reduce((s, d) => s + d.monthlyPayment, 0);
+  // Parcelas das dívidas no mês. No mês corrente, toda dívida em aberto paga a parcela dele (a vencida
+  // também); nos outros, as parcelas do cronograma que vencem no mês — o que já foi pago não aparece.
+  const openDebts = activeDebts.filter(d => d.paidInstallments < d.totalInstallments);
+  const monthDebtInstallments = mPrefix === today.slice(0, 7)
+    ? openDebts.map(debt => ({ debt, amount: debt.monthlyPayment, dueDate: debt.nextDueDate }))
+    : openDebts.flatMap(debt => remainingDebtSchedule(debt).filter(i => i.dueDate.startsWith(mPrefix))
+      .map(i => ({ debt, amount: i.amount, dueDate: i.dueDate })));
+  const monthDebtPayments = monthDebtInstallments.reduce((s, i) => s + i.amount, 0);
   // Dívida cadastrada não tem forma de pagamento: mais de uma parcela = parcelado; parcela
   // única = crédito à vista se for de cartão, senão débito/PIX (empréstimo, boleto…).
   const monthDebtsByType: ByPaymentType = { debitPix: 0, credit: 0, installment: 0 };
   expenses.filter(t => isCard(t) && inThisBill(t)).forEach(t => { monthDebtsByType[txKind(t)] += Math.abs(t.amount); });
-  activeDebts.filter(d => d.paidInstallments < d.totalInstallments).forEach(d => {
+  monthDebtInstallments.forEach(({ debt: d, amount }) => {
     const kind = d.totalInstallments > 1 ? 'installment' : d.category === 'Cartão de Crédito' ? 'credit' : 'debitPix';
-    monthDebtsByType[kind] += d.monthlyPayment;
+    monthDebtsByType[kind] += amount;
   });
   // Recorrências de despesa do mês. A lançada é a transação igual (nome, valor, conta) de antes do
   // ponteiro `nextOccurrence`; no cartão ela já está na fatura, então só conta a que ainda vai cair.
@@ -197,7 +202,7 @@ export function computeFinancialStats(
       && t.amount === r.amount && (t.accountId ?? null) === (r.accountId ?? null))));
   const recurringInflows = [
     ...[...launchedIncomes].map(t => ({ date: t.date, amount: t.amount })),
-    ...upcomingRecurringInflows(activeIncomes, mPrefix).filter(o => o.date.startsWith(mPrefix)),
+    ...upcomingRecurringInflows(activeIncomes, mPrefix, debts).filter(o => o.date.startsWith(mPrefix)),
   ];
   const monthRecurringIncome = recurringInflows.reduce((s, o) => s + o.amount, 0);
   // Parcelas do cartão ainda não lançadas: as já lançadas estão na fatura pendente.
@@ -217,9 +222,9 @@ export function computeFinancialStats(
     ...expenses.filter(t => isCard(t) && inThisBill(t))
       .map(t => ({ day: (t.accountId && dueDays.get(t.accountId)) || dayOf(t.date), amount: Math.abs(t.amount) })),
     // Pagamento dividido: cada parte no seu dia, para cair na quinzena certa.
-    ...activeDebts.filter(d => d.paidInstallments < d.totalInstallments).flatMap(d => d.splits?.length
+    ...monthDebtInstallments.flatMap(({ debt: d, amount, dueDate }) => d.splits?.length
       ? d.splits.map(part => ({ day: part.day, amount: part.amount }))
-      : [{ day: dayOf(d.nextDueDate), amount: d.monthlyPayment }]),
+      : [{ day: dayOf(dueDate), amount }]),
     ...recurringOutflows.map(o => ({
       day: (isCardAccount(o.accountId) && o.accountId && dueDays.get(o.accountId)) || dayOf(o.date), amount: o.amount,
     })),
@@ -229,12 +234,9 @@ export function computeFinancialStats(
 
   const overdueDebts = activeDebts.filter(isDebtOverdue);
 
+  // Entradas − saídas de cada dia do mês.
   const dailyMap: Record<string, number> = {};
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const startStr = thirtyDaysAgo.toISOString().substring(0, 10);
-
-  activeTxs.filter(t => t.date >= startStr).forEach(t => {
+  activeTxs.filter(t => t.date.startsWith(mPrefix)).forEach(t => {
     dailyMap[t.date] = (dailyMap[t.date] ?? 0) + t.amount;
   });
   const dailyEvolution = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => {
@@ -243,7 +245,7 @@ export function computeFinancialStats(
 
   return {
     income, expense, importedBalance, balanceByMonth, dailyEvolution,
-    expenseByCategory, expenseByCategoryByMonth, monthExpense, monthExpenseByType, monthDebtsByType, monthCardExpense, realBalance, investmentBalance, pendingBills,
+    expenseByCategoryByMonth, monthExpense, monthExpenseByType, monthDebtsByType, monthCardExpense, realBalance, investmentBalance, pendingBills,
     activeDebts: totalActiveDebts, monthDebtPayments, monthRecurring, monthRecurringAhead, monthRecurringIncome, monthInflows, totalOwed, monthOutflows, cardInstallmentsAhead, overdueDebts,
     filteredTxsCount: activeTxs.length,
   };
@@ -255,10 +257,11 @@ export function useFinancialStats(
   debts: Debt[],
   dashboardAccountId: string | null,
   investments: Investment[] = NO_INVESTMENTS,
-  recurring: RecurringTransaction[] = NO_RECURRING
+  recurring: RecurringTransaction[] = NO_RECURRING,
+  month?: string
 ): FinancialStats {
   return useMemo(
-    () => computeFinancialStats(transactions, accounts, debts, dashboardAccountId, investments, recurring),
-    [transactions, accounts, debts, dashboardAccountId, investments, recurring]
+    () => computeFinancialStats(transactions, accounts, debts, dashboardAccountId, investments, recurring, month),
+    [transactions, accounts, debts, dashboardAccountId, investments, recurring, month]
   );
 }

@@ -1,9 +1,10 @@
 import { RecurringManager } from '../components/RecurringManager';
-import type { Account, RecurringTransaction, Transaction } from '../types';
+import type { Account, Debt, RecurringTransaction, Transaction } from '../types';
 
 interface RecurringPageProps {
   recurring: RecurringTransaction[];
   accounts: Account[];
+  debts: Debt[];
   onAdd: (rec: Omit<RecurringTransaction, 'id' | 'createdAt'>) => Promise<void>;
   onUpdate: (id: string, rec: Partial<Omit<RecurringTransaction, 'id' | 'createdAt'>>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -13,7 +14,7 @@ interface RecurringPageProps {
 }
 
 export function RecurringPage({
-  recurring, accounts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind,
+  recurring, accounts, debts, onAdd, onUpdate, onDelete, transactionCategories, transactions, kind,
 }: RecurringPageProps) {
   return (
     <>
@@ -26,6 +27,7 @@ export function RecurringPage({
       <RecurringManager
         recurring={recurring}
         accounts={accounts}
+        debts={debts}
         onAdd={onAdd}
         onUpdate={onUpdate}
         onDelete={onDelete}

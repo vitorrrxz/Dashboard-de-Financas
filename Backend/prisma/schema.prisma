@@ -23,10 +23,10 @@ model User {
   salaryFrequency String     @default("monthly")
   // Quinzenal: dia do 1º pagamento (1 a 15); o 2º cai 15 dias depois (5 e 20, 15 e 30).
   salaryPayDay    Int        @default(15)
-  // Bônus de um mês só (bonusMonth = "YYYY-MM"), em centavos, somado à quinzena bonusHalf (1 ou 2).
-  bonusCents      Int        @default(0)
-  bonusHalf       Int        @default(1)
-  bonusMonth      String?
+  // Receitas extras previstas (PLR, 13º, férias...): [{ name, amountCents, month: "YYYY-MM", half: 1|2,
+  // yearly }]. `half` é a quinzena em que entram; `yearly` repete todo ano no mesmo mês. Validado por
+  // `extraIncomeSchema` (schemas.js) — vai e volta junto com o salário.
+  extraIncomes    Json       @default("[]")
 
   accounts     Account[]
   transactions Transaction[]
@@ -129,6 +129,8 @@ model Debt {
   account           Account?   @relation(fields: [accountId], references: [id])
   subItems          DebtItem[]
   splits            DebtSplit[]
+  // Devedores que pagam esta dívida (ver RecurringTransaction.debtId).
+  debtors           RecurringTransaction[]
 
   @@index([userId]) // ver FIN-019
 }
@@ -218,12 +220,17 @@ model RecurringTransaction {
   frequency      String   // 'weekly' | 'monthly' | 'yearly' — validado por Zod em server.js
   nextOccurrence String   // ISO YYYY-MM-DD
   active         Boolean  @default(true)
+  // Devedor que paga uma dívida sua (ex.: o amigo que paga as parcelas do que você comprou para ele):
+  // a receita para quando a dívida é quitada. Excluir a dívida só desfaz o vínculo.
+  debtId         String?
   createdAt      DateTime @default(now())
 
   user           User     @relation(fields: [userId], references: [id])
   account        Account? @relation(fields: [accountId], references: [id])
+  debt           Debt?    @relation(fields: [debtId], references: [id], onDelete: SetNull)
 
   @@index([userId]) // ver FIN-019
+  @@index([debtId])
 }
 
 // FIN-112 — retrato mensal do patrimônio líquido (FIN-064/FIN-073), para o gráfico de evolução em

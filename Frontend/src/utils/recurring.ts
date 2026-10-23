@@ -1,7 +1,8 @@
 // Recorrências no planejamento do mês (sobra, régua, projeção): as de despesa (Despesas Recorrentes)
 // saem, as de receita (Devedores) entram. Valores em reais.
 import { advanceOccurrence } from './dates';
-import type { RecurringTransaction } from '../types';
+import { remainingDebtSchedule } from './debts';
+import type { Debt, RecurringTransaction } from '../types';
 
 /** Uma ocorrência de recorrência: a data em que cai e o valor (positivo, entrada ou saída). */
 export interface RecurringOutflow {
@@ -31,9 +32,16 @@ export function upcomingRecurringOutflows(recurring: RecurringTransaction[], unt
   return upcomingOccurrences(recurringExpenses(recurring), untilMonth);
 }
 
-/** O mesmo de `upcomingRecurringOutflows`, para as recorrências de receita. */
-export function upcomingRecurringInflows(recurring: RecurringTransaction[], untilMonth: string): RecurringOutflow[] {
-  return upcomingOccurrences(recurringIncomes(recurring), untilMonth);
+/**
+ * O mesmo de `upcomingRecurringOutflows`, para as recorrências de receita. O devedor vinculado a uma
+ * dívida (`debtId`) só paga até a última parcela dela — quitada, ele não entra mais.
+ */
+export function upcomingRecurringInflows(recurring: RecurringTransaction[], untilMonth: string, debts: Debt[] = []): RecurringOutflow[] {
+  const lastInstallmentMonth = new Map(debts.map(d => [d.id, remainingDebtSchedule(d).at(-1)?.dueDate.slice(0, 7) ?? '']));
+  return recurringIncomes(recurring).flatMap(r => {
+    const debtEnd = r.debtId ? lastInstallmentMonth.get(r.debtId) : undefined;
+    return upcomingOccurrences([r], debtEnd !== undefined && debtEnd < untilMonth ? debtEnd : untilMonth);
+  });
 }
 
 function upcomingOccurrences(recurring: RecurringTransaction[], untilMonth: string): RecurringOutflow[] {
