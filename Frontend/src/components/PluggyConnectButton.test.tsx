@@ -45,6 +45,14 @@ describe('PluggyConnectButton (FIN-107)', () => {
     expect(onSyncComplete).not.toHaveBeenCalled();
   });
 
+  it('chaves da Pluggy recusadas na automática: avisa na tela, e a conexão continua listada', async () => {
+    apiFetchMock.mockResolvedValueOnce({ synced: 0, items: [ITAU], error: 'A Pluggy recusou as chaves da API.' });
+    render(<PluggyConnectButton onSyncComplete={vi.fn()} />);
+
+    expect(await screen.findByText('A Pluggy recusou as chaves da API.')).toBeInTheDocument();
+    expect(screen.getByText('Itaú')).toBeInTheDocument();
+  });
+
   it('falha na sincronização automática vai para o console, e o painel continua podendo conectar', async () => {
     apiFetchMock.mockRejectedValueOnce(new Error('sem conexão'));
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});

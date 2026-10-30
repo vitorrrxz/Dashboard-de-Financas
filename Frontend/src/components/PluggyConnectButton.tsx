@@ -80,6 +80,8 @@ export function PluggyConnectButton({ onSyncComplete }: PluggyConnectButtonProps
       const data = await fetchAPI('/api/pluggy/auto-sync');
       const list = parseItems(data);
       if (list) setItems(list);
+      // Falha que só o usuário resolve (ex.: chaves recusadas): sem o aviso, os dados só pareceriam velhos.
+      if (typeof data?.error === 'string') setError(data.error);
       if (Number(data?.synced) > 0) onSyncComplete();
     } catch (err) {
       console.error('Falha na sincronização automática com a Pluggy:', err);
@@ -178,12 +180,12 @@ export function PluggyConnectButton({ onSyncComplete }: PluggyConnectButtonProps
       <p className="text-xs text-textMuted mb-3">Bancos conectados via Pluggy</p>
 
       {error && needsReauth && (
-        <p className="text-xs text-amber-400 mb-3 flex items-center gap-2">
+        <p className="text-xs text-amber-400 mb-3 flex items-center gap-2 break-words">
           <AlertTriangle size={14} className="shrink-0" /> {error}
         </p>
       )}
       {error && !needsReauth && (
-        <p className="text-xs text-red-400 mb-3">
+        <p className="text-xs text-red-400 mb-3 break-words">
           {error}
         </p>
       )}
