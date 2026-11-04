@@ -12,6 +12,21 @@ import {
 export const router = express.Router();
 
 const PLUGGY_ITEM_NOT_FOUND = 'Conexão bancária não encontrada.';
+const PLUGGY_KEYS_REJECTED = 'A Pluggy recusou as chaves da API (expiradas ou revogadas). Gere chaves novas no painel da Pluggy e troque-as no .env.';
+
+const PLUGGY_ITEM_GONE = 'A Pluggy não encontrou esta conexão com as chaves atuais do .env. Confira se elas são da mesma aplicação em que os bancos foram conectados.';
+
+// Chaves revogadas ou expiradas: a Pluggy responde 401 a toda chamada, de toda conexão. O SDK rejeita
+// com o HTTPError do `got` na autenticação e com o corpo da resposta (`{ code, ... }`) nas demais chamadas.
+const isPluggyKeysError = error => error?.response?.statusCode === 401 || error?.code === 401;
+
+// A falha que o usuário precisa ver, porque nenhuma nova tentativa resolve. Conexão inexistente: as
+// conexões pertencem à aplicação da Pluggy, então chaves de outra aplicação não as enxergam.
+function pluggyFailureMessage(error) {
+  if (isPluggyKeysError(error)) return PLUGGY_KEYS_REJECTED;
+  return error?.code === 404 ? PLUGGY_ITEM_GONE : null;
+}
+
 
 // FIN-107 — registra (ou atualiza) a conexão do usuário com um banco. `clientUserId` é o usuário do
 // token com que a conexão foi feita (connect-token): a conexão de outro usuário não entra.
@@ -63,6 +78,7 @@ router.post('/connect-token', requireAuth, async (req, res) => {
     });
     res.json({ accessToken: response.accessToken });
   } catch (error) {
+    if (isPluggyKeysError(error)) return res.status(502).json({ error: PLUGGY_KEYS_REJECTED });
     sendInternalError(res, error, 'Erro ao conectar à API da Pluggy.');
   }
 });
@@ -333,38 +349,46 @@ router.post('/sync/:itemId', requireAuth, async (req, res) => {
     const { status, body } = await runExclusive(userId, () => syncPluggyItem(userId, item.pluggyId));
     res.status(status).json(body);
   } catch (error) {
+    const failure = pluggyFailureMessage(error);
+    if (failure) {
+      console.error(failure, error);
+      return res.status(502).json({ error: failure });
+    }
     sendInternalError(res, error, 'Erro na sincronização de dados.');
   }
 });
 
 // POST /api/pluggy/auto-sync — FIN-107: chamada ao abrir o app. Sincroniza as conexões paradas há mais
 // de 6 h, menos a de login expirado (FIN-041), e devolve a lista para a tela mostrar a hora da última
-// sincronização. A falha de uma conexão fica no log e não impede as outras nem a resposta.
+// sincronização. A falha de uma conexão fica no log e não impede as outras nem a resposta; a que só o
+// usuário resolve (`pluggyFailureMessage`) também vai na resposta (`error`), para a tela avisar.
 const AUTO_SYNC_AFTER_MS = 6 * 60 * 60 * 1000;
 router.post('/auto-sync', requireAuth, async (req, res) => {
   const userId = req.user.userId;
   try {
-    const synced = await runExclusive(userId, async () => {
+    const { synced, failure } = await runExclusive(userId, async () => {
       await adoptLegacyPluggyItems(userId);
-      let count = 0;
       // Lido já dentro da fila: a aba que esperou a outra terminar vê a conexão recém-sincronizada.
-      for (const item of await prisma.pluggyItem.findMany({ where: { userId } })) {
-        const stale = !item.lastSyncAt || Date.now() - item.lastSyncAt.getTime() >= AUTO_SYNC_AFTER_MS;
-        if (!stale || item.status === 'LOGIN_ERROR') continue;
+      const stale = (await prisma.pluggyItem.findMany({ where: { userId } })).filter(item =>
+        item.status !== 'LOGIN_ERROR' && (!item.lastSyncAt || Date.now() - item.lastSyncAt.getTime() >= AUTO_SYNC_AFTER_MS));
+      let count = 0;
+      let firstFailure = null;
+      for (const item of stale) {
         try {
           if ((await syncPluggyItem(userId, item.pluggyId)).status === 200) count++;
         } catch (error) {
+          firstFailure ||= pluggyFailureMessage(error);
           console.error(`Falha na sincronização automática (itemId=${item.pluggyId}):`, error);
         }
       }
-      return count;
+      return { synced: count, failure: firstFailure };
     });
     const items = await prisma.pluggyItem.findMany({
       where: { userId },
       orderBy: { createdAt: 'asc' },
       select: { pluggyId: true, providerName: true, status: true, lastSyncAt: true },
     });
-    res.json({ synced, items });
+    res.json({ synced, items, ...(failure ? { error: failure } : {}) });
   } catch (error) {
     sendInternalError(res, error, 'Erro na sincronização automática.');
   }

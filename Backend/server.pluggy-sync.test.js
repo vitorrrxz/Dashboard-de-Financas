@@ -1,7 +1,8 @@
 // @vitest-environment node
 // FIN-107 — conexões da Pluggy registradas e sincronização automática ao abrir o app: a conexão
 // recente não sincroniza, a parada sincroniza uma vez só mesmo com duas abas, a de login expirado
-// fica de fora e o erro da Pluggy não derruba a resposta. A Pluggy é um cliente de mentira.
+// fica de fora e o erro da Pluggy não derruba a resposta. A chave da API recusada e a conexão inexistente
+// são ditas na resposta. A Pluggy é um cliente de mentira.
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from './test/backend-test-utils.js';
@@ -22,6 +23,8 @@ const ACCOUNT = {
 };
 const TX = { id: 'ptx-1', description: 'Mercado', amount: -42.1, date: new Date('2026-09-10T12:00:00Z'), category: 'Groceries' };
 const HOUR = 60 * 60 * 1000;
+// Erro do SDK quando a Pluggy recusa as chaves da API.
+const keysError = () => Object.assign(new Error('Response code 401 (Unauthorized)'), { response: { statusCode: 401 } });
 
 describe('sincronização automática com a Pluggy (FIN-107)', () => {
   let app;
@@ -210,5 +213,46 @@ describe('sincronização automática com a Pluggy (FIN-107)', () => {
     await prisma.pluggyItem.update({ where: { userId_pluggyId: { userId: userA, pluggyId: 'item-1' } }, data: { lastSyncAt: null } });
     await autoSync(tokenA);
     expect((await prisma.account.findMany()).map(a => a.bank)).toEqual(['Nubank', 'Nubank']);
+  });
+
+  it('chaves da API recusadas: o botão e a automática dizem o motivo, em vez de um erro genérico', async () => {
+    await addItem(null);
+    pluggy.fetchItem.mockRejectedValue(keysError());
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const button = await request(app).post('/api/pluggy/sync/item-1').set(auth(tokenA));
+    expect(button.status).toBe(502);
+    expect(button.body.error).toMatch(/chaves/);
+
+    const auto = await autoSync(tokenA);
+    expect(auto.status).toBe(200);
+    expect(auto.body).toMatchObject({ synced: 0, error: expect.stringMatching(/chaves/), items: [{ lastSyncAt: null }] });
+    consoleError.mockRestore();
+  });
+
+  it('401 fora da autenticação, com o corpo da resposta como erro: também avisa das chaves', async () => {
+    await addItem(null);
+    pluggy.fetchItem.mockRejectedValue({ message: 'unauthorized', code: 401 });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await request(app).post('/api/pluggy/sync/item-1').set(auth(tokenA));
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/recusou as chaves/);
+    consoleError.mockRestore();
+  });
+
+  it('conexão que não existe na aplicação das chaves atuais: o botão e a automática avisam, e nada é apagado', async () => {
+    await addItem(null);
+    pluggy.fetchItem.mockRejectedValue({ message: 'item not found', code: 404, codeDescription: 'ITEM_NOT_FOUND' });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const button = await request(app).post('/api/pluggy/sync/item-1').set(auth(tokenA));
+    expect(button.status).toBe(502);
+    expect(button.body.error).toMatch(/mesma aplicação/);
+
+    const auto = await autoSync(tokenA);
+    expect(auto.status).toBe(200);
+    expect(auto.body).toMatchObject({ synced: 0, error: expect.stringMatching(/mesma aplicação/), items: [{ pluggyId: 'item-1' }] });
+    consoleError.mockRestore();
   });
 });
