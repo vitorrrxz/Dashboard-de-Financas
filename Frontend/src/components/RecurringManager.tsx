@@ -20,6 +20,7 @@ const maxDate = (a: string, b: string) => (a > b ? a : b);
 /** Rótulos em português das frequências suportadas (ver `RecurrenceFrequency` em utils/dates.ts). */
 const FREQUENCY_LABELS: Record<RecurrenceFrequency, string> = {
   weekly: 'Semanal',
+  biweekly: 'Quinzenal',
   monthly: 'Mensal',
   yearly: 'Anual',
 };

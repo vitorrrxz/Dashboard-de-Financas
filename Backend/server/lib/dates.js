@@ -29,10 +29,12 @@ export function advanceOccurrence(dateString, frequency) {
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return dateString;
   if (month < 1 || month > 12 || day < 1) return dateString;
 
-  if (frequency === 'weekly') {
+  // Semanal = 7 dias; quinzenal = 15 dias.
+  const stepDays = { weekly: 7, biweekly: 15 }[frequency];
+  if (stepDays) {
     // `new Date(y, mIndex, d)` usa componentes locais (não faz parse UTC de string, ao
     // contrário de `new Date('YYYY-MM-DD')`) e normaliza sozinho a virada de mês/ano.
-    const d = new Date(year, month - 1, day + 7);
+    const d = new Date(year, month - 1, day + stepDays);
     return formatISODate(d.getFullYear(), d.getMonth() + 1, d.getDate());
   }
   if (frequency === 'yearly') {

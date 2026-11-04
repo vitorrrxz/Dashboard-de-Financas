@@ -143,7 +143,7 @@ export const goalUpdateSchema = goalSchema.partial();
 // FIN-053/FIN-054 — transações recorrentes (Fase 4). `amount` segue a convenção de
 // `Transaction`: negativo = despesa, positivo = receita — e não pode ser 0, que geraria
 // lançamentos sem efeito nenhum a cada ocorrência.
-export const RECURRENCE_FREQUENCIES = ['weekly', 'monthly', 'yearly'];
+export const RECURRENCE_FREQUENCIES = ['weekly', 'biweekly', 'monthly', 'yearly'];
 export const recurringSchema = z.object({
   name: z.string({ error: 'Nome da recorrência é obrigatório.' }).trim().min(1, 'Nome da recorrência é obrigatório.'),
   category: z.string({ error: 'Categoria é obrigatória.' }).trim().min(1, 'Categoria é obrigatória.'),

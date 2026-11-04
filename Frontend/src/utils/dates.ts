@@ -97,7 +97,7 @@ export function daysBetween(a: string, b: string): number {
 }
 
 /** Frequências suportadas por uma transação recorrente (ver FIN-053). */
-export type RecurrenceFrequency = 'weekly' | 'monthly' | 'yearly';
+export type RecurrenceFrequency = 'weekly' | 'biweekly' | 'monthly' | 'yearly';
 
 /**
  * Calcula a próxima ocorrência de uma recorrência a partir de `dateString`, conforme a
@@ -106,6 +106,7 @@ export type RecurrenceFrequency = 'weekly' | 'monthly' | 'yearly';
  */
 export function advanceOccurrence(dateString: string, frequency: RecurrenceFrequency): string {
   if (frequency === 'weekly') return advanceDays(dateString, 7);
+  if (frequency === 'biweekly') return advanceDays(dateString, 15);
   if (frequency === 'yearly') return advanceYear(dateString);
   return advanceMonth(dateString);
 }
