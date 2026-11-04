@@ -86,6 +86,10 @@ describe('advanceOccurrence', () => {
   it('weekly avança 7 dias', () => {
     expect(advanceOccurrence('2026-03-01', 'weekly')).toBe('2026-03-08');
   });
+  it('biweekly avança 15 dias, virando o mês', () => {
+    expect(advanceOccurrence('2026-03-01', 'biweekly')).toBe('2026-03-16');
+    expect(advanceOccurrence('2026-03-20', 'biweekly')).toBe('2026-04-04');
+  });
   it('monthly avança um mês', () => {
     expect(advanceOccurrence('2026-03-01', 'monthly')).toBe('2026-04-01');
   });
@@ -95,7 +99,7 @@ describe('advanceOccurrence', () => {
   it('sempre retorna data estritamente maior que a entrada (garante avanço do laço de processamento)', () => {
     // Datas de borda que já quebraram implementações ingênuas: 31 do mês, 29/fev e fim de ano.
     for (const date of ['2026-01-31', '2024-02-29', '2026-12-31', '2026-02-28']) {
-      for (const freq of ['weekly', 'monthly', 'yearly'] as const) {
+      for (const freq of ['weekly', 'biweekly', 'monthly', 'yearly'] as const) {
         expect(advanceOccurrence(date, freq) > date).toBe(true);
       }
     }

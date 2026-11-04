@@ -144,7 +144,7 @@ export function debtorCharges(transactions: Transaction[], accounts: Account[], 
 
 // Dias antes ou depois do vencimento em que um PIX do mesmo valor pode ser o pagamento do devedor —
 // mesma janela do servidor (`PAYMENT_WINDOW_DAYS` em routes/recurring.js).
-const PAYMENT_WINDOW_DAYS: Record<RecurringTransaction['frequency'], number> = { weekly: 3, monthly: 10, yearly: 10 };
+const PAYMENT_WINDOW_DAYS: Record<RecurringTransaction['frequency'], number> = { weekly: 3, biweekly: 7, monthly: 10, yearly: 10 };
 
 /**
  * PIX recebido que parece ser o pagamento do devedor, para o "Confirmar pagamento": mesmo valor, numa

@@ -30,9 +30,9 @@ function recurringOccurrenceHash(userId, recurringId, occurrenceDate) {
 const MAX_OCCURRENCES_PER_RUN = 120;
 
 // Dias antes ou depois do vencimento em que um PIX recebido do mesmo valor pode ser o pagamento do
-// devedor (o "Confirmar pagamento" — mesma janela em `utils/recurring.ts`). Na semanal, menos que
-// meia semana, para um PIX não servir a duas ocorrências.
-const PAYMENT_WINDOW_DAYS = { weekly: 3, monthly: 10, yearly: 10 };
+// devedor (o "Confirmar pagamento" — mesma janela em `utils/recurring.ts`). Na semanal e na
+// quinzenal, menos que meio intervalo, para um PIX não servir a duas ocorrências.
+const PAYMENT_WINDOW_DAYS = { weekly: 3, biweekly: 7, monthly: 10, yearly: 10 };
 
 /** Distância em dias entre duas datas ISO. */
 function daysApart(a, b) {

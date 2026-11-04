@@ -30,6 +30,7 @@ const AMOUNT_TOLERANCE = 0.15;
 // para o dia da cobrança escorregar por fim de semana/feriado (ver FIN-053 pelas mesmas frequências).
 const INTERVAL_BOUNDS_DAYS: Record<RecurrenceFrequency, [min: number, max: number]> = {
   weekly: [5, 9],
+  biweekly: [13, 17],
   monthly: [24, 35],
   yearly: [355, 376],
 };
@@ -111,9 +112,9 @@ export function detectSubscriptions(
   return result.sort((a, b) => b.occurrences - a.occurrences);
 }
 
-const OCCURRENCES_PER_YEAR: Record<RecurrenceFrequency, number> = { weekly: 52, monthly: 12, yearly: 1 };
+const OCCURRENCES_PER_YEAR: Record<RecurrenceFrequency, number> = { weekly: 52, biweekly: 365 / 15, monthly: 12, yearly: 1 };
 
-/** Custo mensal equivalente de uma assinatura — semanal e anual convertidos para comparar com o mensal. */
+/** Custo mensal equivalente de uma assinatura — semanal, quinzenal e anual convertidos para comparar com o mensal. */
 export function monthlySubscriptionCost(sub: Pick<DetectedSubscription, 'amount' | 'frequency'>): number {
   return (Math.abs(sub.amount) * OCCURRENCES_PER_YEAR[sub.frequency]) / 12;
 }

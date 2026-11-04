@@ -55,7 +55,12 @@ describe('detectSubscriptions', () => {
     expect(detectSubscriptions(transactions, [])).toEqual([]);
   });
 
-  it('semanal e anual também são reconhecidos', () => {
+  it('semanal, quinzenal e anual também são reconhecidos', () => {
+    const biweekly = [
+      expense({ name: 'DIARISTA', date: '2026-06-01', amount: -200 }),
+      expense({ name: 'DIARISTA', date: '2026-06-16', amount: -200 }),
+      expense({ name: 'DIARISTA', date: '2026-07-01', amount: -200 }),
+    ];
     const weekly = [
       expense({ name: 'FEIRA ORGANICA', date: '2026-06-01', amount: -50 }),
       expense({ name: 'FEIRA ORGANICA', date: '2026-06-08', amount: -50 }),
@@ -66,8 +71,8 @@ describe('detectSubscriptions', () => {
       expense({ name: 'SEGURO AUTO', date: '2025-03-03', amount: -1200 }),
       expense({ name: 'SEGURO AUTO', date: '2026-03-02', amount: -1300 }),
     ];
-    const found = detectSubscriptions([...weekly, ...yearly], []);
-    expect(found.map(s => s.frequency).sort()).toEqual(['weekly', 'yearly']);
+    const found = detectSubscriptions([...biweekly, ...weekly, ...yearly], []);
+    expect(found.map(s => s.frequency).sort()).toEqual(['biweekly', 'weekly', 'yearly']);
   });
 
   it('receita não entra na detecção (só despesas)', () => {

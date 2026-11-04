@@ -221,7 +221,7 @@ model RecurringTransaction {
   name           String
   category       String
   amount         Int      // centavos; negativo = despesa, positivo = receita (igual a Transaction)
-  frequency      String   // 'weekly' | 'monthly' | 'yearly' — validado por Zod em server.js
+  frequency      String   // 'weekly' | 'biweekly' | 'monthly' | 'yearly' — validado por Zod em server.js
   nextOccurrence String   // ISO YYYY-MM-DD
   active         Boolean  @default(true)
   // Devedor que paga uma dívida sua (ex.: o amigo que paga as parcelas do que você comprou para ele):

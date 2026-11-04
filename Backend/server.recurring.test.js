@@ -328,6 +328,16 @@ describe('/api/recurring-transactions', () => {
       expect(atualizada.nextOccurrence).toBe(daysFromToday(7));
     });
 
+    it('frequência quinzenal avança 15 dias por ocorrência', async () => {
+      const rec = await criarRecorrencia({ name: 'Diarista', category: 'Casa', amount: -20000, frequency: 'biweekly', nextOccurrence: daysFromToday(-15) });
+
+      await request(app).post('/api/recurring-transactions/process').set(auth(tokenA));
+
+      const lancadas = await transacoesPorNome('Diarista');
+      expect(lancadas.map(t => t.date).sort()).toEqual([daysFromToday(-15), todayISO()].sort());
+      expect((await recorrencia(rec.id)).nextOccurrence).toBe(daysFromToday(15));
+    });
+
     it('frequência anual avança para o ano seguinte', async () => {
       const rec = await criarRecorrencia({ name: 'IPVA', category: 'Transporte', amount: -80000, frequency: 'yearly', nextOccurrence: todayISO() });
 
